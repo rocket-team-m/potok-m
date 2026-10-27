@@ -1,0 +1,48 @@
+---
+title: Поток-М
+description: Инженерная документация команды «Поток-М»
+template: splash
+hero:
+  tagline: Двухступенчатая ракета, борт на STM32 и ИИ-ассистент стабилизации. Здесь живёт вся документация команды.
+  actions:
+    - text: Открыть проект
+      link: project/goals/
+      icon: right-arrow
+    - text: GitHub
+      link: https://github.com/rocket-team-m
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+<CardGrid>
+  <Card title="Проект" icon="rocket">
+    Цели, тактико-технические характеристики и план сезона.
+  </Card>
+  <Card title="Борт" icon="puzzle">
+    Электроника, авионика, системы спасения и поиска.
+  </Card>
+  <Card title="ИИ" icon="star">
+    Концепт ассистента, обучение модели и работа с телеметрией.
+  </Card>
+  <Card title="Форма" icon="setting">
+    Чертежи, CAD-модели и аэродинамические расчёты.
+  </Card>
+  <Card title="Полёты" icon="analytics">
+    Протоколы пусков, журнал и разборы.
+  </Card>
+  <Card title="Процессы" icon="list-format">
+    Как мы работаем, принятые решения и словарь терминов.
+  </Card>
+</CardGrid>
+
+## Что это за репозиторий
+
+Один репозиторий на весь проект: документация, код и артефакты. Тяжёлые файлы
+(CAD, логи полётов, результаты Ansys) в git не попадают, для них есть Releases.
+
+- **Сайт:** эта документация, собирается автоматически при каждом пуше в `main`.
+- **Код:** `ai/` — модель и симулятор, `hardware/` — электроника и прошивка,
+  `vehicle/` — чертежи и аэродинамика.
+- **Задачи:** Issues в этом же репозитории, доска — GitHub Projects.

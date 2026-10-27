@@ -1,0 +1,40 @@
+name: Задача
+description: Работа, у которой есть результат и срок
+title: "[задача] "
+labels: ["task"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: Что сделать
+      description: Одно-два предложения. Что должно появиться на выходе?
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Подсистема
+      options: [Документация, Борт, ИИ, Форма и аэродинамика, Полёты, Процессы]
+    validations:
+      required: true
+  - type: input
+    id: deadline
+    attributes:
+      label: Срок
+      placeholder: 30.10.2026
+    validations:
+      required: false
+  - type: input
+    id: owner
+    attributes:
+      label: Ответственный
+      placeholder: @username
+    validations:
+      required: false
+  - type: textarea
+    id: done
+    attributes:
+      label: Критерий готовности
+      description: Как проверим, что сделано?
+    validations:
+      required: false
