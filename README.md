@@ -1,5 +1,9 @@
 # Поток-М
 
+[![Docs](https://github.com/rocket-team-m/potok-m/actions/workflows/docs.yml/badge.svg)](https://github.com/rocket-team-m/potok-m/actions/workflows/docs.yml)
+[![AI](https://github.com/rocket-team-m/potok-m/actions/workflows/ai.yml/badge.svg)](https://github.com/rocket-team-m/potok-m/actions/workflows/ai.yml)
+[![Guard](https://github.com/rocket-team-m/potok-m/actions/workflows/guard.yml/badge.svg)](https://github.com/rocket-team-m/potok-m/actions/workflows/guard.yml)
+
 Один репозиторий на весь проект: документация, код и артефакты.
 
 **Сайт:** https://rocket-team-m.github.io/potok-m/
