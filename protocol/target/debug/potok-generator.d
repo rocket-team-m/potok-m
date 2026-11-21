@@ -1,0 +1,1 @@
+/home/sehaxe/potok-m/protocol/target/debug/potok-generator: /home/sehaxe/potok-m/protocol/generator/src/gen.rs /home/sehaxe/potok-m/protocol/generator/src/main.rs /home/sehaxe/potok-m/protocol/generator/src/model.rs

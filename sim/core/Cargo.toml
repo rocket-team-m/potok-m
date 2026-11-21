@@ -1,0 +1,23 @@
+[package]
+name = "potok-sim"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Deterministic 6-DoF simulator for Potok-M training data"
+
+[dependencies]
+ndarray.workspace = true
+rand.workspace = true
+serde.workspace = true
+toml.workspace = true
+thiserror.workspace = true
+rayon.workspace = true
+# Canonical wire layout: single source of truth is ../protocol/uart.yaml.
+potok-protocol = { path = "../../protocol/potok-protocol" }
+
+[dev-dependencies]
+serde.workspace = true
+
+[[bench]]
+name = "throughput"
+harness = false

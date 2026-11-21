@@ -1,0 +1,72 @@
+protocol:
+  name: potok-uart
+  version: 1
+  endianness: little
+
+  versions:
+    request: 1
+    reply: 1
+
+  crc:
+    algorithm: crc16
+    polynomial: 0x1021
+    init: 0xFFFF
+    reflect_in: false
+    reflect_out: false
+    xor_out: 0x0000
+    coverage: all_except_crc_field
+    field: crc16
+
+  enums:
+    - name: Phase
+      width: 1
+      variants:
+        - { name: BURN, value: 0 }
+        - { name: COAST, value: 1 }
+        - { name: APOGEE, value: 2 }
+        - { name: DESCENT, value: 3 }
+        - { name: LANDED, value: 4 }
+
+  flags:
+    width: 1
+    bits:
+      - { name: GPS_FIX, bit: 0 }
+      - { name: IMU_OK, bit: 1 }
+      - { name: BARO_OK, bit: 2 }
+      - { name: PITOT_OK, bit: 3 }
+      - { name: AI_READY, bit: 4 }
+      - { name: CALIBRATED, bit: 5 }
+      - { name: MOTOR_ARMED, bit: 6 }
+      - { name: FAULT, bit: 7 }
+
+  frames:
+    - name: request
+      size: 56
+      magic: 0x504D
+      fields:
+        - { name: magic, type: u16, value: 0x504D }
+        - { name: seq, type: u16 }
+        - { name: time_us, type: u32 }
+        - { name: phase, type: u8, enum: Phase }
+        - { name: version, type: u8 }
+        - { name: flags, type: u8, flags: true }
+        - { name: reserved, type: u8 }
+        - { name: gyro, type: f32, count: 3 }
+        - { name: accel, type: f32, count: 3 }
+        - { name: mag, type: f32, count: 3 }
+        - { name: height, type: f32 }
+        - { name: pitot_dp, type: i16 }
+        - { name: crc16, type: u16, crc: true }
+
+    - name: reply
+      size: 14
+      magic: 0x5250
+      fields:
+        - { name: magic, type: u16, value: 0x5250 }
+        - { name: seq, type: u16 }
+        - { name: g_pitch, type: i16, scale: 0.001 }
+        - { name: g_yaw, type: i16, scale: 0.001 }
+        - { name: confidence, type: u8 }
+        - { name: ai_healthy, type: u8 }
+        - { name: version, type: u16 }
+        - { name: crc16, type: u16, crc: true }

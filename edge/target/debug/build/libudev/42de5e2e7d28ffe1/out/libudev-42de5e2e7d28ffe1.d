@@ -1,0 +1,12 @@
+/home/sehaxe/potok-m/edge/target/debug/build/libudev/42de5e2e7d28ffe1/out/libudev-42de5e2e7d28ffe1.d: /home/sehaxe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libudev-0.3.0/src/lib.rs /home/sehaxe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libudev-0.3.0/src/context.rs /home/sehaxe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libudev-0.3.0/src/device.rs /home/sehaxe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libudev-0.3.0/src/enumerator.rs /home/sehaxe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libudev-0.3.0/src/error.rs /home/sehaxe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libudev-0.3.0/src/monitor.rs /home/sehaxe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libudev-0.3.0/src/handle.rs /home/sehaxe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libudev-0.3.0/src/util.rs
+
+/home/sehaxe/potok-m/edge/target/debug/build/libudev/42de5e2e7d28ffe1/out/liblibudev-42de5e2e7d28ffe1.rmeta: /home/sehaxe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libudev-0.3.0/src/lib.rs /home/sehaxe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libudev-0.3.0/src/context.rs /home/sehaxe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libudev-0.3.0/src/device.rs /home/sehaxe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libudev-0.3.0/src/enumerator.rs /home/sehaxe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libudev-0.3.0/src/error.rs /home/sehaxe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libudev-0.3.0/src/monitor.rs /home/sehaxe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libudev-0.3.0/src/handle.rs /home/sehaxe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libudev-0.3.0/src/util.rs
+
+/home/sehaxe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libudev-0.3.0/src/lib.rs:
+/home/sehaxe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libudev-0.3.0/src/context.rs:
+/home/sehaxe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libudev-0.3.0/src/device.rs:
+/home/sehaxe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libudev-0.3.0/src/enumerator.rs:
+/home/sehaxe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libudev-0.3.0/src/error.rs:
+/home/sehaxe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libudev-0.3.0/src/monitor.rs:
+/home/sehaxe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libudev-0.3.0/src/handle.rs:
+/home/sehaxe/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libudev-0.3.0/src/util.rs:

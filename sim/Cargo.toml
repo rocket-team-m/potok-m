@@ -1,0 +1,19 @@
+[workspace]
+resolver = "2"
+members = ["core", "cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+ndarray = "0.16.1"
+rand = "0.8.8"
+serde = { version = "1.0.228", features = ["derive"] }
+toml = "0.8.23"
+clap = { version = "4.5.13", features = ["derive"] }
+ratatui = "0.30.2"
+crossterm = "0.29.0"
+thiserror = "2.0.17"
+rayon = "1.11.0"

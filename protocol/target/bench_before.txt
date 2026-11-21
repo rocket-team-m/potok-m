@@ -1,0 +1,8 @@
+iters=1000000 reps=5 (min duration reported)
+crc16(54B)                        180.9 ns/frame      298.49 MB/s
+request encode                    159.2 ns/frame      351.73 MB/s
+request decode                    161.6 ns/frame      346.49 MB/s
+reply encode                       16.9 ns/frame      830.49 MB/s
+reply decode                       18.4 ns/frame      759.64 MB/s
+request encode+decode+crc         328.1 ns/frame      341.34 MB/s
+reply encode+decode+crc            35.2 ns/frame      796.17 MB/s

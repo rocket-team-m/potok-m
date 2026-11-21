@@ -3,7 +3,29 @@ name = "potok-ai"
 version = "0.1.0"
 description = "ИИ-стек «Поток-М»: модель, обучение, симулятор, обработка телеметрии"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "numpy>=2.5.5",
+    "torch==2.15.0",
+]
+
+# Plain `uv sync` installs the CPU-only wheel. For CUDA 13.4, change the
+# `torch` source below to index = "pytorch-cu134" (the index is declared
+# here and holds torch 2.15.0+cu134); GPU wheels are never needed for tests.
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu134"
+url = "https://download.pytorch.org/whl/cu134"
+explicit = true
 
 [dependency-groups]
 dev = [
@@ -11,12 +33,11 @@ dev = [
   "ruff>=0.6",
 ]
 
-[tool.uv]
-package = false
-
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# filter/ is unfinished work from a parallel task; it is not part of this stack.
+exclude = ["src/potok_ai/filter"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

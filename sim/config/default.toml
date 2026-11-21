@@ -1,0 +1,77 @@
+# Deterministic Potok-M simulation defaults. Every randomized quantity is
+# derived from `run.seed` and the episode index; there is no global RNG.
+
+[run]
+seed = 1337
+duration_s = 30.0
+dt = 0.002
+frame_rate_hz = 50.0
+episodes = 1
+# false = exact analytic wind profile (reference); true = grid lookup.
+fast_field = true
+
+[sim]
+boundary_profile = "config/boundary_profile.csv"
+altitude_grid_m = 10.0
+# false = dynamics only (no sensor frames, used by the throughput benchmark).
+sensors = true
+
+[wind]
+v_10 = 8.0
+shear_exponent = 0.22
+shear_delta = 6.0          # m/s jump across the layer
+shear_thickness = 12.0     # m
+shear_altitude = 150.0     # m
+direction_deg = 25.0
+gust_probability = 0.35
+gust_amplitude = 9.0       # m/s
+gust_duration = 2.0        # s
+turbulence_sigma = 1.2     # m/s per axis
+turbulence_scale = 60.0    # m, integral scale
+
+[initial]
+mass_kg = [120.0, 140.0]
+cg_offset_m = [-0.02, 0.02]
+thrust_scale = [0.94, 1.06]
+pitch_deg = [-2.0, 2.0]
+yaw_deg = [-2.0, 2.0]
+gimbal_deg = [-0.8, 0.8]
+
+[sensor]
+gyro_noise = 0.0015
+gyro_bias = [0.002, -0.001, 0.0005]
+accel_noise = 0.08
+accel_bias = [0.02, -0.015, 0.01]
+mag_noise = 0.02
+mag_bias = [0.01, -0.01, 0.005]
+mag_world = [0.22, 0.08, 0.38]
+baro_noise = 0.35
+baro_bias = -0.4
+pitot_noise = 25.0
+pitot_bias = -8.0
+lag_tau = 0.012
+quant_step = 0.0005
+gyro_sat = 12.0
+accel_sat = 250.0
+pitot_sat = 30000.0
+
+[aero]
+area_m2 = 0.0707
+cd0 = 0.35
+cna = 1.8
+static_margin_m = 0.12
+pitch_damping = 0.6
+roll_damping = 0.25
+cd_mach = [[0.0, 0.35], [0.4, 0.35], [0.7, 0.39], [0.9, 0.48], [1.1, 0.52], [1.5, 0.40]]
+thrust_profile = [
+  [0.0, 0.0, 0.0],
+  [0.08, 12000.0, 5.0],
+  [2.40, 12500.0, 5.2],
+  [2.90, 0.0, 0.0],
+  [30.0, 0.0, 0.0],
+]
+
+[output]
+mode = "both"
+# Feature vector consumed by the AI model (window 50 x 8).
+features = ["gyro_x", "gyro_y", "gyro_z", "acc_x", "acc_y", "acc_z", "baro_h", "pitot_q"]
