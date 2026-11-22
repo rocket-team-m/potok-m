@@ -21,6 +21,13 @@
 //! on dynamics-only runs. The version and stride in the header are the
 //! authority: readers accept both layouts and v1 ticks carry no privileged
 //! fields (`gust_start_s = -1`, other extras zero).
+//!
+//! Version 3 (stride 26) is v2 plus two appended f32 per tick:
+//! `g_accel_y, g_accel_x` (24..26), the same clamped world-frame desired
+//! lateral acceleration `[ay, ax]` (m/s^2) exported as v3 validation targets.
+//! The fin command is `[g_accel_y, -g_accel_x]` in `[roll, pitch]` seam order.
+//! v1 and v2 bytes and readers are unchanged; the version and stride in the
+//! header are the authority.
 
 use std::{
     fs::File,
@@ -37,8 +44,11 @@ use crate::{
 pub const MAGIC: &[u8; 8] = b"POTOKTRJ";
 pub const VERSION: u32 = 1;
 pub const VERSION_V2: u32 = 2;
+pub const VERSION_V3: u32 = 3;
 pub const STRIDE: usize = 6;
 pub const TRUTH_STRIDE: usize = 24;
+/// v2 plus `[g_accel_y, g_accel_x]` (m/s^2) at indices 24..26.
+pub const TRUTH_V3_STRIDE: usize = TRUTH_STRIDE + 2;
 pub const HEADER_SIZE: usize = 64;
 const _: () = assert!(8 + 4 + 4 + 4 + 4 + 40 == HEADER_SIZE);
 /// Extension used for the sidecar written beside `validation.bin`.
@@ -72,6 +82,37 @@ pub const TRUTH_TICK_NAMES: [&str; TRUTH_STRIDE] = [
     "g_theta_pitch",
 ];
 
+/// Names of the 26 f32 fields of a v3 tick, in on-disk order.
+pub const TRUTH_V3_TICK_NAMES: [&str; TRUTH_V3_STRIDE] = [
+    "pos_x",
+    "pos_y",
+    "pos_z",
+    "vel_x",
+    "vel_y",
+    "vel_z",
+    "quat_w",
+    "quat_x",
+    "quat_y",
+    "quat_z",
+    "omega_x",
+    "omega_y",
+    "omega_z",
+    "mass_kg",
+    "wind_x",
+    "wind_y",
+    "wind_z",
+    "gust_start_s",
+    "gust_amplitude",
+    "shear_altitude_m",
+    "shear_delta",
+    "shear_thickness_m",
+    "g_theta_roll",
+    "g_theta_pitch",
+    "g_accel_y",
+    "g_accel_x",
+];
+const _: () = assert!(TRUTH_V3_TICK_NAMES.len() == TRUTH_V3_STRIDE);
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TrajectoryTick {
     /// World-frame position (m). Present in v1 and v2.
@@ -96,8 +137,11 @@ pub struct TrajectoryTick {
     pub shear_delta: f32,
     /// Shear-layer thickness (m). V2 only.
     pub shear_thickness_m: f32,
-    /// Reference optimizer target `[roll, pitch]` (rad). V2 only.
+    /// Reference optimizer target `[roll, pitch]` (rad). V2 and v3 only.
     pub g_theta: [f32; 2],
+    /// Clamped world-frame desired lateral acceleration `[ay, ax]` (m/s^2)
+    /// consumed by the fin solver as `[ay, -ax]`. V3 only.
+    pub g_accel: [f32; 2],
 }
 
 impl Default for TrajectoryTick {
@@ -115,6 +159,7 @@ impl Default for TrajectoryTick {
             shear_delta: 0.0,
             shear_thickness_m: 0.0,
             g_theta: [0.0; 2],
+            g_accel: [0.0; 2],
         }
     }
 }
@@ -168,6 +213,26 @@ impl TrajectoryTick {
             shear_delta: a[20],
             shear_thickness_m: a[21],
             g_theta: [a[22], a[23]],
+            g_accel: [0.0; 2],
+        }
+    }
+
+    /// Privileged v3 record: 26 floats in the order of `TRUTH_V3_TICK_NAMES`.
+    /// The first 24 are byte-identical to the v2 record.
+    pub fn as_truth_v3_array(self) -> [f32; TRUTH_V3_STRIDE] {
+        let mut a = [0.0; TRUTH_V3_STRIDE];
+        let v2 = self.as_truth_array();
+        a[..TRUTH_STRIDE].copy_from_slice(&v2);
+        a[TRUTH_STRIDE..].copy_from_slice(&self.g_accel);
+        a
+    }
+
+    pub fn from_truth_v3_array(a: [f32; TRUTH_V3_STRIDE]) -> Self {
+        let mut v2 = [0f32; TRUTH_STRIDE];
+        v2.copy_from_slice(&a[..TRUTH_STRIDE]);
+        Self {
+            g_accel: [a[24], a[25]],
+            ..Self::from_truth_array(v2)
         }
     }
 }
@@ -209,7 +274,8 @@ pub fn lateral_rms_m(ticks: &[TrajectoryTick]) -> f64 {
 
 #[derive(Debug, Clone)]
 pub struct TrajectorySet {
-    /// 1 = six-float flown truth, 2 = 24-float privileged truth.
+    /// 1 = six-float flown truth, 2 = 24-float privileged truth,
+    /// 3 = 26-float privileged truth with the command acceleration.
     pub version: u32,
     pub episode_count: u32,
     pub frames_per_episode: u32,
@@ -219,6 +285,15 @@ pub struct TrajectorySet {
 impl TrajectorySet {
     pub fn is_v2(&self) -> bool {
         self.version == VERSION_V2
+    }
+
+    pub fn is_v3(&self) -> bool {
+        self.version == VERSION_V3
+    }
+
+    /// True when the per-tick privileged truth is present (v2 or v3).
+    pub fn is_privileged(&self) -> bool {
+        self.version >= VERSION_V2
     }
 }
 
@@ -233,9 +308,15 @@ pub fn write_trajectory(path: &Path, cfg: &Config, episodes: &[Episode]) -> Resu
     write_trajectory_with_version(path, cfg, episodes, VERSION)
 }
 
-/// Privileged v2 writer: 24 f32 per tick, version 2 in the header.
+/// Privileged v2 writer: 24 f32 per tick, version 2 in the header. Kept for
+/// legacy consumers; generated datasets use v3 below.
 pub fn write_trajectory_v2(path: &Path, cfg: &Config, episodes: &[Episode]) -> Result<()> {
     write_trajectory_with_version(path, cfg, episodes, VERSION_V2)
+}
+
+/// Current writer: v2's 24 fields plus `[g_accel_y, g_accel_x]` per tick.
+pub fn write_trajectory_v3(path: &Path, cfg: &Config, episodes: &[Episode]) -> Result<()> {
+    write_trajectory_with_version(path, cfg, episodes, VERSION_V3)
 }
 
 pub fn write_trajectory_with_version(
@@ -247,6 +328,7 @@ pub fn write_trajectory_with_version(
     let stride = match version {
         VERSION => STRIDE,
         VERSION_V2 => TRUTH_STRIDE,
+        VERSION_V3 => TRUTH_V3_STRIDE,
         _ => {
             return Err(SimError::Trajectory(format!(
                 "unsupported version {version}"
@@ -275,11 +357,15 @@ pub fn write_trajectory_with_version(
         w.write_all(&e.meta.index.to_le_bytes())?;
         for tick in &e.trajectory {
             let values = if version == VERSION {
-                let mut a = [0f32; TRUTH_STRIDE];
+                let mut a = [0f32; TRUTH_V3_STRIDE];
                 a[..STRIDE].copy_from_slice(&tick.as_array());
                 a
+            } else if version == VERSION_V3 {
+                tick.as_truth_v3_array()
             } else {
-                tick.as_truth_array()
+                let mut a = [0f32; TRUTH_V3_STRIDE];
+                a[..TRUTH_STRIDE].copy_from_slice(&tick.as_truth_array());
+                a
             };
             for v in values.iter().take(stride) {
                 w.write_all(&v.to_le_bytes())?;
@@ -305,6 +391,7 @@ pub fn read_trajectory(path: &Path) -> Result<TrajectorySet> {
     let expected_stride = match version {
         VERSION => STRIDE,
         VERSION_V2 => TRUTH_STRIDE,
+        VERSION_V3 => TRUTH_V3_STRIDE,
         _ => {
             return Err(SimError::Trajectory(format!(
                 "{}: unsupported version {version}",
@@ -327,7 +414,7 @@ pub fn read_trajectory(path: &Path) -> Result<TrajectorySet> {
         r.read_exact(&mut idx)?;
         let mut ticks = Vec::with_capacity(frames_per_episode);
         for _ in 0..frames_per_episode {
-            let mut a = [0f32; TRUTH_STRIDE];
+            let mut a = [0f32; TRUTH_V3_STRIDE];
             for v in a.iter_mut().take(expected_stride) {
                 let mut raw = [0u8; 4];
                 r.read_exact(&mut raw)?;
@@ -337,8 +424,14 @@ pub fn read_trajectory(path: &Path) -> Result<TrajectorySet> {
                 let mut v1 = [0f32; STRIDE];
                 v1.copy_from_slice(&a[..STRIDE]);
                 TrajectoryTick::from_array(v1)
+            } else if version == VERSION_V3 {
+                let mut v3 = [0f32; TRUTH_V3_STRIDE];
+                v3.copy_from_slice(&a[..TRUTH_V3_STRIDE]);
+                TrajectoryTick::from_truth_v3_array(v3)
             } else {
-                TrajectoryTick::from_truth_array(a)
+                let mut v2 = [0f32; TRUTH_STRIDE];
+                v2.copy_from_slice(&a[..TRUTH_STRIDE]);
+                TrajectoryTick::from_truth_array(v2)
             });
         }
         episodes.push(EpisodeTrajectory {

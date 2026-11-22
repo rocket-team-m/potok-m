@@ -6,7 +6,10 @@
 //! state and true wind, so it is an upper bound on what the sensor-only model
 //! can achieve. The two outputs are small pitch/roll set-point corrections
 //! `g_theta`, clamped to `max_correction` rad. During the powered segment the
-//! corrections are zero regardless of the state (AI interlock).
+//! corrections are zero regardless of the state (AI interlock). The exported
+//! command target is `g_accel = [ay, ax]`: the clamped world-frame lateral
+//! acceleration demand, in the `[Y, X]` field order used by the dataset, from
+//! which `fin_accel_command` derives the fin command `[ay, -ax]`.
 
 /// Clamp on both reference-correction axes, radians. Shared with the
 /// dataset quality gate so a target can never silently exceed it.
@@ -22,10 +25,15 @@ use crate::{
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Target {
-    /// [roll, pitch] correction, rad.
+    /// [roll, pitch] correction, rad. Diagnostic/legacy target only: the fin
+    /// actuator consumes `g_accel`, not an angle.
     pub g_theta: [f32; 2],
     pub confidence: f32,
     pub ai_healthy: bool,
+    /// Clamped world-frame desired lateral acceleration `[ay, ax]` in m/s^2.
+    /// The fin command on the same tick is `[g_accel[0], -g_accel[1]]`
+    /// (see `fin_accel_command`); zero while the AI interlock is active.
+    pub g_accel: [f32; 2],
 }
 
 pub struct ReferenceOptimizer {
@@ -81,16 +89,37 @@ impl ReferenceOptimizer {
         ])
     }
 
+    /// Clamped world-frame desired lateral acceleration `[ax, ay]` in m/s^2,
+    /// or `[0, 0]` when the AI interlock is active or the state is unhealthy.
+    /// This is the authoritative training target, exported to the dataset as
+    /// `[g_accel_y, g_accel_x] = [ay, ax]` (Y first to match the fin seam's
+    /// roll-then-pitch order). It shares the raw LQR demand with `solve`.
+    pub fn world_accel_command(
+        &self,
+        s: &State,
+        wind: Vec3,
+        phase: Phase,
+        frame: &Frame,
+    ) -> [f64; 2] {
+        match self.lateral_accel_demand(s, wind, phase, frame) {
+            Some([ax, ay]) => [
+                clamp(ax, -MAX_COMMAND_MPS2, MAX_COMMAND_MPS2),
+                clamp(ay, -MAX_COMMAND_MPS2, MAX_COMMAND_MPS2),
+            ],
+            None => [0.0, 0.0],
+        }
+    }
+
     /// Physical fin command in the control seam's `[roll, pitch]` order, in
     /// m/s^2 of desired lateral acceleration (NOT radians or fin degrees).
+    /// Exactly `[g_accel[0], -g_accel[1]]` of the exported target pair.
     ///
     /// Command convention, verified against the flown trajectory: a positive
     /// `[roll, pitch]` value rotates the nose so the lateral aerodynamic
     /// response is **opposite** to the naive right-hand-rule body-axis reading
     /// (the sim's normal force is built from the relative wind in body frame).
-    /// A positive world +Y demand therefore takes a negative roll command, and
-    /// a positive +X demand a negative pitch command. The interlock/health
-    /// gate matches `solve`.
+    /// The seam's first (roll) axis carries the +Y demand and the second
+    /// (pitch) axis its negative; the interlock/health gate matches `solve`.
     ///
     /// The raw LQR demand can exceed the actuator's acceleration envelope late
     /// in the flight; the controller saturates at `MAX_COMMAND_MPS2` itself.
@@ -103,13 +132,8 @@ impl ReferenceOptimizer {
         phase: Phase,
         frame: &Frame,
     ) -> [f64; 2] {
-        match self.lateral_accel_demand(s, wind, phase, frame) {
-            Some([ax, ay]) => [
-                clamp(ay, -MAX_COMMAND_MPS2, MAX_COMMAND_MPS2),
-                clamp(-ax, -MAX_COMMAND_MPS2, MAX_COMMAND_MPS2),
-            ],
-            None => [0.0, 0.0],
-        }
+        let [ax, ay] = self.world_accel_command(s, wind, phase, frame);
+        [ay, -ax]
     }
 
     pub fn solve(&self, s: &State, wind: Vec3, v: &Vehicle, phase: Phase, frame: &Frame) -> Target {
@@ -120,6 +144,7 @@ impl ReferenceOptimizer {
                     g_theta: [0.0, 0.0],
                     confidence: 0.0,
                     ai_healthy: false,
+                    g_accel: [0.0, 0.0],
                 }
             }
         };
@@ -127,6 +152,7 @@ impl ReferenceOptimizer {
         let pitch_des = (ax_des / axial).atan();
         let roll_des = -(ay_des / axial).atan();
 
+        let [ax, ay] = self.world_accel_command(s, wind, phase, frame);
         let r = quat_to_matrix(s.quat());
         let pitch = r[0][2].atan2(r[2][2]);
         let roll = (-r[1][2]).atan2(r[2][2]);
@@ -142,6 +168,8 @@ impl ReferenceOptimizer {
             ],
             confidence,
             ai_healthy: true,
+            // Dataset field order is [g_accel_y, g_accel_x] = [ay, ax].
+            g_accel: [ay as f32, ax as f32],
         }
     }
 }

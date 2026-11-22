@@ -201,14 +201,41 @@ fn cli_generate_dataset_writes_both_splits_manifest_and_report() {
         assert_eq!(manifest.episode_count, expected as u32);
         assert_eq!(rs.episodes.len(), expected);
         assert_eq!(traj.episodes.len(), expected);
-        assert!(traj.is_v2());
+        assert!(traj.is_v3());
+        assert_eq!(rs.header.target_count, 6);
+        assert!(rs.episodes[0].targets.ncols() == 6);
         assert_eq!(manifest.feature_names.len(), 14, "canonical model frame");
-        assert_eq!(manifest.target_names.len(), 4);
-        assert_eq!(manifest.truth_names.len(), 24);
+        assert_eq!(
+            manifest.target_names,
+            vec![
+                "g_roll",
+                "g_pitch",
+                "confidence",
+                "ai_healthy",
+                "g_accel_y",
+                "g_accel_x"
+            ]
+        );
+        assert_eq!(manifest.truth_names.len(), 26);
+        assert_eq!(manifest.truth_names[24].as_str(), "g_accel_y");
+        assert_eq!(manifest.truth_names[25].as_str(), "g_accel_x");
         assert_eq!(manifest.files.len(), 2);
         assert_eq!(manifest.files[0].name, "validation.bin");
         assert_eq!(manifest.files[1].name, "validation.trajectory");
-        assert!(manifest.bounds.truth.len() == 24);
+        assert!(manifest.bounds.truth.len() == 26);
+        assert!(manifest
+            .bounds
+            .targets
+            .iter()
+            .any(|b| b.name == "g_accel_x"));
+        // The authoritative command target is emitted in both files and agrees
+        // per tick: validation [g_accel_y, g_accel_x] == sidecar g_accel.
+        for (ep, tr) in rs.episodes.iter().zip(traj.episodes.iter()) {
+            for i in 0..ep.targets.nrows() {
+                assert_eq!(ep.targets[[i, 4]], tr.ticks[i].g_accel[0]);
+                assert_eq!(ep.targets[[i, 5]], tr.ticks[i].g_accel[1]);
+            }
+        }
         for rec in &manifest.files {
             let path = split.join(&rec.name);
             assert_eq!(rec.sha256, potok_sim::manifest::sha256_file(&path).unwrap());

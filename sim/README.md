@@ -187,19 +187,19 @@ its exact byte layout, and `ai/src/potok_ai/data.py` uses the same 80-byte
 | offset | size | field |
 |---|---|---|
 | 0 | 8 | magic `POTOKSIM` |
-| 8 | 4 | version `u32` = 2 (1 = legacy 9-metadata file) |
+| 8 | 4 | version `u32` = 3 (2 = legacy 4-target file, 1 = legacy 9-metadata file) |
 | 12 | 8 | seed `u64` |
 | 20 | 4 | episode count `u32` |
 | 24 | 4 | frames per episode `u32` |
 | 28 | 4 | feature count `u32` |
-| 32 | 4 | target count `u32` = 4 |
+| 32 | 4 | target count `u32` = 6 (4 in v1/v2) |
 | 36 | 4 | frame rate `f32` |
 | 40 | 4 | dt `f32` |
 | 44 | 4 | duration `f32` |
 | 48 | 4 | metadata count `u32` = 17 in v2, zero in v1 |
 | 52 | 28 | reserved (zero) |
 
-The writer emits **version 2** (`validation::VERSION = 2`). Per episode:
+The writer emits **version 3** (`validation::VERSION = 3`). Per episode:
 `u64` index, then 17 metadata `f32`:
 
 | index | field |
@@ -209,24 +209,49 @@ The writer emits **version 2** (`validation::VERSION = 2`). Per episode:
 | 15 | scenario id `u16` as `f32` |
 | 16 | split flag: 0 = train, 1 = held-out |
 
-Then `frames × features` f32, then `frames × 4` f32 targets (g_roll, g_pitch,
-confidence, ai_healthy as 0/1). A consumer concatenates the conditioning
-vector to every frame to form the model input.
+Then `frames × features` f32, then `frames × 6` f32 targets in this exact
+order (one row per 50 Hz frame):
 
-**Backward compatibility:** `write_validation_with_version(..., VERSION_V1)`
-writes the original 9-metadata layout with version 1 and a zeroed
-`meta_count`. `read_validation` accepts both versions; for v1 it reconstructs
-nominal Potok-M conditioning (scenario 0, train) from the defaults. Both
-paths are covered by round-trip tests.
+| index | field | units / meaning |
+|---|---|---|
+| 0 | `g_roll` | rad, legacy angle-domain diagnostic target |
+| 1 | `g_pitch` | rad, legacy angle-domain diagnostic target |
+| 2 | `confidence` | [0,1] |
+| 3 | `ai_healthy` | 0/1 |
+| 4 | `g_accel_y` | m/s², clamped world **+Y** lateral acceleration demand |
+| 5 | `g_accel_x` | m/s², clamped world **+X** lateral acceleration demand |
+
+Columns 0–3 are the unchanged v1/v2 target record; `g_theta` is **never
+overwritten** by the new fields. Columns 4–5 come from
+`ReferenceOptimizer::world_accel_command` on the true 6-DoF state and true
+wind at that tick, and are zero while the AI interlock is active. The command
+the fin actuator actually consumes is
+`fin_accel_command = [g_accel_y, -g_accel_x]` in the seam's `[roll, pitch]`
+order, clamped to ±10 m/s² (`MAX_COMMAND_MPS2`). Y is written first to match
+that seam order. This is the authoritative target for AI training; `g_theta`
+is kept only as a diagnostic and for legacy readers. A consumer concatenates
+the conditioning vector to every frame to form the model input.
+
+**Backward compatibility:** `write_validation_with_version(...)` with
+`VERSION_V1` or `VERSION_V2` writes the original 4-target layout (9 metadata
+in v1, 17 in v2) with byte-identical target rows; `read_validation`
+auto-detects the row width from the header version and `target_count`
+(v1/v2 → 4, v3 → 6) and rejects a mismatch loudly. For v1 it reconstructs
+nominal Potok-M conditioning (scenario 0, train) from the defaults. All three
+paths are covered by round-trip tests. The AI reader in `ai/` is owned by
+another lane: until it accepts version 3 with six targets, it cannot consume
+files from the current writer.
 
 #### Truth-extended v2 metadata
 
-`output.truth_metadata = true` (or `write_validation_with_truth`) still writes
-**version 2**, but with `meta_count = 39`: the classic 17 floats plus a
-22-float truth record captured at the episode's last 50 Hz tick. The header
+`output.truth_metadata = true` (or `write_validation_with_truth`) writes
+**version 3** with `meta_count = 39`: the classic 17 floats plus a 22-float
+truth record captured at the episode's last 50 Hz tick. The header
 `meta_count` is the authority; `read_validation` accepts 9 (v1), 17 (classic
-v2) and 39 (truth-extended v2), so old files and old readers keep working.
-`ValidationEpisode.truth` is `None` for the first two.
+v2/v3) and 39 (truth-extended v2/v3), so old files and old readers keep
+working. `ValidationEpisode.truth` is `None` for the first two. This terminal
+record is unchanged (no `g_accel`); the per-tick command target lives in the
+v3 sidecar below.
 
 | index (after the 17) | field | units |
 |---|---|---|
@@ -252,9 +277,10 @@ privileged LoopWM teacher, use the per-tick sidecar below.
 and `frames x 6` f32 per episode (`x, y, z, vx, vy, vz`). Every old reader and
 binary file keeps working.
 
-`write_trajectory_v2` writes **version 2** with the same 64-byte header but
-`stride=24`: the six v1 floats plus, at every 50 Hz tick, the full un-noised
-6-DoF state and the reference command:
+`write_trajectory_v2` still writes **version 2** with the same 64-byte header
+and `stride=24` (unchanged bytes). The writer used by `generate-dataset` is
+`write_trajectory_v3`, **version 3, `stride=26`**: the 24 v2 fields plus two
+appended floats per tick. The v2 field order is:
 
 | index | field | units |
 |---|---|---|
@@ -270,13 +296,18 @@ binary file keeps working.
 | 20 | shear velocity jump | m/s |
 | 21 | shear-layer thickness | m |
 | 22–23 | reference optimizer `g_theta` `[roll, pitch]` | rad |
+| 24 | `g_accel_y` (v3 only) | m/s² |
+| 25 | `g_accel_x` (v3 only) | m/s² |
 
-`read_trajectory` accepts both versions: the header version and stride are the
-authority, and a v1 read leaves the 18 privileged fields at explicit defaults
-(`gust_start_s = -1`, everything else zero), never at guessed values. The
-order is pinned by `trajectory::TRUTH_TICK_NAMES`. `g_theta` is the reference
-optimizer's target; a `--control-file` run flies its own command and is not
-silently substituted.
+Indices 24–25 equal validation target columns 4–5 on the same tick, and the
+fin command is again `[24, -25]`. `read_trajectory` accepts all three versions:
+the header version and stride are the authority (6 / 24 / 26), and a v1 read
+leaves the privileged fields at explicit defaults (`gust_start_s = -1`,
+everything else zero), never at guessed values. A v2 read leaves `g_accel` at
+`[0, 0]`. The order is pinned by `trajectory::TRUTH_TICK_NAMES` and
+`TRUTH_V3_TICK_NAMES`. `g_theta` and `g_accel` are the reference optimizer's
+targets; a `--control-file` run flies its own command and is not silently
+substituted.
 
 ## Dataset manifest and quality gates
 
@@ -284,8 +315,8 @@ silently substituted.
 writes:
 
 ```
-DIR/train/validation.bin                (v2, 17 metadata floats)
-DIR/train/validation.trajectory         (POTOKTRJ v2, stride 24)
+DIR/train/validation.bin                (v3, 17 metadata floats, 6 targets)
+DIR/train/validation.trajectory         (POTOKTRJ v3, stride 26)
 DIR/train/manifest.json
 DIR/held-out/validation.bin
 DIR/held-out/validation.trajectory
@@ -301,8 +332,9 @@ The model frame is the canonical 14 channels (eight raw + six physics).
 
 Before writing the manifests the generator re-reads the files it wrote and
 runs LOUD gates: finite values everywhere, disjoint train/held-out scenario
-sets, feature limits, `g_theta` within +/-0.12 rad and confidence/health in
-`[0,1]`, plausible truth (mass > 0, unit quaternion, gust/shear in range),
+sets, feature limits, `g_theta` within +/-0.12 rad, `g_accel_*` within
++/-10 m/s², confidence/health in `[0,1]`, plausible truth (mass > 0, unit
+quaternion, gust/shear in range),
 consistent frame counts, at least `--min-episodes-per-split` (default 4), and
 a full second generation whose four binary files must be byte-identical.
 Any failure exits nonzero with the gate name and offending value; nothing is
@@ -348,3 +380,12 @@ position/velocity error → desired tilt, minus body-rate damping), clamped to
 ±0.12 rad, with an infinite-horizon approximation rather than a solved
 Riccati equation or online MPC. It sees true state and wind, so it is an upper
 bound on the sensor-only model. It is zeroed on pad/boost by the AI interlock.
+
+The exported command target is **not** `g_theta`. `ReferenceOptimizer`
+computes the same raw LQR demand `(ax, ay)` and clamps it to the actuator
+envelope as `[ax, ay]` (`world_accel_command`); the dataset writes it as
+`[g_accel_y, g_accel_x] = [ay, ax]`. The fin solver consumes
+`fin_accel_command = [g_accel_y, -g_accel_x]` m/s² in `[roll, pitch]` order
+and converts it to a fin deflection by a moment balance. Training on
+`g_theta` instead of this pair was the cause of the negative closed-loop A/B;
+`g_theta` remains as a diagnostic/legacy column only.

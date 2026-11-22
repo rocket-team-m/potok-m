@@ -39,8 +39,9 @@ pub use scenario::{is_held_out, scenario, Scenario, Split, SCENARIO_COUNT};
 pub use sensor::{FlagSet, Frame, Sensor};
 pub use trajectory::{
     apogee_m, lateral_rms_m, read_trajectory, sidecar_path, write_trajectory, write_trajectory_v2,
-    write_trajectory_with_version, EpisodeTrajectory, TrajectorySet, TrajectoryTick, TRUTH_STRIDE,
-    TRUTH_TICK_NAMES, VERSION_V2,
+    write_trajectory_v3, write_trajectory_with_version, EpisodeTrajectory, TrajectorySet,
+    TrajectoryTick, TRUTH_STRIDE, TRUTH_TICK_NAMES, TRUTH_V3_STRIDE, TRUTH_V3_TICK_NAMES,
+    VERSION_V2, VERSION_V3,
 };
-pub use validation::{TruthRecord, META_V2_TRUTH, TRUTH_COUNT};
+pub use validation::{TruthRecord, LEGACY_TARGET_COUNT, META_V2_TRUTH, TRUTH_COUNT};
 pub use wind::Wind;

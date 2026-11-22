@@ -8,11 +8,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     config::Config,
+    control::MAX_COMMAND_MPS2,
     error::{Result, SimError},
     manifest::{Bounds, NamedRange},
     optimizer::MAX_CORRECTION,
-    trajectory::{TrajectorySet, TRUTH_TICK_NAMES},
-    validation::{ValidationSet, TARGET_NAMES},
+    trajectory::{
+        TrajectorySet, TRUTH_STRIDE, TRUTH_TICK_NAMES, TRUTH_V3_STRIDE, TRUTH_V3_TICK_NAMES,
+        VERSION_V3,
+    },
+    validation::{ValidationSet, LEGACY_TARGET_COUNT, TARGET_COUNT, TARGET_NAMES},
 };
 
 pub const QUALITY_SCHEMA_VERSION: u32 = 1;
@@ -52,11 +56,14 @@ pub fn feature_limits(name: &str) -> Option<(f64, f64)> {
     })
 }
 
+/// Bounds for target column `index`: the four legacy columns followed by
+/// `g_accel_y`/`g_accel_x` (the actuator's m/s^2 envelope) in v3.
 pub fn target_limits(index: usize) -> (f64, f64) {
     match index {
         0 | 1 => (-MAX_CORRECTION, MAX_CORRECTION),
         2 | 3 => (0.0, 1.0),
-        _ => unreachable!("target count is fixed at four"),
+        4 | 5 => (-MAX_COMMAND_MPS2, MAX_COMMAND_MPS2),
+        _ => unreachable!("target count is at most six"),
     }
 }
 
@@ -105,12 +112,21 @@ pub fn observed_bounds(cfg: &Config, v: &ValidationSet, t: &TrajectorySet) -> Bo
         }
         out.targets.push(named_range(name, lo, hi));
     }
-    for (i, name) in TRUTH_TICK_NAMES.iter().enumerate() {
+    let truth_names: &[&str] = if t.version >= VERSION_V3 {
+        &TRUTH_V3_TICK_NAMES
+    } else {
+        &TRUTH_TICK_NAMES
+    };
+    for (i, name) in truth_names.iter().enumerate() {
         let mut lo = f64::INFINITY;
         let mut hi = f64::NEG_INFINITY;
         for e in &t.episodes {
             for tick in &e.ticks {
-                let x = tick.as_truth_array()[i] as f64;
+                let x = if t.version >= VERSION_V3 {
+                    tick.as_truth_v3_array()[i] as f64
+                } else {
+                    tick.as_truth_array()[i] as f64
+                };
                 lo = lo.min(x);
                 hi = hi.max(x);
             }
@@ -178,9 +194,14 @@ pub fn check_dataset(
             t.frames_per_episode
         ));
     }
-    if !t.is_v2() {
-        frame_problem = Some("sidecar is not version 2 (no privileged truth)".into());
+    if !t.is_privileged() {
+        frame_problem = Some("sidecar is not version 2 or 3 (no privileged truth)".into());
     }
+    let expected_targets = if v.version >= 3 {
+        TARGET_COUNT
+    } else {
+        LEGACY_TARGET_COUNT
+    };
     for e in &v.episodes {
         if e.features.nrows() != nf || e.features.ncols() != nc {
             frame_problem = Some(format!(
@@ -189,9 +210,9 @@ pub fn check_dataset(
                 e.features.dim()
             ));
         }
-        if e.targets.nrows() != nf || e.targets.ncols() != 4 {
+        if e.targets.nrows() != nf || e.targets.ncols() != expected_targets {
             frame_problem = Some(format!(
-                "episode {} targets {:?}, expected ({nf}, 4)",
+                "episode {} targets {:?}, expected ({nf}, {expected_targets})",
                 e.index,
                 e.targets.dim()
             ));
@@ -211,9 +232,14 @@ pub fn check_dataset(
         errors.push(format!("frame_count: {p}"));
     } else {
         let total = (n as u64) * (frames as u64);
+        let stride = if t.version >= VERSION_V3 {
+            TRUTH_V3_STRIDE
+        } else {
+            TRUTH_STRIDE
+        };
         record(
             "frame_count",
-            format!("{n} x {frames} = {total} frames, stride=24"),
+            format!("{n} x {frames} = {total} frames, stride={stride}"),
             true,
         );
     }
@@ -234,10 +260,14 @@ pub fn check_dataset(
         }
     }
     for e in &t.episodes {
-        if e.ticks
-            .iter()
-            .any(|tick| tick.as_truth_array().iter().any(|x| !x.is_finite()))
-        {
+        let bad = e.ticks.iter().any(|tick| {
+            if t.version >= VERSION_V3 {
+                tick.as_truth_v3_array().iter().any(|x| !x.is_finite())
+            } else {
+                tick.as_truth_array().iter().any(|x| !x.is_finite())
+            }
+        });
+        if bad {
             nonfinite.push(format!("episode {} per-tick truth", e.index));
         }
     }
@@ -309,7 +339,10 @@ pub fn check_dataset(
     record(
         "target_bounds",
         if bad_targets.is_empty() {
-            "g_theta within +/-0.12 rad, confidence and health in [0,1]".into()
+            format!(
+                "g_theta within +/-{MAX_CORRECTION} rad, confidence and health in [0,1], \
+                 g_accel within +/-{MAX_COMMAND_MPS2} m/s^2"
+            )
         } else {
             bad_targets[..bad_targets.len().min(3)].join(", ")
         },
@@ -327,6 +360,14 @@ pub fn check_dataset(
                 bad_truth.push(format!(
                     "episode {} tick {i} mass={}",
                     e.index, tick.mass_kg
+                ));
+            }
+            if (tick.g_accel[0] as f64).abs() > MAX_COMMAND_MPS2
+                || (tick.g_accel[1] as f64).abs() > MAX_COMMAND_MPS2
+            {
+                bad_truth.push(format!(
+                    "episode {} tick {i} g_accel={:?} outside +/-{MAX_COMMAND_MPS2} m/s^2",
+                    e.index, tick.g_accel
                 ));
             }
             let q2 = tick.quat.iter().map(|x| (*x as f64).powi(2)).sum::<f64>();
@@ -356,7 +397,7 @@ pub fn check_dataset(
     record(
         "truth_bounds",
         if bad_truth.is_empty() {
-            "mass>0, unit quaternion, gust/shear and g_theta in range".into()
+            "mass>0, unit quaternion, gust/shear, g_theta and g_accel in range".into()
         } else {
             bad_truth[..bad_truth.len().min(3)].join(", ")
         },

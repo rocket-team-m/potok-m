@@ -385,10 +385,13 @@ impl Simulator {
                     }
                 }
                 // The privileged teacher sees the reference optimizer's
-                // correction, not the (optional) flown control command.
+                // targets, not the (optional) flown control command. The
+                // target's `g_accel` is the world-frame command consumed by
+                // `fin_accel_command` on this same tick (true state + wind).
                 if let Some(target) = targets.last() {
                     if let Some(tick) = trajectory.last_mut() {
                         tick.g_theta = target.g_theta;
+                        tick.g_accel = target.g_accel;
                     }
                 }
 

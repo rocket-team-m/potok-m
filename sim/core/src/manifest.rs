@@ -17,7 +17,7 @@ use sha2::{Digest, Sha256};
 use crate::{
     config::Config,
     error::{Result, SimError},
-    trajectory::TRUTH_TICK_NAMES,
+    trajectory::TRUTH_V3_TICK_NAMES,
     validation::TARGET_NAMES,
 };
 
@@ -143,6 +143,7 @@ pub fn default_target_names() -> Vec<String> {
     TARGET_NAMES.iter().map(|s| s.to_string()).collect()
 }
 
+/// Per-tick truth names of the generated (v3) sidecar.
 pub fn default_truth_names() -> Vec<String> {
-    TRUTH_TICK_NAMES.iter().map(|s| s.to_string()).collect()
+    TRUTH_V3_TICK_NAMES.iter().map(|s| s.to_string()).collect()
 }

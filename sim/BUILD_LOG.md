@@ -567,3 +567,69 @@ and clamping, thin-air counted zero, LOUD zero authority (helper + whole run),
 zero-command bit identity, oracle improves on held-out (3 seeds), wrong sign
 worsens, v1/v2 sidecar round-trip of a controlled flight, placeholder COUNTED.
 All 54 pre-existing tests stay green.
+
+## Command-target export: validation v3 / POTOKTRJ v3 (22.11.2026)
+
+Final A/B root cause: the AI models were trained on `g_theta`, an
+angle-domain tilt target from `optimizer.solve`, but the actuator consumes
+`fin_accel_command`, a world-frame lateral acceleration demand. The fix is to
+export the command the fin solver actually consumes. No physics, gains or
+A/B data were changed; all edits are inside `sim/`.
+
+### Exact format versions and field order
+
+- `validation.bin` writer is now **v3**: same 80-byte `POTOKSIM` header and
+  the same 17 (or 39 with `truth_metadata`) metadata floats, but
+  **`target_count = 6`** (was 4). Target row per 50 Hz frame, little-endian
+  f32: `g_roll, g_pitch, confidence, ai_healthy, g_accel_y, g_accel_x`.
+  Columns 0–3 are the untouched legacy record; `g_theta` is never overwritten.
+- v1 (`target_count = 4`, 9 metadata) and v2 (4 targets, 17 or 39 metadata)
+  writers still emit their original bytes via
+  `write_validation_with_version`. `read_validation` auto-detects by version
+  and `target_count` (v1/v2 → 4 columns, v3 → 6) and rejects a mismatch
+  LOUDLY. Truth-extended files may still be v2; the default writer and
+  `write_validation_with_truth` are v3.
+- `POTOKTRJ` sidecar: `write_trajectory` (v1, stride 6) and
+  `write_trajectory_v2` (stride 24) are byte-identical to before.
+  `generate-dataset` now uses **`write_trajectory_v3`, version 3, stride 26**:
+  the 24 v2 fields followed by `g_accel_y, g_accel_x` (indices 24–25).
+  `read_trajectory` auto-detects stride 6/24/26; v1 defaults the privileged
+  fields, v2 defaults `g_accel` to `[0,0]`.
+- The terminal `TruthRecord` in validation metadata (22 floats) is unchanged;
+  the per-tick command target lives in the v3 sidecar.
+
+### Exact conversion semantics
+
+`optimizer.rs` exposes `world_accel_command(s, wind, phase, frame) -> [ax, ay]`
+(m/s²): the same raw LQR demand `solve` uses for `g_theta`, each axis clamped
+to ±`MAX_COMMAND_MPS2` = 10 m/s², or `[0, 0]` when `!frame.ai_input_valid()`,
+the state is non-finite or `!phase.ai_allowed()`. The dataset stores it as
+`[g_accel_y, g_accel_x] = [ay, ax]` (Y first: the fin seam is roll-then-pitch).
+The actuator command is recovered exactly as
+`fin_accel_command = [g_accel_y, -g_accel_x]` in `[roll, pitch]` order; this
+is bit-identical to the pre-change oracle (`clamp(-ax) == -clamp(ax)` for a
+symmetric envelope). `Episode.targets[i].g_accel` is computed on the optimizer
+from the true state and wind at tick `i` and is copied to
+`TrajectoryTick.g_accel` at the same tick, so validation columns 4–5 equal
+sidecar indices 24–25 frame-for-frame. `g_theta` remains a diagnostic/legacy
+target. Quality gates check the new columns and truth against ±10 m/s².
+
+### Verification
+
+```
+cargo check --workspace --offline -> Finished, no warnings
+cargo fmt --all -- --check        -> clean
+cargo test  --workspace --offline -> 67 passed, 0 failed
+```
+
+New gates in `core/tests/dataset_tests.rs` (+5): v3 sidecar stride/round-trip,
+validation v1/v2/v3 byte layout and field order, LOUD version/target-count
+mismatch, `fin_accel_command` vs exported target on a flown episode, and
+zero-command bit identity for all three validation and sidecar versions.
+The CLI `generate-dataset` gate now asserts v3 targets, 26 truth names and
+sidecar/validation `g_accel` agreement; all 14 quality checks still pass.
+
+Skipped: AI-, scripts-, edge- and protocol-side readers (owned by other lanes;
+the AI reader still hardcodes target_count=4 and version 2, so it must accept
+version 3 / six targets before consuming these datasets); no physics tuning; no
+change to the v1/v2 byte layouts or to the terminal truth metadata.

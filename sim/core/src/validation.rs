@@ -2,12 +2,27 @@
 //!
 //! Layout (little-endian), see sim/README.md for the full description:
 //!   header, then for each episode: `meta_count` metadata f32,
-//!   frames x features f32 (row-major), frames x 4 targets f32 (row-major).
-//! Version 1 stores the original 9 metadata; version 2 stores those 9 plus
-//! 6 conditioning numbers, a scenario id and the train/withheld split flag
-//! (17 total). A v2 file may carry 22 extra truth floats (39 total) when
-//! written by `write_validation_with_truth`; `meta_count` in the header is
-//! the authority, so v1/v2 readers of either layout keep working.
+//!   frames x features f32 (row-major), frames x target_count f32 (row-major).
+//! Version 1 stores the original 9 metadata; version 2 and 3 store those 9
+//! plus 6 conditioning numbers, a scenario id and the train/withheld split
+//! flag (17 total). A v2 or v3 file may carry 22 extra truth floats (39
+//! total) when written by `write_validation_with_truth`; `meta_count` in the
+//! header is the authority, so v1/v2 readers of either layout keep working.
+//!
+//! Target field order (one row per 50 Hz frame):
+//!   v1/v2 (target_count = 4): `g_roll, g_pitch, confidence, ai_healthy`
+//!       — the legacy angle-domain diagnostic target, unchanged bytes.
+//!   v3 (target_count = 6): the same four fields, then
+//!       `g_accel_y, g_accel_x` (f32, m/s^2).
+//!   `g_accel_y` is the clamped world +Y lateral acceleration demand and
+//!   `g_accel_x` the clamped world +X demand, both from
+//!   `ReferenceOptimizer::world_accel_command` on the true state and wind at
+//!   that tick (zero while the AI interlock is active). The fin command the
+//!   actuator actually consumes is `[g_accel_y, -g_accel_x]` in seam
+//!   `[roll, pitch]` order — see `ReferenceOptimizer::fin_accel_command`.
+//!   Y is written first to match the fin seam's roll-then-pitch order.
+//!   Readers auto-detect the row width from the header version and
+//!   `target_count`; a mismatch is a LOUD error, never a zero-fill.
 
 use std::{
     fs::File,
@@ -25,8 +40,11 @@ use crate::{
 };
 
 pub const MAGIC: &[u8; 8] = b"POTOKSIM";
-pub const VERSION: u32 = 2;
 pub const VERSION_V1: u32 = 1;
+pub const VERSION_V2: u32 = 2;
+/// Current writer version: six targets including the command acceleration.
+pub const VERSION: u32 = 3;
+pub const VERSION_V3: u32 = VERSION;
 pub const META_V1: usize = 9;
 pub const META_V2: usize = 17;
 /// 22 extra floats appended to v2 metadata: wind(3), gust start+amplitude(2),
@@ -34,8 +52,19 @@ pub const META_V2: usize = 17;
 pub const TRUTH_COUNT: usize = 22;
 pub const META_V2_TRUTH: usize = META_V2 + TRUTH_COUNT;
 pub const META_COUNT: usize = META_V2;
-pub const TARGET_COUNT: usize = 4; // g_roll, g_pitch, confidence, ai_healthy
-pub const TARGET_NAMES: [&str; TARGET_COUNT] = ["g_roll", "g_pitch", "confidence", "ai_healthy"];
+/// Legacy target width: v1 and v2 files carry only these four fields.
+pub const LEGACY_TARGET_COUNT: usize = 4;
+/// Current (v3) target width: g_roll, g_pitch, confidence, ai_healthy,
+/// g_accel_y, g_accel_x.
+pub const TARGET_COUNT: usize = 6;
+pub const TARGET_NAMES: [&str; TARGET_COUNT] = [
+    "g_roll",
+    "g_pitch",
+    "confidence",
+    "ai_healthy",
+    "g_accel_y",
+    "g_accel_x",
+];
 pub const FILE_NAME: &str = "validation.bin";
 
 /// The single authority for the on-disk header length: 8 magic + 4 version +
@@ -88,7 +117,7 @@ impl Header {
         let version = u32::from_le_bytes(b[8..12].try_into().unwrap());
         let meta_count = match version {
             VERSION_V1 => META_V1 as u32,
-            VERSION => {
+            VERSION_V2 | VERSION_V3 => {
                 let n = u32::from_le_bytes(b[48..52].try_into().unwrap());
                 if n as usize != META_V2 && n as usize != META_V2_TRUTH {
                     return Err(SimError::InvalidValidation(format!(
@@ -108,10 +137,16 @@ impl Header {
         for (i, f) in floats.iter_mut().enumerate() {
             *f = f32::from_le_bytes(b[36 + i * 4..40 + i * 4].try_into().unwrap());
         }
-        if vals[3] as usize != TARGET_COUNT {
-            return Err(SimError::InvalidValidation(
-                "unsupported target count".into(),
-            ));
+        let expected_targets = match version {
+            VERSION_V1 | VERSION_V2 => LEGACY_TARGET_COUNT,
+            VERSION_V3 => TARGET_COUNT,
+            _ => unreachable!("version checked above"),
+        };
+        if vals[3] as usize != expected_targets {
+            return Err(SimError::InvalidValidation(format!(
+                "version {version} needs {expected_targets} targets, header says {}",
+                vals[3]
+            )));
         }
         Ok(VersionedHeader {
             header: Header {
@@ -149,12 +184,12 @@ pub struct ValidationEpisode {
     pub split: Split,
     pub features: Array2<f32>,
     pub targets: Array2<f32>,
-    /// Present only in truth-extended v2 files. Ground truth at the last
+    /// Present only in truth-extended v2 or v3 files. Ground truth at the last
     /// 50 Hz tick of the episode.
     pub truth: Option<TruthRecord>,
 }
 
-/// Ground truth appended to v2 metadata. `wind` is the true wind vector at
+/// Ground truth appended to v2 or v3 metadata. `wind` is the true wind vector at
 /// the tick (m/s, world frame); `gust_start_s` is -1 when no gust was active;
 /// `pos/vel/quat/omega/mass_kg` are the un-noised RK4 state.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -227,9 +262,9 @@ fn meta_of(e: &Episode) -> [f32; META_V1] {
     ]
 }
 
-/// Writes the classic format (version 2, 17 metadata). Use
-/// `write_validation_with_version` for a legacy v1 file, or
-/// `write_validation_with_truth` for the truth-extended v2 layout.
+/// Writes the current format (version 3, 17 metadata, six targets per frame).
+/// Use `write_validation_with_version` for a legacy v1/v2 file, or
+/// `write_validation_with_truth` for the truth-extended v3 layout.
 pub fn write_validation(path: &Path, cfg: &Config, episodes: &[Episode]) -> Result<()> {
     write_validation_impl(path, cfg, episodes, VERSION, cfg.output.truth_metadata)
 }
@@ -243,7 +278,7 @@ pub fn write_validation_with_version(
     write_validation_impl(path, cfg, episodes, version, false)
 }
 
-/// Writes version 2 with 39 metadata floats per episode: the classic 17 plus
+/// Writes version 3 with 39 metadata floats per episode: the classic 17 plus
 /// the `TruthRecord` captured at the episode's last frame tick.
 pub fn write_validation_with_truth(path: &Path, cfg: &Config, episodes: &[Episode]) -> Result<()> {
     write_validation_impl(path, cfg, episodes, VERSION, true)
@@ -256,22 +291,31 @@ fn write_validation_impl(
     version: u32,
     truth: bool,
 ) -> Result<()> {
-    if version != VERSION && version != VERSION_V1 {
+    if version != VERSION_V1 && version != VERSION_V2 && version != VERSION_V3 {
         return Err(SimError::InvalidValidation(format!(
             "unsupported validation version {version}"
         )));
     }
-    if truth && episodes.iter().any(|e| e.truth.is_none()) {
+    if truth && version == VERSION_V1 {
         return Err(SimError::InvalidValidation(
-            "truth-extended v2 needs a TruthRecord on every episode".into(),
+            "truth metadata needs version 2 or 3".into(),
         ));
+    }
+    if truth && episodes.iter().any(|e| e.truth.is_none()) {
+        return Err(SimError::InvalidValidation(format!(
+            "truth-extended v{version} needs a TruthRecord on every episode"
+        )));
     }
     let header = Header {
         seed: cfg.run.seed,
         episode_count: episodes.len() as u32,
         frames_per_episode: cfg.frames_per_episode() as u32,
         feature_count: cfg.feature_count() as u32,
-        target_count: TARGET_COUNT as u32,
+        target_count: if version == VERSION_V3 {
+            TARGET_COUNT as u32
+        } else {
+            LEGACY_TARGET_COUNT as u32
+        },
         frame_rate_hz: cfg.run.frame_rate_hz as f32,
         dt: cfg.run.dt as f32,
         duration_s: cfg.run.duration_s as f32,
@@ -289,7 +333,7 @@ fn write_validation_impl(
         w.write_all(&e.meta.index.to_le_bytes())?;
         let mut meta = Vec::with_capacity(header.meta_count as usize);
         meta.extend_from_slice(&meta_of(e));
-        if version == VERSION {
+        if version >= VERSION_V2 {
             meta.extend_from_slice(&e.meta.conditioning.as_array());
             meta.push(e.meta.scenario_id as f32);
             meta.push(e.meta.split.as_u8() as f32);
@@ -312,6 +356,13 @@ fn write_validation_impl(
             ] {
                 w.write_all(&v.to_le_bytes())?;
             }
+            if version == VERSION_V3 {
+                // Field order: [g_accel_y, g_accel_x] = [ay, ax]. The fin
+                // command derived by the consumer is [y, -x] m/s^2.
+                for v in t.g_accel {
+                    w.write_all(&v.to_le_bytes())?;
+                }
+            }
         }
     }
     w.flush()?;
@@ -332,7 +383,7 @@ pub fn read_validation(path: &Path) -> Result<ValidationSet> {
             r.read_exact(&mut b)?;
             *v = f32::from_le_bytes(b);
         }
-        let (conditioning, scenario_id, split) = if vh.version == VERSION {
+        let (conditioning, scenario_id, split) = if vh.version >= VERSION_V2 {
             let mut c = [0f32; Conditioning::COUNT];
             for v in c.iter_mut() {
                 let mut b = [0u8; 4];
@@ -373,7 +424,7 @@ pub fn read_validation(path: &Path) -> Result<ValidationSet> {
             };
             (c, 0, Split::Train)
         };
-        let truth = if vh.version == VERSION && vh.header.meta_count as usize == META_V2_TRUTH {
+        let truth = if vh.version >= VERSION_V2 && vh.header.meta_count as usize == META_V2_TRUTH {
             let mut a = [0f32; TRUTH_COUNT];
             for v in a.iter_mut() {
                 let mut b = [0u8; 4];

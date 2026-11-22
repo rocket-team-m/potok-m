@@ -19,7 +19,7 @@ use potok_sim::{
     scenario::{scenario, Split},
     trajectory::{
         apogee_m, lateral_rms_m, read_trajectory, sidecar_path, write_trajectory,
-        write_trajectory_v2,
+        write_trajectory_v3,
     },
     validation::{read_validation, write_validation, FILE_NAME},
     write_manifest, Config, OutputMode, Simulator, PHYSICS_FEATURES,
@@ -497,7 +497,9 @@ fn write_split(dir: &PathBuf, cfg: &Config, episodes: &[Episode]) -> Result<(), 
     fs::create_dir_all(dir)?;
     let validation = dir.join(FILE_NAME);
     write_validation(&validation, cfg, episodes)?;
-    write_trajectory_v2(&sidecar_path(&validation), cfg, episodes)?;
+    // The generated dataset carries the authoritative command target on both
+    // sides: six validation targets and the v3 per-tick g_accel sidecar.
+    write_trajectory_v3(&sidecar_path(&validation), cfg, episodes)?;
     Ok(())
 }
 
