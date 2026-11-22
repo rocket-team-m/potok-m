@@ -1,0 +1,14 @@
+{
+  "model": "loopwm",
+  "rmse_train": 0.2531840474965656,
+  "rmse_held_out": 0.20452951551410833,
+  "ratio": 0.8078293934252818,
+  "params": 83075,
+  "mac": 6231744,
+  "bytes": 78171,
+  "mae": 0.1945591577496264,
+  "max_error": 1.7850745916366577,
+  "ece": 0.0,
+  "seed": 1,
+  "config_hash": "f8b27abff1ad13ae"
+}

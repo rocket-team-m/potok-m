@@ -540,13 +540,87 @@ gives ECE ≈0 via isotonic with ratio 1.093.
 `loopwm` was not retrained: its run-2 numbers stand for that code state, and a
 future retrain would inherit the changed `confidence_target` default.
 
-## Skipped (as of run 3, OR-derived config, 12 s)
+## Full 30 s OR-aligned flights (run 4, 2026-11-22, seed 1)
+
+Artifacts: `ai/out/run4/` (per-model exports, consolidated `*.metrics.json` /
+`*.calibration.json`, `sim.toml`, `data/`, `logs/`, `REPORT.md`). The sim CLI was
+rebuilt (`cd sim && cargo build --release -q -p potok-cli`) because
+`core/src/episode.rs` had changed; no `sim/` file was edited.
+
+### Config diff and exact commands
+
+```bash
+# The current OR-derived default already says duration_s = 30.0. The temp copy
+# is byte-identical to sim/config/default.toml; the only diff vs run3 is
+# duration_s = 12.0 -> 30.0 (run3/sim.toml line 7).
+cp /home/sehaxe/potok-m/sim/config/default.toml /tmp/potok-run4-sim.toml
+sed -i 's/^duration_s = .*/duration_s = 30.0/' /tmp/potok-run4-sim.toml
+diff /home/sehaxe/potok-m/ai/out/run3/sim.toml /tmp/potok-run4-sim.toml   # line 7 only
+
+cd /home/sehaxe/potok-m/sim
+./target/release/potok-cli --config /tmp/potok-run4-sim.toml --seed 1 --episodes 100 \
+    --physics-features --split train --validation-out /tmp/opencode/potok-train-30s
+./target/release/potok-cli --config /tmp/potok-run4-sim.toml --seed 1 --episodes 100 \
+    --physics-features --split held-out --validation-out /tmp/opencode/potok-heldout-30s
+cp /tmp/opencode/potok-train-30s/validation.bin   ../ai/out/run4/data/train_validation.bin
+cp /tmp/opencode/potok-heldout-30s/validation.bin ../ai/out/run4/data/heldout_validation.bin
+cp /tmp/potok-run4-sim.toml ../ai/out/run4/sim.toml
+
+# All three at the 40-epoch documented minimum; residual + curriculum ON
+# (defaults), --calibrate ON, run3's logit-domain confidence loss.
+cd /home/sehaxe/potok-m/ai
+PYTHONPATH=src .venv/bin/python -m potok_ai.engine --model lrs --stage train \
+  --data out/run4/data --out out/run4/lrs --epochs 40 --seed 1 --device cpu \
+  --window 50 --batch 8 --limit 2 --eval-limit 1451 --lr 0.03 \
+  --width 64 --rank 32 --heads 4 --max-iters 2 \
+  --lite-width 64 --attn-rank 8 --lite-iters 2 --latent-tokens 16 --calibrate
+PYTHONPATH=src .venv/bin/python -m potok_ai.engine --model loopwm-lite --stage train \
+  --data out/run4/data --out out/run4/lite --epochs 40 --seed 1 --device cpu \
+  --window 50 --batch 8 --limit 1451 --eval-limit 1451 \
+  --width 64 --rank 32 --heads 4 --max-iters 2 \
+  --lite-width 64 --attn-rank 8 --lite-iters 2 --latent-tokens 16 --calibrate
+PYTHONPATH=src .venv/bin/python -m potok_ai.engine --model loopwm --stage train \
+  --data out/run4/data --out out/run4/loopwm --epochs 40 --seed 1 --device cpu \
+  --window 50 --batch 8 --limit 1451 --eval-limit 1451 \
+  --width 64 --rank 32 --heads 4 --max-iters 2 \
+  --lite-width 64 --attn-rank 8 --lite-iters 2 --latent-tokens 16 --calibrate
+```
+
+### Data counts and AI-active window
+
+100 episodes generated per split; the scenario split keeps **80 train** (16
+scenarios 00–15) and **20 held-out** (4 scenarios 16–19), 1500 frames × 14
+features each. `ai_healthy` (target column 4 = `ai_input_valid()` i.e. AI_READY
+and no FAULT, plus finite state and `phase.ai_allowed()`) counts per episode:
+train min/mean/median/max 892 / 948.0 / 950 / 991, held-out 904 / 920.2 / 921 /
+932; first active tick 509–608 (train) and 568–596 (held-out), last 1499. So
+~18–20 s of real AI-active flight per 30 s episode (12 s data had only a few).
+
+### Results (exact values from `out/run4/*/metrics.json`)
+
+| model | rmse_train | rmse_held_out | ratio | raw_ece | calibrated_ece | coverage | n | pass |
+|---|---|---|---|---|---|---|---|---|
+| lrs | 0.23534260581864586 | 0.17480535227421898 | 0.7427696811045057 | 0.27101346266432763 | 1.8210412119971556e-18 | 0.5664024810475534 | 29020 | PASS |
+| loopwm-lite | 0.24327372147530726 | 0.2014719806952057 | 0.8281699292196485 | 0.36777935151629193 | 0.036456756663980794 | 0.07322536181943487 | 5804 | PASS |
+| loopwm | 0.2531840474965656 | 0.20452951551410833 | 0.8078293934252818 | 0.582649142628668 | 0.0 | 0.0616815988973122 | 5804 | PASS |
+
+Coverage is real: 16437/29020, 425/5804 and 358/5804 held-out samples within
+`tol = 0.1`. All three pass both gates at the 40-epoch minimum, so no increase
+was needed and no gate, tolerance or threshold was changed. ECE is in-sample on
+held-out (`n` reported); raw ECE is large because confidence is mis-scaled
+before calibration, not because the head is constant (run3 fix).
+
+`uv run pytest -q` → `86 passed in 11.59s`; `uv run ruff check src tests` →
+`All checks passed!`. `lrs.bin` / `loopwm_student.bin` reload as v2 20-input
+students.
+
+## Skipped (as of run 4, OR-derived config, 30 s)
 
 - No GPU wheels, no A/B runs, no push. The 3-seed statistical protocol is still
   unrun; this is one seed (1).
 - LoopWM-lite is trained against a randomly initialised teacher unless a
-  `loopwm.pt` from a `loopwm` stage sits in the same `--out` dir; the two real
-  runs used separate dirs, so lite's latent targets were random. Its gates pass
-  but its RMSE is not comparable to `loopwm`'s.
+  `loopwm.pt` from a `loopwm` stage sits in the same `--out` dir; runs 2–4 used
+  separate dirs, so lite's latent targets were random. Its gates pass but its
+  RMSE is not comparable to `loopwm`'s.
 - The 0.3–0.6 ms Pi latency estimate and an OpenRocket-derived aero card run are
   not measured here. `sim/`, `edge/`, `protocol/` and `docs/` were not touched.
