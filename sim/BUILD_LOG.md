@@ -128,8 +128,8 @@ and uncertainty notes are in `sim/README.md`.
 Two-stage thrust uses the **passport minimum 3.2 kNs total**: 2.2 kNs / 5.5 s /
 1.88 kg → 400 N at 0.342 kg/s (RDK-2000) and 1.0 kNs / 3.2 s / 1.0 kg →
 312.5 N at 0.3125 kg/s (RDK-1000), both below the passport peak thrusts. At
-the current mass and placeholder Cd=0.35 the nominal run reaches ~174.4 m/s
-and ~2071 m apogee; the speed target needs better aerodynamics. The gap is documented in the config and README
+the 14–15 kg mass and placeholder Cd=0.35 the nominal run reaches ~148.0 m/s
+and ~1653 m apogee; both targets need better aerodynamics and lower mass. The gap is documented in the config and README
 rather than hidden. Aerodynamic coefficients remain explicitly marked placeholders.
 
 Also derived from the data rather than hardcoded: `Vehicle::dry_mass` is now
@@ -193,8 +193,8 @@ new files; no files outside `sim/` were touched here.
 ## TTX revision (22.11.2026)
 
 Max speed TTX: M=0.5–0.6 ± (~170–200 m/s at 3 km).
-At the nominal seed the simulator reaches ~174.4 m/s
-and ~2071 m apogee; the apogee target is met.
+At the nominal seed the simulator reaches ~148.0 m/s
+and ~1653 m apogee; both are below the TTX.
 
 ## Ideal loop — physics side (SPEC_ENGINE_IDEAL.md)
 

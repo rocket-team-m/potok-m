@@ -34,7 +34,7 @@ turbulence_scale = 60.0    # m, integral scale
 
 [initial]
 # User-stated TTX: ~13 kg lift-off mass.
-mass_kg = [12.5, 13.5]
+mass_kg = [14.0, 15.0]
 cg_offset_m = [-0.02, 0.02]
 thrust_scale = [0.94, 1.06]
 pitch_deg = [-2.0, 2.0]

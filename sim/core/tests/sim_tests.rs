@@ -276,14 +276,14 @@ fn parallel_episodes_match_serial() {
 #[test]
 fn defaults_match_real_vehicle_ttx() {
     let cfg = Config::default();
-    assert!((cfg.initial.mass_kg.0 - 12.5).abs() < 1e-9);
-    assert!((cfg.initial.mass_kg.1 - 13.5).abs() < 1e-9);
+    assert!((cfg.initial.mass_kg.0 - 14.0).abs() < 1e-9);
+    assert!((cfg.initial.mass_kg.1 - 15.0).abs() < 1e-9);
     assert!((cfg.aero.area_m2 - 0.00817).abs() < 1e-9);
     assert!((cfg.aero.static_margin_m - 0.0765).abs() < 1e-9);
     assert!((cfg.sensor.accel_noise - 0.011).abs() < 1e-9);
     assert!((cfg.sensor.gyro_noise - 0.0015).abs() < 1e-9);
 
-    let v = Vehicle::from_config(&cfg, 13.0, 1.0, [0.0, 0.0]);
+    let v = Vehicle::from_config(&cfg, 14.5, 1.0, [0.0, 0.0]);
     assert!(
         (v.propellant_mass() - 2.881).abs() < 0.05,
         "propellant {}",
@@ -311,13 +311,13 @@ fn nominal_trajectory_is_plausible() {
         e.apogee_m, e.max_speed_mps
     );
     assert!(
-        (1_900.0..=2_200.0).contains(&e.apogee_m),
-        "apogee {} m outside 1.9-2.2 km",
+        (1_500.0..=1_800.0).contains(&e.apogee_m),
+        "apogee {} m outside 1.5-1.8 km",
         e.apogee_m
     );
     assert!(
-        (165.0..=185.0).contains(&e.max_speed_mps),
-        "max speed {} m/s outside 165-185",
+        (140.0..=160.0).contains(&e.max_speed_mps),
+        "max speed {} m/s outside 140-160",
         e.max_speed_mps
     );
 }

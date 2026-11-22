@@ -78,7 +78,7 @@ fn domain_randomization_stays_within_tolerances() {
     for i in 0..40u64 {
         let e = s.run_episode(i).unwrap();
         let c = e.meta.conditioning;
-        assert!((12.5..=13.5).contains(&(c.mass_kg as f64)));
+        assert!((14.0..=15.0).contains(&(c.mass_kg as f64)));
         assert!((0.94..=1.06).contains(&e.meta.thrust_scale));
         assert!((0.30..=0.40).contains(&(c.cd0 as f64)));
         assert!((0.85..=1.10).contains(&(c.static_margin_cal as f64)));
