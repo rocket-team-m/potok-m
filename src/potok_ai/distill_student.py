@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import numpy as np
 import torch
 from torch.nn import functional as F
 from torch.optim import AdamW
@@ -34,6 +35,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--conf-weight", type=float, default=1.0)
     parser.add_argument("--conf-temp", type=float, default=0.25)
+    parser.add_argument("--anomaly-rate", type=float, default=0.15)
+    parser.add_argument("--mtp-k", type=int, default=3)
+    parser.add_argument("--mtp-weight", type=float, default=0.1)
     parser.add_argument("--limit", type=int, default=None)
     return parser
 
@@ -66,12 +70,15 @@ def flags_valid(row) -> bool:
 def train_episode(
     student: StatefulTCN,
     teacher: PotokModel,
+    mtp_head: torch.nn.Module | None,
     frames,
     optimizer: AdamW,
     args: argparse.Namespace,
+    seed_offset: int = 0,
 ) -> tuple[int, int, torch.Tensor | None]:
     """Run one episode; return (windows trained, state resets, last loss)."""
     device = next(student.parameters()).device
+    rng = np.random.default_rng(args.seed + seed_offset)
     student.reset_state()
     resets = 1
     windows = 0
@@ -84,7 +91,13 @@ def train_episode(
             resets += 1
         previous_phase = phase
 
-        corrections, confidence = student.step(row)
+        student_row = row
+        anomaly = rng.random() < args.anomaly_rate
+        if anomaly:
+            student_row = row.copy()
+            channel = int(rng.integers(0, SENSOR_FEATURES))
+            student_row[channel] = 0.0 if rng.random() < 0.5 else student_row[channel] * 3.0
+        corrections, confidence = student.step(student_row)
         if tick + 1 < args.window or not flags_valid(row):
             continue
 
@@ -95,12 +108,18 @@ def train_episode(
         ).unsqueeze(0)
         with torch.no_grad():
             expected = teacher(window)[0, :2]
-            discrepancy = (expected - corrections.detach()).abs().mean()
-            target = torch.exp(-discrepancy / args.conf_temp)
+            target = torch.as_tensor(0.3 if anomaly else 0.95, dtype=torch.float32, device=device)
 
         imitation = F.mse_loss(corrections, expected)
         calibration = F.mse_loss(confidence, target)
         loss = imitation + args.conf_weight * calibration
+        if mtp_head is not None and tick + 1 + args.mtp_k <= len(frames):
+            block = np.asarray(frames, dtype=np.float32)[:, :SENSOR_FEATURES]
+            mu, sd = block.mean(axis=0), np.maximum(block.std(axis=0), 1e-3)
+            future = (np.asarray(frames[tick + 1 : tick + 1 + args.mtp_k, :SENSOR_FEATURES], dtype=np.float32) - mu) / sd
+            prediction = mtp_head(student.last_z).view(args.mtp_k, SENSOR_FEATURES)
+            future_t = torch.as_tensor(future, dtype=prediction.dtype, device=device)
+            loss = loss + args.mtp_weight * F.mse_loss(prediction, future_t)
         optimizer.zero_grad(set_to_none=False)
         loss.backward()
         optimizer.step()
@@ -123,16 +142,18 @@ def run(args: argparse.Namespace) -> float:
     student = StatefulTCN(
         StudentConfig(seed=args.seed, loops=args.loops)
     ).to(device)
-    optimizer = AdamW(student.parameters(), lr=args.lr)
+    mtp_head = torch.nn.Linear(student.cfg.width, args.mtp_k * SENSOR_FEATURES).to(device) if args.mtp_k > 0 else None
+    params = list(student.parameters()) + (list(mtp_head.parameters()) if mtp_head is not None else [])
+    optimizer = AdamW(params, lr=args.lr)
     episodes = load_episodes(args.data)
 
     student.train()
     final_loss = float("nan")
     total_windows = 0
     for _ in range(args.epochs):
-        for episode in episodes:
+        for index, episode in enumerate(episodes):
             windows, _, last_loss = train_episode(
-                student, teacher, episode.frames, optimizer, args
+                student, teacher, mtp_head, episode.frames, optimizer, args, seed_offset=index
             )
             total_windows += windows
             if last_loss is not None:
