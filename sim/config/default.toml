@@ -82,7 +82,8 @@ spike_probability = 0.0
 spike_amplitude = 0.0
 
 [aero]
-# User-stated TTX: diameter 0.102 m -> A = pi*(0.102/2)^2 = 0.00817 m^2.
+# Inner diameter is 102 mm. Outer diameter (and area) depends on wall
+# thickness, still unspecified; 0.102 m / 0.00817 m^2 is a placeholder.
 area_m2 = 0.00817
 # "placeholder" (default) uses the analytic coefficients below and prints a
 # COUNTED marker. "card" loads the 2-D (Mach, alpha) grid named by card_path;
