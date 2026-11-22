@@ -42,3 +42,7 @@ target/
 # Generated datasets — regenerate with potok-cli, never commit
 ai/out/*/data/*.bin
 ai/out/*/data/*.trajectory
+
+# Scratch A/B work dirs — regenerate locally
+scripts/ab_diag_work/
+scripts/ab_work/
