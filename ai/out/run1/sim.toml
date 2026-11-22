@@ -1,0 +1,168 @@
+# Deterministic Potok-M simulation defaults. Every randomized quantity is
+# derived from `run.seed` and the episode index; there is no global RNG.
+# See sim/README.md "Source of default numbers" for the provenance table.
+
+[run]
+seed = 1337
+duration_s = 12.0
+dt = 0.002
+frame_rate_hz = 50.0
+episodes = 1
+# false = exact analytic wind profile (reference); true = grid lookup.
+fast_field = true
+
+[sim]
+boundary_profile = "config/boundary_profile.csv"
+altitude_grid_m = 10.0
+# false = dynamics only (no sensor frames, used by the throughput benchmark).
+sensors = true
+
+[wind]
+# Launch-day winds are TTX assumptions, not passport values. Reduced from the
+# earlier 8/6 m/s so the wind does not turn the vehicle far off vertical.
+v_10 = 3.0
+shear_exponent = 0.22
+shear_delta = 2.0          # m/s jump across the layer
+shear_thickness = 12.0     # m
+shear_altitude = 150.0     # m
+direction_deg = 25.0
+gust_probability = 0.2
+gust_amplitude = 9.0       # m/s
+gust_duration = 2.0        # s
+turbulence_sigma = 0.6     # m/s per axis
+turbulence_scale = 60.0    # m, integral scale
+
+[initial]
+# User-stated TTX: ~13 kg lift-off mass.
+mass_kg = [10.4, 11.4]
+cg_offset_m = [-0.02, 0.02]
+thrust_scale = [0.94, 1.06]
+pitch_deg = [-2.0, 2.0]
+yaw_deg = [-2.0, 2.0]
+gimbal_deg = [-0.8, 0.8]
+
+[sensor]
+# DELTA report: 1064 ug = 0.0104 m/s^2 -> 0.011 m/s^2.
+gyro_noise = 0.0015        # rad/s, kept at the previously validated value
+gyro_bias = [0.002, -0.001, 0.0005]
+accel_noise = 0.011        # m/s^2, DELTA report 1064 ug
+accel_bias = [0.02, -0.015, 0.01]
+mag_noise = 0.02
+mag_bias = [0.01, -0.01, 0.005]
+mag_world = [0.22, 0.08, 0.38]
+baro_noise = 0.35
+baro_bias = -0.4
+pitot_noise = 25.0
+pitot_bias = -8.0
+lag_tau = 0.012
+quant_step = 0.0005
+gyro_sat = 12.0
+accel_sat = 250.0
+pitot_sat = 30000.0
+
+# Allan-variance instrument model. 0 (the default) keeps the legacy
+# white-noise + constant-bias model and its RNG draw order unchanged. ARW is
+# a density (rad/s/sqrt(Hz), m/s^2/sqrt(Hz)); the discrete std is arw/sqrt(dt).
+# Bias stability drives a seeded random walk on top of the constant bias.
+gyro_arw = 0.0
+gyro_bias_stability = 0.0
+accel_arw = 0.0
+accel_bias_stability = 0.0
+# Other non-ideal effects; all 0/off by default for legacy behaviour.
+# Whole-frame measurement delay (frames) on gyro/accel/mag/baro/pitot.
+latency_steps = 0
+# Per-channel quantization; 0 means "use quant_step above".
+gyro_quant_step = 0.0
+accel_quant_step = 0.0
+# Extra saturation limits; 0 means "no limit".
+mag_sat = 0.0
+baro_sat = 0.0
+# Per-frame seeded spike injection (probability, magnitude).
+spike_probability = 0.0
+spike_amplitude = 0.0
+
+[aero]
+# Inner diameter is 102 mm. Outer diameter (and area) depends on wall
+# thickness, still unspecified; 0.102 m / 0.00817 m^2 is a placeholder.
+area_m2 = 0.011
+# "placeholder" (default) uses the analytic coefficients below and prints a
+# COUNTED marker. "card" loads the 2-D (Mach, alpha) grid named by card_path;
+# out-of-grid queries are a LOUD error. config/aero_card.toml is generated
+# from these placeholder values and reproduces them when selected.
+source = "placeholder"
+# card_path = "config/aero_card.toml"
+# PLACEHOLDER aero coefficients (NOT from the real Potok-M aero model):
+# cd0, cna, pitch_damping, roll_damping and the cd_mach table are estimates.
+# Their uncertainty is unquantified; a real OpenRocket/Ansys card would replace
+# them. Only area and static margin below are user-stated physical values.
+cd0 = 0.40
+cna = 1.8
+# Static margin 0.0765 m; with OR outer diameter 118 mm this is ~0.65 cal.
+static_margin_m = 0.0765
+pitch_damping = 0.6
+roll_damping = 0.25
+cd_mach = [[0.0, 0.30], [0.4, 0.32], [0.7, 0.39], [0.9, 0.40], [1.1, 0.40], [1.5, 0.40]]
+# Motor passports (chat PDFs):
+#   stage 1 RDK-2000: 2.2-2.4 kNs, avg 390-400 N, peak 500-550 N,
+#     burn 5-6 s, propellant 1.88 kg.
+#   stage 2 RDK-1000: 1.0-1.2 kNs, avg 260-270 N, peak 550-600 N,
+#     burn 3-3.5 s, propellant 1.0 kg.
+# Motor passports: 2.2 + 1.0 kNs minimum (400 N for 5.5 s and 312.5 N for
+# 3.2 s), both below the passport peak thrusts.
+# First stage is jettisoned at 5.5 s; its RDK-2000 casing is 2.8 - 1.88 = 0.92 kg.
+stage_sep_time_s = 6.0
+stage_sep_mass_kg = 2.55
+# Mass flows 0.342 / 0.3125 kg/s are the passport propellant masses divided
+# by the burn times. Peaks and thrust ripple are NOT modelled; only average
+# thrust and mass flow are.
+thrust_profile = [
+  [0.00, 0.00, 0.0000],
+  [0.25, 295.00, 0.2000],
+  [0.50, 260.00, 0.2667],
+  [0.75, 380.00, 0.3600],
+  [0.99, 473.28, 0.3810],
+  [1.25, 510.00, 0.4091],
+  [1.51, 488.66, 0.3800],
+  [1.75, 547.50, 0.4200],
+  [2.00, 520.00, 0.4400],
+  [2.25, 513.33, 0.4000],
+  [2.50, 530.00, 0.4200],
+  [2.75, 505.00, 0.4200],
+  [3.00, 516.67, 0.4000],
+  [3.25, 512.50, 0.4000],
+  [3.50, 493.33, 0.4000],
+  [3.75, 473.33, 0.3800],
+  [4.00, 440.00, 0.3600],
+  [4.25, 415.00, 0.3400],
+  [4.50, 403.33, 0.3200],
+  [4.75, 410.00, 0.3200],
+  [5.00, 370.00, 0.3200],
+  [5.25, 140.00, 0.1000],
+  [5.50, 35.00, 0.0600],
+  [5.75, 13.33, 0.0000],
+  [6.00, 0.00, 0.6000],
+  [6.25, 140.00, 0.1000],
+  [6.50, 335.00, 0.2000],
+  [6.75, 380.00, 0.3200],
+  [7.00, 420.00, 0.3400],
+  [7.25, 490.00, 0.4000],
+  [7.50, 590.00, 0.4600],
+  [7.75, 543.33, 0.4200],
+  [8.00, 500.00, 0.4000],
+  [8.25, 496.67, 0.3800],
+  [8.50, 370.00, 0.3400],
+  [8.75, 320.00, 0.2400],
+  [9.00, 250.00, 0.2200],
+  [9.25, 95.00, 0.0800],
+  [9.50, 18.00, 0.0200],
+  [9.75, 12.75, 0.0200],
+  [10.00, 0.00, 0.0000],
+]
+
+[output]
+mode = "both"
+# Feature vector consumed by the AI model (window 50 x 8).
+features = ["gyro_x", "gyro_y", "gyro_z", "acc_x", "acc_y", "acc_z", "baro_h", "pitot_q"]
+# false writes classic v2 (17 metadata floats). true appends 22 truth floats
+# (true wind, gust, shear and the full 6-DoF state) as v2 metadata (39 total).
+truth_metadata = false

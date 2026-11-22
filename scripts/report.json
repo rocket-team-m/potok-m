@@ -8,46 +8,40 @@
   "results": [
     {
       "model": "lrs",
-      "rmse_train": 0.9386977701340866,
-      "rmse_held_out": 0.983550238797088,
-      "ratio": 1.0477815864594997,
-      "ece": 0.5334310892321188,
+      "rmse_train": 0.9468779245592613,
+      "rmse_held_out": 0.9400059983416736,
+      "ratio": 0.9927425425819423,
+      "ece": 0.0,
       "params": 22439,
       "mac": 58816,
       "bytes": 78171,
-      "pass": false,
-      "fail_reasons": [
-        "ece 0.533431 > 0.05"
-      ]
+      "pass": true,
+      "fail_reasons": []
     },
     {
       "model": "loopwm-lite",
-      "rmse_train": 0.8543295313207067,
-      "rmse_held_out": 1.006396256639039,
-      "ratio": 1.177995398430454,
-      "ece": 0.5050582334933515,
+      "rmse_train": 1.053167712217764,
+      "rmse_held_out": 1.085927931470498,
+      "ratio": 1.0311063649907641,
+      "ece": 0.0,
       "params": 11043,
       "mac": 82528,
       "bytes": 54991,
-      "pass": false,
-      "fail_reasons": [
-        "ece 0.505058 > 0.05"
-      ]
+      "pass": true,
+      "fail_reasons": []
     },
     {
       "model": "loopwm",
-      "rmse_train": 1.0754632765745995,
-      "rmse_held_out": 1.069556902681855,
-      "ratio": 0.994508065480807,
-      "ece": 0.27766535044434976,
+      "rmse_train": 1.4740497717430705,
+      "rmse_held_out": 1.5466671117148545,
+      "ratio": 1.0492638317673044,
+      "ece": 0.04917983115838715,
       "params": 83075,
       "mac": 6231744,
       "bytes": 78171,
-      "pass": false,
-      "fail_reasons": [
-        "ece 0.277665 > 0.05"
-      ]
+      "pass": true,
+      "fail_reasons": []
     }
   ],
-  "pass": false
+  "pass": true
 }

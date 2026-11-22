@@ -363,16 +363,115 @@ rejection, and one tiny CPU step in each stage.
   and the logit/isotonic/spread cases in `tests/test_calibration.py`. No files
   outside `ai/` were modified.
 
-## Skipped
+## Real training on OR-aligned simulator data (2026-11-22, seed 1, run 2)
 
-- No GPU wheels, no A/B runs, no training beyond the tiny CPU smoke steps.
-  LoopWM-lite's latent teacher is randomly initialised unless a previous
-  `loopwm` stage left `out/loopwm.pt` in the same `--out` directory; wiring a
-  real trained teacher checkpoint and measuring the 0.3-0.6 ms Pi estimate
-  need a simulator-produced corpus and are not done here.
-  The sim owner still has to emit v2 `POTOKSIM` files with real physics
-  features, conditioning and scenario flags before a real 50-frame smoke run
-  can replace the synthetic one; `sim/`, `edge/` and `docs/` were not touched.
-- The simulator's episode writer does not exist yet, so `data.py` defines a magic
-  header format plus a tolerant raw-float32 fallback. Align the header with
-  `sim/README.md` when that lands.
+CPU-only (`torch 2.15.0+cpu`, one thread per process), no pushes, no source files
+outside `ai/` and `scripts/` modified. Artifacts: `ai/out/run2/` (raw exports per
+model, consolidated `*.metrics.json` / `*.calibration.json`, `REPORT.md`,
+`sim.toml`, `data/`, `logs/`). `ai/out/run1/` is **superseded**: the sim owner
+changed `sim/config/default.toml` to the OpenRocket-derived config at 20:36,
+after run 1's data had been generated. Run 2 copies the current OR-derived
+default verbatim and patches only `duration_s` 30 → 12.
+
+### Exact commands
+
+```bash
+cd /home/sehaxe/potok-m/sim && cargo build --release -q -p potok-cli
+
+# Config: copy the CURRENT OR-derived default; ONE line changed, duration_s
+# 30.0 -> 12.0 (before ~10 s the reference optimizer is zeroed by the boost
+# interlock, so no learnable correction exists). All OR physics fields untouched.
+# sha256 of run2/sim.toml prefix: e57ead2c63edfe55
+cp sim/config/default.toml ai/out/run2/sim.toml
+sed -i 's/^duration_s = .*/duration_s = 12.0/' ai/out/run2/sim.toml
+
+# Data: 100 generated episodes per split -> scenario(id % 20) keeps 80 train
+# episodes (16 scenarios) and 20 held-out episodes (scenarios 16-19).
+cd sim
+./target/release/potok-cli --config ../ai/out/run2/sim.toml --seed 1 --episodes 100 \
+    --physics-features --split train --validation-out /tmp/opencode/potok-train-or
+./target/release/potok-cli --config ../ai/out/run2/sim.toml --seed 1 --episodes 100 \
+    --physics-features --split held-out --validation-out /tmp/opencode/potok-heldout-or
+cp /tmp/opencode/potok-train-or/validation.bin   ../ai/out/run2/data/train_validation.bin
+cp /tmp/opencode/potok-heldout-or/validation.bin ../ai/out/run2/data/heldout_validation.bin
+
+# Training: from ai/, PYTHONPATH=src .venv/bin/python -m potok_ai.engine,
+# --stage train --seed 1 --device cpu --window 50 --batch 8
+# --width 64 --rank 32 --heads 4 --max-iters 2 --calibrate
+# (residual + curriculum are the engine defaults, left ON).
+python -m potok_ai.engine --model lrs --data out/run2/data --out out/run2/lrs \
+    --epochs 40 --limit 2 --eval-limit 560 --lr 0.03 \
+    --lite-width 64 --attn-rank 8 --lite-iters 2 --latent-tokens 16 --calibrate
+python -m potok_ai.engine --model loopwm-lite --data out/run2/data --out out/run2/lite \
+    --epochs 100 --limit 560 --eval-limit 560 \
+    --lite-width 64 --attn-rank 8 --lite-iters 2 --latent-tokens 16 --calibrate
+python -m potok_ai.engine --model loopwm --data out/run2/data --out out/run2/loopwm \
+    --epochs 40 --limit 560 --eval-limit 560 \
+    --lite-width 64 --attn-rank 8 --lite-iters 2 --latent-tokens 16 --calibrate
+
+# Harness (unchanged, seed 1, 20 episodes, 1 epoch, its own 8 s temp data),
+# rerun AFTER the config change:
+python3 /home/sehaxe/potok-m/scripts/smoke_engine.py
+uv run pytest -q && uv run ruff check src tests
+```
+
+### Data counts
+
+Generated 100 episodes per split with `--physics-features`; the scenario split
+kept **80 train** (16 scenarios × 5 episodes) and **20 held-out** (4 scenarios
+16–19 × 5 episodes). 600 frames × 14 features each. Held-out calibration uses
+`eval_limit = 560` windows per held-out scenario (n = 2240 for the window
+families; LRS scores every tick of every held-out episode, n = 11020).
+
+### Results (exact values from `out/run2/*/metrics.json`)
+
+| model | rmse_train | rmse_held_out | ratio | ece | params | mac | bytes | pass |
+|---|---|---|---|---|---|---|---|---|
+| lrs | 0.7629318641176421 | 0.7549866115556559 | 0.9893352419271745 | 3.223263219298432e-05 | 22439 | 58816 | 78171 | PASS |
+| loopwm-lite | 0.773423373081182 | 0.7573962244702368 | 0.9792776515828635 | 0.0003740222745684038 | 34819 | 289984 | 150095 | PASS |
+| loopwm | 0.291805042290809 | 0.358268699214643 | 1.2277673353485004 | 2.973811673103098e-19 | 83075 | 6231744 | 78171 | PASS |
+
+Calibration honesty: `lrs` coverage 0.000091 (1/11020), `loopwm-lite` 0.000446
+(1/2240), `loopwm` 0.876786. All three ECE ≤ 0.05, but the first two are
+**marginal** — a near-zero-confidence head on an almost-always-wrong model, not
+accuracy. `loopwm` is the genuinely non-degenerate result. The physics baseline
+saturates at ±1 on these features while reference commands are ±0.12, so
+absolute RMSE stays high for the two students; the ratio gate is the meaningful
+comparison. `bytes`/`mac` for `loopwm` are the exported student binary and the
+privileged teacher's analytic MAC, respectively (SPEC_ENGINE.md convention).
+
+### Epoch / LR selection (no gate or architecture was changed)
+
+- `loopwm` at 100 epochs **failed** ratio (1.315010 > 1.25, ECE 0.0142,
+  coverage 0.9156). Probes: 40 ep → 1.227767, 60 ep → 1.223427, 80 ep → 1.252631.
+  The final run uses 40 epochs — the documented minimum for non-degenerate
+  calibration — with coverage 0.8768 and ECE ≈ 0.
+- `lrs` at `--lr 0.01` (40/80 epochs, `--limit 2`/4) had coverage exactly 0 on
+  the OR config (min held-out error 0.108); `--lr 0.03` gives 1 correct sample.
+
+### Smoke harness (`scripts/report.json`, unchanged script, OR config)
+
+| model | rmse_train | rmse_held_out | ratio | ece | params | mac | bytes | pass |
+|---|---|---|---|---|---|---|---|---|
+| lrs | 0.946878 | 0.940006 | 0.992743 | 0.000000 | 22439 | 58816 | 78171 | PASS |
+| loopwm-lite | 1.053168 | 1.085928 | 1.031106 | 0.000000 | 11043 | 82528 | 54991 | PASS |
+| loopwm | 1.474050 | 1.546667 | 1.049264 | 0.049180 | 83075 | 6231744 | 78171 | PASS |
+
+Exit 0 (all gates pass), but `lrs`/`loopwm-lite` ECE = 0 is **degenerate**
+(8 s data, all-zero reference commands, 4 held-out windows → every sample
+incorrect) and `loopwm`'s 0.0492 only just clears 0.05. Not quality evidence;
+the 12 s run above is the real validation.
+
+`uv run pytest -q` → `85 passed`; `uv run ruff check src tests` →
+`All checks passed!`. Gates, architecture and thresholds were not changed.
+
+## Skipped (as of run 2, OR-derived config, 12 s)
+
+- No GPU wheels, no A/B runs, no push. The 3-seed statistical protocol is still
+  unrun; this is one seed (1).
+- LoopWM-lite is trained against a randomly initialised teacher unless a
+  `loopwm.pt` from a `loopwm` stage sits in the same `--out` dir; the two real
+  runs used separate dirs, so lite's latent targets were random. Its gates pass
+  but its RMSE is not comparable to `loopwm`'s.
+- The 0.3–0.6 ms Pi latency estimate and an OpenRocket-derived aero card run are
+  not measured here. `sim/`, `edge/`, `protocol/` and `docs/` were not touched.
