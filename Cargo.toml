@@ -3,7 +3,7 @@ name = "potok-edge"
 version = "0.1.0"
 edition = "2021"
 description = "Fixed-size CPU inference service for the Potok-M assist control loop"
-license = "MIT"
+license = "GPL-3.0-or-later"
 
 # No workspace join: sim/, ai/, protocol/ are owned by other agents.
 # This crate is self-contained and builds with plain `cargo test` / `cargo check`.
