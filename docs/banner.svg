@@ -15,7 +15,7 @@
   <text x="56" y="152" fill="#f5f5f5" font-family="DejaVu Sans, sans-serif" font-size="58" font-weight="600" letter-spacing="2">ИИ-СТЕК</text>
   <text x="58" y="194" fill="#8a8a8a" font-family="DejaVu Sans Mono, monospace" font-size="19">обучение · дистилляция · инференс</text>
   <line x1="56" y1="224" x2="1144" y2="224" stroke="#262626" stroke-width="1"/>
-  <text x="56" y="264" fill="#8a8a8a" font-family="DejaVu Sans Mono, monospace" font-size="14">OPEN SOURCE · RUST · TEAM TOOLING</text>
+  <text x="56" y="264" fill="#8a8a8a" font-family="DejaVu Sans Mono, monospace" font-size="14">ОТКРЫТЫЙ КОД · RUST · КОМАНДА</text>
   <g transform="translate(890,88)" fill="none" stroke="#6b8fff" stroke-width="2" opacity="0.9">
     <path d="M0 132 L56 4 L112 132 L56 104 Z"/>
     <path d="M56 104 L56 156"/>

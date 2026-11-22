@@ -110,4 +110,4 @@ cargo run --release --manifest-path ai/tui/Cargo.toml -- --demo
 - Полётного лога нет. Все метрики — симуляционные.
 - Текущие студенты проигрывают zero command в closed-loop A/B; oracle выигрывает, значит проблема в training target, не в механике.
 
-Лицензия: MIT OR Apache-2.0.
+Лицензия: MIT.
