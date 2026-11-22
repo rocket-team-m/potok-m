@@ -2,7 +2,8 @@ use std::{path::PathBuf, process::Command};
 
 use potok_cli::tui::{render, DashboardState};
 use potok_sim::{
-    read_trajectory, scenario::Split, sidecar_path, validation::read_validation, Config,
+    manifest::read_manifest, read_trajectory, scenario::Split, sidecar_path,
+    validation::read_validation, Config,
 };
 use ratatui::{backend::TestBackend, Terminal};
 
@@ -147,4 +148,121 @@ fn dashboard_state_tracks_episodes() {
     assert_eq!(state.episode, 1);
     assert_eq!(state.frames, e.frames.len());
     assert!(state.summary_lines()[0].contains("1/1"));
+}
+
+fn dataset_dir(tag: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("potok-dataset-cli-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    dir
+}
+
+fn generate(out: &PathBuf, extra: &[&str]) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_potok-cli"))
+        .arg("generate-dataset")
+        .args([
+            "--seed",
+            "42",
+            "--train-episodes",
+            "8",
+            "--held-out-episodes",
+            "4",
+        ])
+        .arg("--out")
+        .arg(out)
+        .args(extra)
+        .output()
+        .expect("run generate-dataset")
+}
+
+#[test]
+fn cli_generate_dataset_writes_both_splits_manifest_and_report() {
+    let dir = dataset_dir("e2e");
+    let out = generate(&dir, &[]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("generate-dataset: seed=42"), "{stdout}");
+    assert!(stdout.contains("all_passed=true"), "{stdout}");
+    assert!(!dir.join(".determinism-check").exists());
+
+    for (label, expected) in [("train", 8usize), ("held-out", 4)] {
+        let split = dir.join(label);
+        let validation = split.join("validation.bin");
+        let sidecar = sidecar_path(&validation);
+        let manifest = read_manifest(&split.join("manifest.json")).unwrap();
+        let rs = read_validation(&validation).unwrap();
+        let traj = read_trajectory(&sidecar).unwrap();
+        assert_eq!(manifest.schema_version, 1);
+        assert_eq!(manifest.seed, 42);
+        assert_eq!(manifest.split, label);
+        assert_eq!(manifest.episode_count, expected as u32);
+        assert_eq!(rs.episodes.len(), expected);
+        assert_eq!(traj.episodes.len(), expected);
+        assert!(traj.is_v2());
+        assert_eq!(manifest.feature_names.len(), 14, "canonical model frame");
+        assert_eq!(manifest.target_names.len(), 4);
+        assert_eq!(manifest.truth_names.len(), 24);
+        assert_eq!(manifest.files.len(), 2);
+        assert_eq!(manifest.files[0].name, "validation.bin");
+        assert_eq!(manifest.files[1].name, "validation.trajectory");
+        assert!(manifest.bounds.truth.len() == 24);
+        for rec in &manifest.files {
+            let path = split.join(&rec.name);
+            assert_eq!(rec.sha256, potok_sim::manifest::sha256_file(&path).unwrap());
+            assert_eq!(rec.bytes, std::fs::metadata(&path).unwrap().len());
+        }
+        assert!(traj.episodes[0].ticks.iter().any(|t| t.quat[0] != 0.0));
+    }
+
+    let train = read_manifest(&dir.join("train/manifest.json")).unwrap();
+    let held = read_manifest(&dir.join("held-out/manifest.json")).unwrap();
+    assert!(train
+        .scenario_ids
+        .iter()
+        .all(|id| !held.scenario_ids.contains(id)));
+    assert_eq!(train.config_hash, held.config_hash);
+    let report = std::fs::read_to_string(dir.join("quality_report.json")).unwrap();
+    assert!(report.contains("\"all_passed\": true"));
+    assert!(report.contains("deterministic_regeneration"));
+    assert!(report.contains("split_scenarios_disjoint"));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn cli_generate_dataset_is_byte_identical_on_regeneration() {
+    let a = dataset_dir("det-a");
+    let b = dataset_dir("det-b");
+    generate(&a, &[]);
+    generate(&b, &[]);
+    for name in [
+        "train/validation.bin",
+        "train/validation.trajectory",
+        "train/manifest.json",
+        "held-out/validation.bin",
+        "held-out/validation.trajectory",
+        "held-out/manifest.json",
+        "quality_report.json",
+    ] {
+        assert_eq!(
+            std::fs::read(a.join(name)).unwrap(),
+            std::fs::read(b.join(name)).unwrap(),
+            "{name} must be byte-identical across seeds"
+        );
+    }
+    std::fs::remove_dir_all(&a).unwrap();
+    std::fs::remove_dir_all(&b).unwrap();
+}
+
+#[test]
+fn cli_generate_dataset_gate_failure_is_loud() {
+    let dir = dataset_dir("gate-fail");
+    let out = generate(&dir, &["--min-episodes-per-split", "9"]);
+    assert!(!out.status.success(), "too few episodes must fail");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("dataset quality gate failed"), "{stderr}");
+    assert!(stderr.contains("episode_count"), "{stderr}");
+    std::fs::remove_dir_all(&dir).unwrap();
 }

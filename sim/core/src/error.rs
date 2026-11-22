@@ -27,4 +27,8 @@ pub enum SimError {
     Control(String),
     #[error("trajectory sidecar error: {0}")]
     Trajectory(String),
+    #[error("dataset manifest error: {0}")]
+    Dataset(String),
+    #[error("dataset quality gate failed: {0}")]
+    Quality(String),
 }

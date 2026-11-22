@@ -186,7 +186,14 @@ fn trajectory_sidecar_roundtrip_carries_flown_truth() {
     assert_eq!(set.frames_per_episode as usize, cfg.frames_per_episode());
     for (got, want) in set.episodes.iter().zip(eps.iter()) {
         assert_eq!(got.index, want.meta.index);
-        assert_eq!(got.ticks, want.trajectory);
+        // V1 stores only the six flown floats; privileged fields are v2-only.
+        assert!(
+            got.ticks
+                .iter()
+                .map(|t| t.as_array())
+                .eq(want.trajectory.iter().map(|t| t.as_array())),
+            "v1 flown truth must round-trip"
+        );
         assert_eq!(got.apogee_m(), apogee_m(&want.trajectory));
         assert_eq!(got.lateral_rms_m(), lateral_rms_m(&want.trajectory));
     }

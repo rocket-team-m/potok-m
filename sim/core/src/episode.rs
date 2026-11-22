@@ -247,6 +247,21 @@ impl Simulator {
                 trajectory.push(TrajectoryTick {
                     pos: cast3(state.pos()),
                     vel: cast3(state.vel()),
+                    quat: [
+                        state.quat()[0] as f32,
+                        state.quat()[1] as f32,
+                        state.quat()[2] as f32,
+                        state.quat()[3] as f32,
+                    ],
+                    omega: cast3(state.omega()),
+                    mass_kg: state.mass() as f32,
+                    wind: cast3(w),
+                    gust_start_s: gust_info.map(|g| g.0).unwrap_or(-1.0) as f32,
+                    gust_amplitude: gust_info.map(|g| g.2).unwrap_or(0.0) as f32,
+                    shear_altitude_m: wind.shear_altitude() as f32,
+                    shear_delta: wind.shear_delta() as f32,
+                    shear_thickness_m: wind.shear_thickness() as f32,
+                    ..TrajectoryTick::default()
                 });
 
                 // The controller sees the frame at this tick. With sensors off
@@ -301,6 +316,13 @@ impl Simulator {
                         let (roll, pitch) = control(seen);
                         let (roll, pitch) = validate_command(roll, pitch)?;
                         command_deg = [roll, pitch];
+                    }
+                }
+                // The privileged teacher sees the reference optimizer's
+                // correction, not the (optional) flown control command.
+                if let Some(target) = targets.last() {
+                    if let Some(tick) = trajectory.last_mut() {
+                        tick.g_theta = target.g_theta;
                     }
                 }
 

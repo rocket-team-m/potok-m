@@ -8,6 +8,10 @@
 //! `g_theta`, clamped to `max_correction` rad. During the powered segment the
 //! corrections are zero regardless of the state (AI interlock).
 
+/// Clamp on both reference-correction axes, radians. Shared with the
+/// dataset quality gate so a target can never silently exceed it.
+pub const MAX_CORRECTION: f64 = 0.12;
+
 use crate::{
     config::Config,
     dynamics::{Phase, State, Vehicle},
@@ -38,7 +42,7 @@ impl Default for ReferenceOptimizer {
             kd_vel: 0.55,
             kp_att: 1.8,
             kd_rate: 0.35,
-            max_correction: 0.12,
+            max_correction: MAX_CORRECTION,
         }
     }
 }

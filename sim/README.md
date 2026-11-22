@@ -20,8 +20,15 @@ cargo run -p potok-cli -- --episodes 20 --physics-features --split train \
     --validation-out train/
 cargo run -p potok-cli -- --episodes 20 --physics-features --split held-out \
     --validation-out heldout/
+cargo run -p potok-cli -- generate-dataset --seed 42 \
+    --train-episodes 100 --held-out-episodes 20 --out dataset/
 cargo bench -p potok-sim --bench throughput   # episodes/s, frames/s
 ```
+
+`generate-dataset` is the single-command dataset generator: it writes both
+splits, their v2 truth sidecars, a `manifest.json` next to each
+`validation.bin`, and `quality_report.json` at the output root. All old CLI
+flags keep working and still write the v1 sidecar.
 
 `config/default.toml` is unchanged (8 output channels). `--physics-features`
 appends the six derived channels to make the 14-value model frame; `--split`
@@ -234,6 +241,72 @@ v2) and 39 (truth-extended v2), so old files and old readers keep working.
 | 14–17 | true quaternion `(w, x, y, z)` | — |
 | 18–20 | true body angular rate (X/Y/Z) | rad/s |
 | 21 | true mass at the tick | kg |
+
+The terminal truth record above is per-episode (last tick only). For a
+privileged LoopWM teacher, use the per-tick sidecar below.
+
+#### Per-tick privileged truth sidecar (POTOKTRJ v2)
+
+`write_trajectory` still writes **version 1**: 64-byte header (`POTOKTRJ`,
+`version=1`, episode_count u32, frames_per_episode u32, `stride=6`, 40 reserved)
+and `frames x 6` f32 per episode (`x, y, z, vx, vy, vz`). Every old reader and
+binary file keeps working.
+
+`write_trajectory_v2` writes **version 2** with the same 64-byte header but
+`stride=24`: the six v1 floats plus, at every 50 Hz tick, the full un-noised
+6-DoF state and the reference command:
+
+| index | field | units |
+|---|---|---|
+| 0–2 | world position x/y/z | m |
+| 3–5 | world velocity x/y/z | m/s |
+| 6–9 | quaternion `(w, x, y, z)` | — |
+| 10–12 | body angular rate x/y/z | rad/s |
+| 13 | mass | kg |
+| 14–16 | true wind x/y/z (world frame) | m/s |
+| 17 | gust start (`-1` = none) | s |
+| 18 | gust amplitude | m/s |
+| 19 | shear-layer altitude | m |
+| 20 | shear velocity jump | m/s |
+| 21 | shear-layer thickness | m |
+| 22–23 | reference optimizer `g_theta` `[roll, pitch]` | rad |
+
+`read_trajectory` accepts both versions: the header version and stride are the
+authority, and a v1 read leaves the 18 privileged fields at explicit defaults
+(`gust_start_s = -1`, everything else zero), never at guessed values. The
+order is pinned by `trajectory::TRUTH_TICK_NAMES`. `g_theta` is the reference
+optimizer's target; a `--control-file` run flies its own command and is not
+silently substituted.
+
+## Dataset manifest and quality gates
+
+`generate-dataset --seed S --train-episodes M --held-out-episodes K --out DIR`
+writes:
+
+```
+DIR/train/validation.bin                (v2, 17 metadata floats)
+DIR/train/validation.trajectory         (POTOKTRJ v2, stride 24)
+DIR/train/manifest.json
+DIR/held-out/validation.bin
+DIR/held-out/validation.trajectory
+DIR/held-out/manifest.json
+DIR/quality_report.json
+```
+
+Each manifest is deterministic JSON (schema version 1): effective config hash
+(sha256 of canonical TOML), seed, split, sorted scenario ids, episode/frame
+counts, feature/target/truth names, observed min/max bounds, and `sha256` +
+byte count of `validation.bin` and its sidecar. No timestamps or process ids.
+The model frame is the canonical 14 channels (eight raw + six physics).
+
+Before writing the manifests the generator re-reads the files it wrote and
+runs LOUD gates: finite values everywhere, disjoint train/held-out scenario
+sets, feature limits, `g_theta` within +/-0.12 rad and confidence/health in
+`[0,1]`, plausible truth (mass > 0, unit quaternion, gust/shear in range),
+consistent frame counts, at least `--min-episodes-per-split` (default 4), and
+a full second generation whose four binary files must be byte-identical.
+Any failure exits nonzero with the gate name and offending value; nothing is
+clamped or skipped. `quality_report.json` records every passing check.
 
 ## Aero coefficient card
 

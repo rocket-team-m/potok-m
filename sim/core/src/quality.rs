@@ -1,0 +1,438 @@
+//! Quality gates for generated datasets. Every failure is LOUD: a `SimError`
+//! naming the dataset, the gate and the offending value. No clamping, no
+//! skip, no silent fallback.
+
+use std::collections::BTreeSet;
+
+use serde::{Deserialize, Serialize};
+
+use crate::{
+    config::Config,
+    error::{Result, SimError},
+    manifest::{Bounds, NamedRange},
+    optimizer::MAX_CORRECTION,
+    trajectory::{TrajectorySet, TRUTH_TICK_NAMES},
+    validation::{ValidationSet, TARGET_NAMES},
+};
+
+pub const QUALITY_SCHEMA_VERSION: u32 = 1;
+pub const MIN_EPISODES_PER_SPLIT: usize = 4;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GateCheck {
+    pub name: String,
+    pub ok: bool,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct QualityReport {
+    pub schema_version: u32,
+    pub config_hash: String,
+    pub seed: u64,
+    pub checks: Vec<GateCheck>,
+    pub all_passed: bool,
+}
+
+/// Conservative physical sanity limits, not tuned to any model or result.
+/// An unknown feature name fails the gate rather than getting a free pass.
+pub fn feature_limits(name: &str) -> Option<(f64, f64)> {
+    Some(match name {
+        "gyro_x" | "gyro_y" | "gyro_z" => (-1.0e3, 1.0e3),
+        "acc_x" | "acc_y" | "acc_z" => (-1.0e4, 1.0e4),
+        "mag_x" | "mag_y" | "mag_z" => (-100.0, 100.0),
+        "baro_h" => (-100.0, 1.0e5),
+        "pitot_q" | "pitot_dp" => (-1.0e6, 1.0e6),
+        "alpha_deg" | "beta_deg" => (-180.0, 180.0),
+        "q_dyn_kpa" => (0.0, 1.0e5),
+        "a_lat_resid" => (0.0, 1.0e5),
+        "drag_est" => (0.0, 1.0e5),
+        "static_margin_cal" => (0.0, 100.0),
+        _ => return None,
+    })
+}
+
+pub fn target_limits(index: usize) -> (f64, f64) {
+    match index {
+        0 | 1 => (-MAX_CORRECTION, MAX_CORRECTION),
+        2 | 3 => (0.0, 1.0),
+        _ => unreachable!("target count is fixed at four"),
+    }
+}
+
+fn named_range(name: &str, min: f64, max: f64) -> NamedRange {
+    NamedRange {
+        name: name.to_string(),
+        min,
+        max,
+    }
+}
+
+/// Observed (min, max) of every exported channel, for the manifest.
+pub fn observed_bounds(cfg: &Config, v: &ValidationSet, t: &TrajectorySet) -> Bounds {
+    let mut out = Bounds::empty();
+    for (i, name) in cfg.output.features.iter().enumerate() {
+        let mut lo = f64::INFINITY;
+        let mut hi = f64::NEG_INFINITY;
+        for e in &v.episodes {
+            for row in e.features.rows() {
+                if i < row.len() {
+                    lo = lo.min(row[i] as f64);
+                    hi = hi.max(row[i] as f64);
+                }
+            }
+        }
+        if !lo.is_finite() {
+            lo = 0.0;
+            hi = 0.0;
+        }
+        out.features.push(named_range(name, lo, hi));
+    }
+    for (i, name) in TARGET_NAMES.iter().enumerate() {
+        let mut lo = f64::INFINITY;
+        let mut hi = f64::NEG_INFINITY;
+        for e in &v.episodes {
+            for row in e.targets.rows() {
+                if i < row.len() {
+                    lo = lo.min(row[i] as f64);
+                    hi = hi.max(row[i] as f64);
+                }
+            }
+        }
+        if !lo.is_finite() {
+            lo = 0.0;
+            hi = 0.0;
+        }
+        out.targets.push(named_range(name, lo, hi));
+    }
+    for (i, name) in TRUTH_TICK_NAMES.iter().enumerate() {
+        let mut lo = f64::INFINITY;
+        let mut hi = f64::NEG_INFINITY;
+        for e in &t.episodes {
+            for tick in &e.ticks {
+                let x = tick.as_truth_array()[i] as f64;
+                lo = lo.min(x);
+                hi = hi.max(x);
+            }
+        }
+        if !lo.is_finite() {
+            lo = 0.0;
+            hi = 0.0;
+        }
+        out.truth.push(named_range(name, lo, hi));
+    }
+    out
+}
+
+fn fail(dataset: &str, gate: &str, detail: impl std::fmt::Display) -> SimError {
+    SimError::Quality(format!("{dataset}: {gate}: {detail}"))
+}
+
+/// Runs every gate on one split (both `validation.bin` and its v2 sidecar, as
+/// read back from disk). Returns the report on success, a LOUD error on the
+/// first failed gate with every other failure appended.
+pub fn check_dataset(
+    dataset: &str,
+    cfg: &Config,
+    v: &ValidationSet,
+    t: &TrajectorySet,
+    min_episodes: usize,
+) -> Result<QualityReport> {
+    let mut errors: Vec<String> = Vec::new();
+    let mut checks = Vec::new();
+    let mut record = |name: &str, detail: String, ok: bool| {
+        checks.push(GateCheck {
+            name: name.to_string(),
+            ok,
+            detail,
+        });
+    };
+
+    // 1. Episode count, including the on-disk header and the sidecar.
+    let n = v.episodes.len();
+    let count_ok =
+        n >= min_episodes && v.header.episode_count as usize == n && t.episode_count as usize == n;
+    record(
+        "episode_count",
+        format!(
+            "{n} >= {min_episodes}, header={}, sidecar={}",
+            v.header.episode_count, t.episode_count
+        ),
+        count_ok,
+    );
+    if !count_ok {
+        errors.push(format!(
+            "episode_count: {n} episodes (need >= {min_episodes}), validation header {}, sidecar {}",
+            v.header.episode_count, t.episode_count
+        ));
+    }
+
+    // 2. Frame counts, matrix shapes and sidecar stride.
+    let frames = cfg.frames_per_episode();
+    let nf = v.header.frames_per_episode as usize;
+    let nc = cfg.feature_count();
+    let mut frame_problem = None;
+    if nf != frames || t.frames_per_episode as usize != frames {
+        frame_problem = Some(format!(
+            "frames per episode: validation header {nf}, sidecar {}, config {frames}",
+            t.frames_per_episode
+        ));
+    }
+    if !t.is_v2() {
+        frame_problem = Some("sidecar is not version 2 (no privileged truth)".into());
+    }
+    for e in &v.episodes {
+        if e.features.nrows() != nf || e.features.ncols() != nc {
+            frame_problem = Some(format!(
+                "episode {} features {:?}, expected ({nf}, {nc})",
+                e.index,
+                e.features.dim()
+            ));
+        }
+        if e.targets.nrows() != nf || e.targets.ncols() != 4 {
+            frame_problem = Some(format!(
+                "episode {} targets {:?}, expected ({nf}, 4)",
+                e.index,
+                e.targets.dim()
+            ));
+        }
+    }
+    for e in &t.episodes {
+        if e.ticks.len() != frames {
+            frame_problem = Some(format!(
+                "episode {} has {} truth ticks, expected {frames}",
+                e.index,
+                e.ticks.len()
+            ));
+        }
+    }
+    if let Some(p) = &frame_problem {
+        record("frame_count", p.clone(), false);
+        errors.push(format!("frame_count: {p}"));
+    } else {
+        let total = (n as u64) * (frames as u64);
+        record(
+            "frame_count",
+            format!("{n} x {frames} = {total} frames, stride=24"),
+            true,
+        );
+    }
+
+    // 3. No NaN/Inf anywhere: features, targets, terminal and per-tick truth.
+    let mut nonfinite = Vec::new();
+    for e in &v.episodes {
+        if e.features.iter().any(|x| !x.is_finite()) {
+            nonfinite.push(format!("episode {} features", e.index));
+        }
+        if e.targets.iter().any(|x| !x.is_finite()) {
+            nonfinite.push(format!("episode {} targets", e.index));
+        }
+        if let Some(truth) = &e.truth {
+            if truth.as_array().iter().any(|x| !x.is_finite()) {
+                nonfinite.push(format!("episode {} terminal truth", e.index));
+            }
+        }
+    }
+    for e in &t.episodes {
+        if e.ticks
+            .iter()
+            .any(|tick| tick.as_truth_array().iter().any(|x| !x.is_finite()))
+        {
+            nonfinite.push(format!("episode {} per-tick truth", e.index));
+        }
+    }
+    record(
+        "finite",
+        if nonfinite.is_empty() {
+            "all exported values finite".into()
+        } else {
+            nonfinite.join(", ")
+        },
+        nonfinite.is_empty(),
+    );
+    if !nonfinite.is_empty() {
+        errors.push(format!("finite: non-finite in {}", nonfinite.join(", ")));
+    }
+
+    // 4. Feature bounds.
+    let mut bad_features = Vec::new();
+    for e in &v.episodes {
+        for (i, name) in cfg.output.features.iter().enumerate() {
+            let (lo, hi) = match feature_limits(name) {
+                Some(b) => b,
+                None => {
+                    bad_features.push(format!("unknown feature {name:?}"));
+                    continue;
+                }
+            };
+            for row in e.features.rows() {
+                if i < row.len() {
+                    let x = row[i] as f64;
+                    if !(lo..=hi).contains(&x) {
+                        bad_features.push(format!("{name}={x} outside [{lo},{hi}]"));
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    record(
+        "feature_bounds",
+        if bad_features.is_empty() {
+            "all features inside physical limits".into()
+        } else {
+            bad_features[..bad_features.len().min(3)].join(", ")
+        },
+        bad_features.is_empty(),
+    );
+    if !bad_features.is_empty() {
+        errors.push(format!("feature_bounds: {}", bad_features.join(", ")));
+    }
+
+    // 5. Target bounds and the 0/1 health flag.
+    let mut bad_targets = Vec::new();
+    for e in &v.episodes {
+        for row in e.targets.rows() {
+            for (i, x) in row.iter().enumerate() {
+                let (lo, hi) = target_limits(i);
+                let x = *x as f64;
+                if !(lo..=hi).contains(&x) {
+                    bad_targets.push(format!("{}={x} outside [{lo},{hi}]", TARGET_NAMES[i]));
+                    break;
+                }
+            }
+            if row[3] != 0.0 && row[3] != 1.0 {
+                bad_targets.push(format!("ai_healthy={} is not 0 or 1", row[3]));
+            }
+        }
+    }
+    record(
+        "target_bounds",
+        if bad_targets.is_empty() {
+            "g_theta within +/-0.12 rad, confidence and health in [0,1]".into()
+        } else {
+            bad_targets[..bad_targets.len().min(3)].join(", ")
+        },
+        bad_targets.is_empty(),
+    );
+    if !bad_targets.is_empty() {
+        errors.push(format!("target_bounds: {}", bad_targets.join(", ")));
+    }
+
+    // 6. Truth bounds: physical plausibility of the privileged teacher input.
+    let mut bad_truth = Vec::new();
+    for e in &t.episodes {
+        for (i, tick) in e.ticks.iter().enumerate() {
+            if !(tick.mass_kg > 0.0) {
+                bad_truth.push(format!(
+                    "episode {} tick {i} mass={}",
+                    e.index, tick.mass_kg
+                ));
+            }
+            let q2 = tick.quat.iter().map(|x| (*x as f64).powi(2)).sum::<f64>();
+            if !(0.9..=1.1).contains(&q2.sqrt()) {
+                bad_truth.push(format!(
+                    "episode {} tick {i} quat norm={}",
+                    e.index,
+                    q2.sqrt()
+                ));
+            }
+            if tick.gust_start_s < -1.0 || tick.gust_start_s > cfg.run.duration_s as f32 + 1.0 {
+                bad_truth.push(format!(
+                    "episode {} tick {i} gust_start={}",
+                    e.index, tick.gust_start_s
+                ));
+            }
+            if tick.gust_amplitude < 0.0 || tick.shear_delta < 0.0 || tick.shear_thickness_m < 0.0 {
+                bad_truth.push(format!("episode {} tick {i} negative gust/shear", e.index));
+            }
+            for g in tick.g_theta {
+                if !((-MAX_CORRECTION..=MAX_CORRECTION).contains(&(g as f64))) {
+                    bad_truth.push(format!("episode {} tick {i} g_theta={g}", e.index));
+                }
+            }
+        }
+    }
+    record(
+        "truth_bounds",
+        if bad_truth.is_empty() {
+            "mass>0, unit quaternion, gust/shear and g_theta in range".into()
+        } else {
+            bad_truth[..bad_truth.len().min(3)].join(", ")
+        },
+        bad_truth.is_empty(),
+    );
+    if !bad_truth.is_empty() {
+        errors.push(format!("truth_bounds: {}", bad_truth.join(", ")));
+    }
+
+    if !errors.is_empty() {
+        return Err(fail(dataset, "quality", errors.join("; ")));
+    }
+    Ok(QualityReport {
+        schema_version: QUALITY_SCHEMA_VERSION,
+        config_hash: String::new(),
+        seed: v.header.seed,
+        checks,
+        all_passed: true,
+    })
+}
+
+/// Train and held-out scenario id sets must be disjoint, by id and by the
+/// underlying wind/gust signature.
+pub fn check_split_disjoint(train: &ValidationSet, held: &ValidationSet) -> Result<GateCheck> {
+    let ids =
+        |v: &ValidationSet| -> BTreeSet<u16> { v.episodes.iter().map(|e| e.scenario_id).collect() };
+    let a = ids(train);
+    let b = ids(held);
+    let overlap: Vec<u16> = a.intersection(&b).copied().collect();
+    let detail = format!(
+        "train={:?} held-out={:?} overlap={overlap:?}",
+        a.iter().copied().collect::<Vec<_>>(),
+        b.iter().copied().collect::<Vec<_>>()
+    );
+    if !overlap.is_empty() || a.is_empty() || b.is_empty() {
+        return Err(SimError::Quality(format!(
+            "split_scenarios_disjoint: {detail}"
+        )));
+    }
+    Ok(GateCheck {
+        name: "split_scenarios_disjoint".into(),
+        ok: true,
+        detail,
+    })
+}
+
+/// Byte-for-byte comparison of a regenerated dataset against the first one.
+pub fn check_determinism(pairs: &[(&str, &[u8], &[u8])]) -> Result<GateCheck> {
+    let mut mismatches = Vec::new();
+    for (name, a, b) in pairs {
+        if a != b {
+            mismatches.push(name.to_string());
+        }
+    }
+    let detail = format!("{} files compared, mismatches={mismatches:?}", pairs.len());
+    if !mismatches.is_empty() {
+        return Err(SimError::Quality(format!(
+            "deterministic_regeneration: {detail}"
+        )));
+    }
+    Ok(GateCheck {
+        name: "deterministic_regeneration".into(),
+        ok: true,
+        detail,
+    })
+}
+
+pub fn quality_report_to_string(report: &QualityReport) -> Result<String> {
+    let mut s = serde_json::to_string_pretty(report)
+        .map_err(|e| SimError::Dataset(format!("quality report serialization: {e}")))?;
+    s.push('\n');
+    Ok(s)
+}
+
+pub fn write_quality_report(path: &std::path::Path, report: &QualityReport) -> Result<()> {
+    let text = quality_report_to_string(report)?;
+    std::fs::write(path, text.as_bytes())?;
+    Ok(())
+}

@@ -35,6 +35,7 @@ pub const TRUTH_COUNT: usize = 22;
 pub const META_V2_TRUTH: usize = META_V2 + TRUTH_COUNT;
 pub const META_COUNT: usize = META_V2;
 pub const TARGET_COUNT: usize = 4; // g_roll, g_pitch, confidence, ai_healthy
+pub const TARGET_NAMES: [&str; TARGET_COUNT] = ["g_roll", "g_pitch", "confidence", "ai_healthy"];
 pub const FILE_NAME: &str = "validation.bin";
 
 /// The single authority for the on-disk header length: 8 magic + 4 version +

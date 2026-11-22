@@ -11,6 +11,9 @@ license = "MIT"
 ndarray = "0.16.1"
 rand = "0.8.8"
 serde = { version = "1.0.228", features = ["derive"] }
+# float_roundtrip: default parser is 1 ULP off on some f32-derived bounds.
+serde_json = { version = "=1.0.145", features = ["float_roundtrip"] }
+sha2 = "0.10"
 toml = "0.8.23"
 clap = { version = "4.5.13", features = ["derive"] }
 ratatui = "0.30.2"
