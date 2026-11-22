@@ -1,6 +1,6 @@
 # potok-edge
 
-CPU inference service for the Potok-M assist loop on Raspberry Pi. No CUDA,
+CPU inference service for the Potok-M assist loop on Raspberry Pi 4 B (2 GB RAM). No CUDA,
 no autograd, no training, no Python in the loop. Builds with plain
 `cargo test` / `cargo check`.
 
