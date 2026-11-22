@@ -260,6 +260,19 @@ pub struct AeroConfig {
     pub cd_mach: Vec<(f64, f64)>,
     /// Table of (time_s, thrust_N, mass_flow_kg_s) knots.
     pub thrust_profile: Vec<(f64, f64, f64)>,
+    /// First-stage jettison time and dry mass removed at separation.
+    /// Defaults come from the RDK-2000 passport (2.8 - 1.88 kg casing).
+    #[serde(default = "default_stage_sep_time")]
+    pub stage_sep_time_s: f64,
+    #[serde(default = "default_stage_sep_mass")]
+    pub stage_sep_mass_kg: f64,
+}
+
+fn default_stage_sep_time() -> f64 {
+    5.5
+}
+fn default_stage_sep_mass() -> f64 {
+    0.92
 }
 
 fn default_cd0_range() -> Range {

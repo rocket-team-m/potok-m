@@ -1,8 +1,10 @@
+use std::path::Path;
+
 use potok_protocol as proto;
 use potok_sim::{
     atmosphere::Atmosphere,
     config::Config,
-    dynamics::{derivative, Phase, State, Vehicle},
+    dynamics::{derivative, rk4, Phase, State, Vehicle},
     math::{episode_seed, lerp_table},
     sensor::{gating, wire_flags, FLAG_AI_READY, FLAG_FAULT, FLAG_MOTOR_ARMED},
     validation::{
@@ -387,4 +389,20 @@ fn config_validation_rejects_bad_frame_rate() {
     let mut cfg = Config::default();
     cfg.run.dt = -1.0;
     assert!(cfg.validate().is_err());
+}
+
+#[test]
+fn first_stage_separation_drops_dry_mass() {
+    let cfg = Config::default();
+    let v = Vehicle::from_config(&cfg, 14.5, 1.0, [0.0, 0.0]);
+    let atm = Atmosphere::load(Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../config/boundary_profile.csv")), 50.0).unwrap();
+    let mut s = State::zeros();
+    s.mass[0] = v.dry_mass + 0.1;
+    s.pos[2] = 1.0;
+
+    let before = rk4(5.48, &s, 0.01, [0.0, 0.0, 0.0], &atm, &v);
+    assert!(before.mass[0] > v.dry_mass - v.stage_sep_mass / 2.0);
+
+    let after = rk4(5.49, &s, 0.02, [0.0, 0.0, 0.0], &atm, &v);
+    assert!(after.mass[0] <= v.dry_mass - v.stage_sep_mass / 2.0);
 }

@@ -109,6 +109,9 @@ cd_mach = [[0.0, 0.35], [0.4, 0.35], [0.7, 0.39], [0.9, 0.48], [1.1, 0.52], [1.5
 #     burn 3-3.5 s, propellant 1.0 kg.
 # Motor passports: 2.2 + 1.0 kNs minimum (400 N for 5.5 s and 312.5 N for
 # 3.2 s), both below the passport peak thrusts.
+# First stage is jettisoned at 5.5 s; its RDK-2000 casing is 2.8 - 1.88 = 0.92 kg.
+stage_sep_time_s = 5.5
+stage_sep_mass_kg = 0.92
 # Mass flows 0.342 / 0.3125 kg/s are the passport propellant masses divided
 # by the burn times. Peaks and thrust ripple are NOT modelled; only average
 # thrust and mass flow are.

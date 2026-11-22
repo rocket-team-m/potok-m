@@ -37,7 +37,7 @@ flags are optional, so every older command line keeps working.
 | static margin | 0.0765 m = 0.75 cal | TTX |
 | motor impulse | 2.4 + 1.2 kNs (upper passport) | RDK-2000 / RDK-1000 passports, chat PDFs (2.2–2.4 / 1.0–1.2 kNs) |
 | thrust / mass flow | 400 N @ 0.342 kg/s for 5.5 s; 312.5 N @ 0.3125 kg/s for 3.2 s | passport minimum 2.2 + 1.0 kNs; propellant masses from the passports |
-| target speed / apogee | M=0,5–0,6 (±) / ~3 km | current TTX; this model reaches ~148 m/s / ~1.65 km at nominal seed, below both targets |
+| target speed / apogee | M=0,5–0,6 (±) / ~3 km | current TTX; this model reaches ~151 m/s / ~1.69 km at nominal seed, below both targets |
 | gyro noise | 0.0015 rad/s | previously validated simulator value |
 | accel noise | 0.011 m/s² (1064 µg) | DELTA report |
 | wind (v_10, shear, gust, turbulence) | 3 m/s, 2 m/s, p=0.2, σ=0.6 m/s | launch-day assumption, not passport data; reduced from earlier 8/6 m/s so the vehicle stays near vertical |
@@ -50,7 +50,7 @@ ballpark. Their uncertainty is unquantified; a real OpenRocket/Ansys
 aerodynamic card (as referenced in the project docs) should replace them.
 Motor peaks (500–550 / 550–600 N) and thrust ripple are not modelled — only
 average thrust and mass flow. With the passport-minimum 3.2 kNs and 14–15 kg mass the nominal
-simulation reaches ~148 m/s and ~1.65 km; real aerodynamics and mass reduction
+simulation reaches ~151 m/s and ~1.69 km; real aerodynamics and mass reduction
 are needed to reach the TTX.
 
 ## Domain randomization (Potok-M only)

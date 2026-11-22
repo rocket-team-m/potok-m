@@ -72,6 +72,9 @@ impl Phase {
 #[derive(Debug, Clone)]
 pub struct Vehicle {
     pub dry_mass: f64,
+    /// Dry mass jettisoned with the first stage.
+    pub stage_sep_mass: f64,
+    pub stage_sep_time: f64,
     pub thrust_scale: f64,
     /// Unit vector of the thrust axis in body frame; normalized once here.
     pub thrust_dir: Vec3,
@@ -120,6 +123,8 @@ impl Vehicle {
         let dry_mass = (mass - propellant).max(mass * 0.5);
         Self {
             dry_mass,
+            stage_sep_mass: cfg.aero.stage_sep_mass_kg,
+            stage_sep_time: cfg.aero.stage_sep_time_s,
             thrust_scale,
             thrust_dir,
             aero: cfg.aero.clone(),
@@ -385,7 +390,13 @@ pub fn derivative(t: f64, s: &State, wind: Vec3, atm: &Atmosphere, v: &Vehicle) 
     let w = s.omega;
     let moment_aero = cross([0.0, 0.0, v.aero.static_margin_m], normal);
     let r_body = 0.15_f64;
-    let mass = s.mass[0].max(v.dry_mass);
+    let sep_done = if t >= v.stage_sep_time {
+        v.stage_sep_mass
+    } else {
+        0.0
+    };
+    let mass_min = v.dry_mass - sep_done;
+    let mass = s.mass[0].max(mass_min);
     let i_xx = 0.1 * mass * r_body * r_body;
     let i_zz = 0.02 * mass * r_body * r_body;
     // PLACEHOLDER pitch/roll damping (not from the real aero model). Scaled
@@ -476,8 +487,19 @@ pub fn rk4(t: f64, s: &State, dt: f64, wind: Vec3, atm: &Atmosphere, v: &Vehicle
         o.quat[i] =
             s.quat[i] + h6 * (k1.quat[i] + 2.0 * k2.quat[i] + 2.0 * k3.quat[i] + k4.quat[i]);
     }
-    o.mass[0] = (s.mass[0] + h6 * (k1.mass[0] + 2.0 * k2.mass[0] + 2.0 * k3.mass[0] + k4.mass[0]))
-        .max(v.dry_mass);
+    let sep_mass = if t < v.stage_sep_time && t + dt >= v.stage_sep_time {
+        v.stage_sep_mass
+    } else {
+        0.0
+    };
+    let sep_done = if t + dt >= v.stage_sep_time {
+        v.stage_sep_mass
+    } else {
+        0.0
+    };
+    o.mass[0] = (s.mass[0] + h6 * (k1.mass[0] + 2.0 * k2.mass[0] + 2.0 * k3.mass[0] + k4.mass[0])
+        - sep_mass)
+        .max(v.dry_mass - sep_done);
     o.quat = quat_normalize(o.quat);
     if o.pos[2] <= 0.0 {
         o.pos[2] = 0.0;
