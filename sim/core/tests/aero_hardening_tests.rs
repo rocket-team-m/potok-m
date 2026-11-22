@@ -14,9 +14,8 @@ use std::{
 };
 
 use potok_sim::{
-    aero::placeholder_uses,
-    config::AeroSource,
-    AeroCard, AeroChannel, Config, SimError, Simulator, PLACEHOLDER_CM_DELTA,
+    aero::placeholder_uses, config::AeroSource, AeroCard, AeroChannel, Config, SimError, Simulator,
+    PLACEHOLDER_CM_DELTA,
 };
 
 const CARD: &str = "../config/aero_card.toml";
@@ -39,13 +38,62 @@ static COUNTER_LOCK: Mutex<()> = Mutex::new(());
 
 // (mach, alpha_deg, OR Cd, pinned card Cd, OR Cm, pinned card Cm).
 const OR_SAMPLES: &[(f64, f64, f64, f64, f64, f64)] = &[
-    (0.020000, 14.896902673, 0.583000, 0.577527814100, -1.420000, -1.460777596378),
-    (0.179000, 0.401070457, 0.363000, 0.360083698610, 0.046000, 0.045330449244),
-    (0.493000, 0.006904141, 0.402000, 0.390683060057, 0.002000, 0.001964599527),
-    (0.733000, 0.014558858, 0.394000, 0.393330003311, 0.001000, 0.000916033655),
-    (0.407000, 0.028974476, 0.319000, 0.319184870070, 0.002000, 0.003365958763),
-    (0.215000, 0.114591559, 0.300000, 0.299889960517, 0.010000, 0.011993622878),
-    (0.059000, 3.437746771, 0.335000, 0.352317429833, 0.217000, 0.175238900897),
+    (
+        0.020000,
+        14.896902673,
+        0.583000,
+        0.577527814100,
+        -1.420000,
+        -1.460777596378,
+    ),
+    (
+        0.179000,
+        0.401070457,
+        0.363000,
+        0.360083698610,
+        0.046000,
+        0.045330449244,
+    ),
+    (
+        0.493000,
+        0.006904141,
+        0.402000,
+        0.390683060057,
+        0.002000,
+        0.001964599527,
+    ),
+    (
+        0.733000,
+        0.014558858,
+        0.394000,
+        0.393330003311,
+        0.001000,
+        0.000916033655,
+    ),
+    (
+        0.407000,
+        0.028974476,
+        0.319000,
+        0.319184870070,
+        0.002000,
+        0.003365958763,
+    ),
+    (
+        0.215000,
+        0.114591559,
+        0.300000,
+        0.299889960517,
+        0.010000,
+        0.011993622878,
+    ),
+    (
+        0.059000,
+        3.437746771,
+        0.335000,
+        0.352317429833,
+        0.217000,
+        0.175238900897,
+    ),
 ];
 
 // A fully populated card: no nan nodes, all four control channels present.
@@ -122,7 +170,11 @@ fn channels_bit_identical(a: &AeroCard, b: &AeroCard) -> bool {
 fn or_card_parity_stays_inside_hard_per_row_and_mean_ceilings() {
     let card = card();
     assert_eq!(card.mach.len(), MACH_LEN, "Mach axis changed silently");
-    assert_eq!(card.alpha_deg.len(), ALPHA_LEN, "alpha axis changed silently");
+    assert_eq!(
+        card.alpha_deg.len(),
+        ALPHA_LEN,
+        "alpha axis changed silently"
+    );
 
     let (mut worst_cd, mut worst_cm, mut sum_cd, mut sum_cm) = (0.0_f64, 0.0_f64, 0.0_f64, 0.0_f64);
     for &(mach, alpha, cd_or, cd_pinned, cm_or, cm_pinned) in OR_SAMPLES {
@@ -156,8 +208,16 @@ fn or_card_parity_stays_inside_hard_per_row_and_mean_ceilings() {
     );
     assert!(worst_cd <= MAX_CD_ROW_ERROR, "Cd row error {worst_cd}");
     assert!(worst_cm <= MAX_CM_ROW_ERROR, "Cm row error {worst_cm}");
-    assert!(sum_cd / n <= MAX_CD_MEAN_ERROR, "Cd mean error {}", sum_cd / n);
-    assert!(sum_cm / n <= MAX_CM_MEAN_ERROR, "Cm mean error {}", sum_cm / n);
+    assert!(
+        sum_cd / n <= MAX_CD_MEAN_ERROR,
+        "Cd mean error {}",
+        sum_cd / n
+    );
+    assert!(
+        sum_cm / n <= MAX_CM_MEAN_ERROR,
+        "Cm mean error {}",
+        sum_cm / n
+    );
 }
 
 #[test]
@@ -168,10 +228,7 @@ fn or_card_finite_nodes_read_back_exactly_and_gaps_are_never_invented() {
         let (mut clean, mut gapped) = (0, 0);
         for ai in 0..card.alpha_deg.len() {
             for mi in 0..card.mach.len() {
-                let (m0, a0) = (
-                    stencil_lo(&card.mach, mi),
-                    stencil_lo(&card.alpha_deg, ai),
-                );
+                let (m0, a0) = (stencil_lo(&card.mach, mi), stencil_lo(&card.alpha_deg, ai));
                 let corners = [
                     grid[a0][m0],
                     grid[a0][m0 + 1],
@@ -199,7 +256,10 @@ fn or_card_finite_nodes_read_back_exactly_and_gaps_are_never_invented() {
                 }
             }
         }
-        assert!(clean > 0 && gapped > 0, "{ch:?}: clean={clean} gapped={gapped}");
+        assert!(
+            clean > 0 && gapped > 0,
+            "{ch:?}: clean={clean} gapped={gapped}"
+        );
     }
 }
 
@@ -208,7 +268,11 @@ fn or_card_absent_channels_and_partial_nan_stencils_are_loud() {
     let card = card();
     // The flight data measures Cd and Cm only. The three control derivatives
     // are absent and must never be zero-filled or borrowed from the placeholder.
-    for ch in [AeroChannel::Cna, AeroChannel::PitchDamping, AeroChannel::CmDelta] {
+    for ch in [
+        AeroChannel::Cna,
+        AeroChannel::PitchDamping,
+        AeroChannel::CmDelta,
+    ] {
         assert!(card.channel(ch).is_empty(), "{ch:?} must be absent");
         match card.interpolate(ch, 0.493, 0.006904141) {
             Err(SimError::AeroCard(msg)) => assert!(msg.contains("absent"), "{ch:?}: {msg}"),
@@ -231,10 +295,9 @@ fn or_card_absent_channels_and_partial_nan_stencils_are_loud() {
         (0.817, 90.0),
     ] {
         match card.interpolate(AeroChannel::Cd0, mach, alpha) {
-            Err(SimError::AeroCard(msg)) => assert!(
-                msg.contains("no measured data"),
-                "({mach}, {alpha}): {msg}"
-            ),
+            Err(SimError::AeroCard(msg)) => {
+                assert!(msg.contains("no measured data"), "({mach}, {alpha}): {msg}")
+            }
             other => panic!("nan stencil at ({mach}, {alpha}) was not loud: {other:?}"),
         }
     }
@@ -313,7 +376,10 @@ fn or_card_load_and_interpolation_are_bitwise_deterministic() {
     let b = AeroCard::from_toml_str(&text).unwrap();
     let c = card();
 
-    assert!(channels_bit_identical(&a, &b), "file vs string grids differ");
+    assert!(
+        channels_bit_identical(&a, &b),
+        "file vs string grids differ"
+    );
     assert!(channels_bit_identical(&a, &c), "two file loads differ");
     let axis_bits = |v: &[f64]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
     assert_eq!(axis_bits(&a.mach), axis_bits(&b.mach));
@@ -323,11 +389,31 @@ fn or_card_load_and_interpolation_are_bitwise_deterministic() {
 
     for &(mach, alpha, ..) in OR_SAMPLES {
         let first = a.interpolate(AeroChannel::Cd0, mach, alpha).unwrap();
-        assert_eq!(first.to_bits(), b.interpolate(AeroChannel::Cd0, mach, alpha).unwrap().to_bits());
-        assert_eq!(first.to_bits(), c.interpolate(AeroChannel::Cd0, mach, alpha).unwrap().to_bits());
-        assert_eq!(first.to_bits(), a.interpolate(AeroChannel::Cd0, mach, alpha).unwrap().to_bits());
+        assert_eq!(
+            first.to_bits(),
+            b.interpolate(AeroChannel::Cd0, mach, alpha)
+                .unwrap()
+                .to_bits()
+        );
+        assert_eq!(
+            first.to_bits(),
+            c.interpolate(AeroChannel::Cd0, mach, alpha)
+                .unwrap()
+                .to_bits()
+        );
+        assert_eq!(
+            first.to_bits(),
+            a.interpolate(AeroChannel::Cd0, mach, alpha)
+                .unwrap()
+                .to_bits()
+        );
         let first_cm = a.interpolate(AeroChannel::CmPitch, mach, alpha).unwrap();
-        assert_eq!(first_cm.to_bits(), b.interpolate(AeroChannel::CmPitch, mach, alpha).unwrap().to_bits());
+        assert_eq!(
+            first_cm.to_bits(),
+            b.interpolate(AeroChannel::CmPitch, mach, alpha)
+                .unwrap()
+                .to_bits()
+        );
     }
 }
 
@@ -341,9 +427,7 @@ fn card_path_episodes_are_deterministic() {
     let b = Simulator::new(cfg).unwrap().run_episode(0).unwrap();
     assert_eq!(a.features, b.features);
     assert_eq!(a.apogee_m.to_bits(), b.apogee_m.to_bits());
-    let frames = |e: &potok_sim::Episode| {
-        e.frames.iter().map(|f| f.to_bytes()).collect::<Vec<_>>()
-    };
+    let frames = |e: &potok_sim::Episode| e.frames.iter().map(|f| f.to_bytes()).collect::<Vec<_>>();
     assert_eq!(frames(&a), frames(&b));
 }
 
@@ -390,7 +474,11 @@ fn card_coefficients_are_card_values_not_placeholder_formulas() {
     // The episode cd0 shift applies on top of the CARD value, not the
     // placeholder baseline table.
     let shifted = card.coeffs(0.5, 5.0, card.baseline_cd0 + 0.10).unwrap();
-    assert!((shifted.cd0 - 0.87).abs() <= NODE_READ_TOL, "shifted cd0 {}", shifted.cd0);
+    assert!(
+        (shifted.cd0 - 0.87).abs() <= NODE_READ_TOL,
+        "shifted cd0 {}",
+        shifted.cd0
+    );
     assert_eq!(shifted.cna.to_bits(), c.cna.to_bits());
     assert_eq!(shifted.pitch_damping.to_bits(), c.pitch_damping.to_bits());
     assert_eq!(shifted.cm_delta.to_bits(), c.cm_delta.to_bits());
@@ -400,22 +488,44 @@ fn card_coefficients_are_card_values_not_placeholder_formulas() {
 fn extracted_card_cannot_be_silently_replaced_by_the_placeholder_card() {
     let or = card();
     let ph = AeroCard::from_file(&card_path(PLACEHOLDER_CARD)).unwrap();
-    assert_ne!(or.mach.len(), ph.mach.len(), "the two cards share a Mach axis");
-    assert_ne!(or.alpha_deg.len(), ph.alpha_deg.len(), "the two cards share an alpha axis");
+    assert_ne!(
+        or.mach.len(),
+        ph.mach.len(),
+        "the two cards share a Mach axis"
+    );
+    assert_ne!(
+        or.alpha_deg.len(),
+        ph.alpha_deg.len(),
+        "the two cards share an alpha axis"
+    );
 
     // Real OR data: nan gaps and a measured Cm channel. The placeholder card
     // has neither, and does carry the three control derivatives the OR flight
     // data never measured.
     let nan_count = |c: &AeroCard, ch: AeroChannel| {
-        c.channel(ch).iter().flatten().filter(|v| v.is_nan()).count()
+        c.channel(ch)
+            .iter()
+            .flatten()
+            .filter(|v| v.is_nan())
+            .count()
     };
     assert!(nan_count(&or, AeroChannel::Cd0) > 0, "OR card has no gaps");
     assert_eq!(nan_count(&ph, AeroChannel::Cd0), 0);
     assert!(!or.channel(AeroChannel::CmPitch).is_empty());
     assert!(ph.channel(AeroChannel::CmPitch).is_empty());
-    for ch in [AeroChannel::Cna, AeroChannel::PitchDamping, AeroChannel::CmDelta] {
-        assert!(or.channel(ch).is_empty(), "{ch:?} is not in the OR flight data");
-        assert!(!ph.channel(ch).is_empty(), "{ch:?} missing from placeholder card");
+    for ch in [
+        AeroChannel::Cna,
+        AeroChannel::PitchDamping,
+        AeroChannel::CmDelta,
+    ] {
+        assert!(
+            or.channel(ch).is_empty(),
+            "{ch:?} is not in the OR flight data"
+        );
+        assert!(
+            !ph.channel(ch).is_empty(),
+            "{ch:?} missing from placeholder card"
+        );
     }
 
     let (mach, alpha, _, or_cd, _, _) = OR_SAMPLES[1];
