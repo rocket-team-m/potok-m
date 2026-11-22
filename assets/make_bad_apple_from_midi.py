@@ -1,9 +1,9 @@
-"""Render the downloaded Bad Apple MIDI as a piezo-buzzer demo (full length).
+"""Render the downloaded Bad Apple MIDI as a monophonic piezo-buzzer demo.
 
 Source MIDI: github.com/Handhule90/badapple-midi, community transcription,
-original composition ZUN / Touhou Project. Two melodic tracks are rendered:
-Synth1 and Vocals. Drums/bass/percussion are intentionally omitted because
-stacking all 13 tracks on one buzzers produced an unreadable result.
+original composition ZUN / Touhou Project. Only the Synth1 melody track is
+used; overlapping tracks and retriggered notes caused the previous versions
+to stack notes on top of each other.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ import numpy as np
 RATE = 48_000
 START_SECONDS = 27.0
 MAX_SECONDS = 218.0 - START_SECONDS
-TRACKS = ("Synth1", "Vocals")
+TRACK_NAME = "Synth1"
 MIDI = Path(__file__).with_name("BadApple.mid")
 OUT = Path(__file__).with_name("badapple_buzzer.wav")
 
@@ -34,50 +34,59 @@ def events(path: Path) -> list[tuple[float, int, bool]]:
         for message in track:
             if message.type == "set_tempo":
                 tempo = message.tempo
-
     result: list[tuple[float, int, bool]] = []
     for track in mid.tracks:
-        if not any(name in track.name for name in TRACKS):
+        if TRACK_NAME not in track.name:
             continue
         tick = 0
         for message in track:
             tick += message.time
             if message.type in ("note_on", "note_off"):
                 seconds = tick * tempo / ppq / 1_000_000.0
-                is_on = message.type == "note_on" and message.velocity > 0
-                result.append((seconds, message.note, is_on))
+                result.append((seconds, message.note, message.type == "note_on" and message.velocity > 0))
     return sorted(result)
 
 
 def render() -> np.ndarray:
     out = np.zeros(int(MAX_SECONDS * RATE), dtype=np.float32)
-    active: dict[int, tuple[float, float]] = {}
+    active: dict[int, float] = {}
+    max_poly = 0
+
+    def emit(start: float, end: float, note: int) -> None:
+        duration = end - start
+        if duration <= 0.0 or start >= MAX_SECONDS:
+            return
+        index = int(start * RATE)
+        count = min(int(duration * RATE), len(out) - index)
+        if count <= 0:
+            return
+        t = np.arange(count, dtype=np.float32) / RATE
+        phase = np.mod(t * note_freq(note), 1.0)
+        wave_form = np.where(phase < 0.28, 1.0, -1.0)
+        env = np.minimum(1.0, t * 90.0) * np.minimum(1.0, (duration - t) * 90.0)
+        out[index : index + count] += (0.34 * env * wave_form).astype(np.float32)
 
     for raw_time, note, is_on in events(MIDI):
         time = raw_time - START_SECONDS
-        if time < 0.0:
-            continue
         if time >= MAX_SECONDS:
             break
-        index = int(time * RATE)
         if is_on:
-            active[note] = (time, note_freq(note))
-            continue
-        if note not in active:
-            continue
-        start, freq = active.pop(note)
-        count = int((time - start) * RATE)
-        if count <= 0 or index >= len(out):
-            continue
-        t = np.arange(count, dtype=np.float32) / RATE
-        phase = np.mod(t * freq, 1.0)
-        wave_form = np.where(phase < 0.28, 1.0, -1.0)
-        env = np.minimum(1.0, t * 90.0) * np.minimum(1.0, (time - start - t) * 90.0)
-        end = min(index + count, len(out))
-        out[index:end] += (0.22 * env * wave_form[: end - index]).astype(np.float32)
+            # Force monophony: close every previous note before opening a new one.
+            for old_note, start in list(active.items()):
+                emit(start, time, old_note)
+                active.pop(old_note)
+            if time >= 0.0:
+                active[note] = max(time, 0.0)
+            max_poly = max(max_poly, len(active))
+        elif note in active:
+            start = active.pop(note)
+            emit(start, time, note)
 
-    audio = 0.85 * out[: int(MAX_SECONDS * RATE)]
-    return np.clip(audio, -1.0, 1.0)
+    for note, start in active.items():
+        emit(start, MAX_SECONDS, note)
+
+    print(f"notes from {TRACK_NAME}, max polyphony {max_poly}")
+    return np.clip(0.85 * out, -1.0, 1.0)
 
 
 def main() -> None:
