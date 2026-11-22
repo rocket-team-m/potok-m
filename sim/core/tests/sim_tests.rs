@@ -363,6 +363,7 @@ fn canonical_golden_request_is_byte_identical() {
         gust: false,
         shear: false,
         saturated: false,
+        spike: false,
         pitot_valid: true,
         physics: [0.0; 6],
     };

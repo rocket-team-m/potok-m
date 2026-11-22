@@ -6,7 +6,7 @@
 use crate::{
     atmosphere::Air,
     dynamics::{State, Vehicle},
-    math::{lerp_table, mat_t_vec, norm, quat_to_matrix, scale, sub},
+    math::{mat_t_vec, norm, quat_to_matrix, scale, sub},
 };
 
 /// Order is load-bearing: the last six entries of `sensor::FEATURE_NAMES`
@@ -59,6 +59,7 @@ impl PhysicsFeatures {
         let mass = s.mass().max(v.dry_mass);
         let area = v.aero.area_m2;
         let az = speed.max(1.0);
+        let cna = v.effective_cna();
 
         // SPEC_SMART.md writes atan2(w_body_z, v_body_x): w is the body Z
         // angular rate from the RK4 state. Kept literally; the classical
@@ -70,12 +71,11 @@ impl PhysicsFeatures {
         // Lateral specific force minus the base aero model's lateral estimate
         // (normal force + mach-table drag), in m/s^2.
         let normal = [
-            qdyn * area * v.aero.cna * (vb[0] / az),
-            qdyn * area * v.aero.cna * (vb[1] / az),
+            qdyn * area * cna * (vb[0] / az),
+            qdyn * area * cna * (vb[1] / az),
         ];
-        let cd_base = v.cd_table.first().map(|p| p.1).unwrap_or(v.aero.cd0);
         let mach = speed / air.speed_of_sound.max(1.0);
-        let cd = (v.aero.cd0 - cd_base) + lerp_table(&v.cd_table, mach);
+        let cd = v.effective_cd(mach);
         let vhat = if speed > 1e-6 {
             scale(vb, 1.0 / speed)
         } else {

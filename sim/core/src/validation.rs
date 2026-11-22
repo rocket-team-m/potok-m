@@ -4,7 +4,10 @@
 //!   header, then for each episode: `meta_count` metadata f32,
 //!   frames x features f32 (row-major), frames x 4 targets f32 (row-major).
 //! Version 1 stores the original 9 metadata; version 2 stores those 9 plus
-//! 6 conditioning numbers, a scenario id and the train/withheld split flag.
+//! 6 conditioning numbers, a scenario id and the train/withheld split flag
+//! (17 total). A v2 file may carry 22 extra truth floats (39 total) when
+//! written by `write_validation_with_truth`; `meta_count` in the header is
+//! the authority, so v1/v2 readers of either layout keep working.
 
 use std::{
     fs::File,
@@ -26,6 +29,10 @@ pub const VERSION: u32 = 2;
 pub const VERSION_V1: u32 = 1;
 pub const META_V1: usize = 9;
 pub const META_V2: usize = 17;
+/// 22 extra floats appended to v2 metadata: wind(3), gust start+amplitude(2),
+/// shear altitude/delta/thickness(3), 6-DoF state(14).
+pub const TRUTH_COUNT: usize = 22;
+pub const META_V2_TRUTH: usize = META_V2 + TRUTH_COUNT;
 pub const META_COUNT: usize = META_V2;
 pub const TARGET_COUNT: usize = 4; // g_roll, g_pitch, confidence, ai_healthy
 pub const FILE_NAME: &str = "validation.bin";
@@ -45,8 +52,8 @@ pub struct Header {
     pub frame_rate_hz: f32,
     pub dt: f32,
     pub duration_s: f32,
-    /// Metadata f32 per episode: 9 in v1, 17 in v2. Stored in reserved bytes
-    /// 48..52 of the header (zero for v1).
+    /// Metadata f32 per episode: 9 in v1, 17 in classic v2, 39 in a
+    /// truth-extended v2. Stored in bytes 48..52 of the header (zero for v1).
     pub meta_count: u32,
 }
 
@@ -82,7 +89,7 @@ impl Header {
             VERSION_V1 => META_V1 as u32,
             VERSION => {
                 let n = u32::from_le_bytes(b[48..52].try_into().unwrap());
-                if n as usize != META_V2 {
+                if n as usize != META_V2 && n as usize != META_V2_TRUTH {
                     return Err(SimError::InvalidValidation(format!(
                         "unsupported metadata count {n}"
                     )));
@@ -141,6 +148,61 @@ pub struct ValidationEpisode {
     pub split: Split,
     pub features: Array2<f32>,
     pub targets: Array2<f32>,
+    /// Present only in truth-extended v2 files. Ground truth at the last
+    /// 50 Hz tick of the episode.
+    pub truth: Option<TruthRecord>,
+}
+
+/// Ground truth appended to v2 metadata. `wind` is the true wind vector at
+/// the tick (m/s, world frame); `gust_start_s` is -1 when no gust was active;
+/// `pos/vel/quat/omega/mass_kg` are the un-noised RK4 state.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct TruthRecord {
+    pub wind: [f32; 3],
+    pub gust_start_s: f32,
+    pub gust_amplitude: f32,
+    pub shear_altitude_m: f32,
+    pub shear_delta: f32,
+    pub shear_thickness_m: f32,
+    pub pos: [f32; 3],
+    pub vel: [f32; 3],
+    pub quat: [f32; 4],
+    pub omega: [f32; 3],
+    pub mass_kg: f32,
+}
+
+impl TruthRecord {
+    pub fn as_array(self) -> [f32; TRUTH_COUNT] {
+        let mut a = [0.0; TRUTH_COUNT];
+        a[0..3].copy_from_slice(&self.wind);
+        a[3] = self.gust_start_s;
+        a[4] = self.gust_amplitude;
+        a[5] = self.shear_altitude_m;
+        a[6] = self.shear_delta;
+        a[7] = self.shear_thickness_m;
+        a[8..11].copy_from_slice(&self.pos);
+        a[11..14].copy_from_slice(&self.vel);
+        a[14..18].copy_from_slice(&self.quat);
+        a[18..21].copy_from_slice(&self.omega);
+        a[21] = self.mass_kg;
+        a
+    }
+
+    pub fn from_array(a: [f32; TRUTH_COUNT]) -> Self {
+        Self {
+            wind: [a[0], a[1], a[2]],
+            gust_start_s: a[3],
+            gust_amplitude: a[4],
+            shear_altitude_m: a[5],
+            shear_delta: a[6],
+            shear_thickness_m: a[7],
+            pos: [a[8], a[9], a[10]],
+            vel: [a[11], a[12], a[13]],
+            quat: [a[14], a[15], a[16], a[17]],
+            omega: [a[18], a[19], a[20]],
+            mass_kg: a[21],
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -164,10 +226,11 @@ fn meta_of(e: &Episode) -> [f32; META_V1] {
     ]
 }
 
-/// Writes the current format (version 2). Use `write_validation_with_version`
-/// to emit a legacy version-1 file for compatibility tests.
+/// Writes the classic format (version 2, 17 metadata). Use
+/// `write_validation_with_version` for a legacy v1 file, or
+/// `write_validation_with_truth` for the truth-extended v2 layout.
 pub fn write_validation(path: &Path, cfg: &Config, episodes: &[Episode]) -> Result<()> {
-    write_validation_with_version(path, cfg, episodes, VERSION)
+    write_validation_impl(path, cfg, episodes, VERSION, cfg.output.truth_metadata)
 }
 
 pub fn write_validation_with_version(
@@ -176,10 +239,35 @@ pub fn write_validation_with_version(
     episodes: &[Episode],
     version: u32,
 ) -> Result<()> {
+    write_validation_impl(path, cfg, episodes, version, false)
+}
+
+/// Writes version 2 with 39 metadata floats per episode: the classic 17 plus
+/// the `TruthRecord` captured at the episode's last frame tick.
+pub fn write_validation_with_truth(
+    path: &Path,
+    cfg: &Config,
+    episodes: &[Episode],
+) -> Result<()> {
+    write_validation_impl(path, cfg, episodes, VERSION, true)
+}
+
+fn write_validation_impl(
+    path: &Path,
+    cfg: &Config,
+    episodes: &[Episode],
+    version: u32,
+    truth: bool,
+) -> Result<()> {
     if version != VERSION && version != VERSION_V1 {
         return Err(SimError::InvalidValidation(format!(
             "unsupported validation version {version}"
         )));
+    }
+    if truth && episodes.iter().any(|e| e.truth.is_none()) {
+        return Err(SimError::InvalidValidation(
+            "truth-extended v2 needs a TruthRecord on every episode".into(),
+        ));
     }
     let header = Header {
         seed: cfg.run.seed,
@@ -192,6 +280,8 @@ pub fn write_validation_with_version(
         duration_s: cfg.run.duration_s as f32,
         meta_count: if version == VERSION_V1 {
             META_V1 as u32
+        } else if truth {
+            META_V2_TRUTH as u32
         } else {
             META_V2 as u32
         },
@@ -206,6 +296,9 @@ pub fn write_validation_with_version(
             meta.extend_from_slice(&e.meta.conditioning.as_array());
             meta.push(e.meta.scenario_id as f32);
             meta.push(e.meta.split.as_u8() as f32);
+            if truth {
+                meta.extend_from_slice(&e.truth.unwrap().as_array());
+            }
         }
         for v in meta {
             w.write_all(&v.to_le_bytes())?;
@@ -283,6 +376,19 @@ pub fn read_validation(path: &Path) -> Result<ValidationSet> {
             };
             (c, 0, Split::Train)
         };
+        let truth = if vh.version == VERSION
+            && vh.header.meta_count as usize == META_V2_TRUTH
+        {
+            let mut a = [0f32; TRUTH_COUNT];
+            for v in a.iter_mut() {
+                let mut b = [0u8; 4];
+                r.read_exact(&mut b)?;
+                *v = f32::from_le_bytes(b);
+            }
+            Some(TruthRecord::from_array(a))
+        } else {
+            None
+        };
         let (nf, nc, nt) = (
             vh.header.frames_per_episode as usize,
             vh.header.feature_count as usize,
@@ -308,6 +414,7 @@ pub fn read_validation(path: &Path) -> Result<ValidationSet> {
             split,
             features,
             targets,
+            truth,
         });
     }
     Ok(ValidationSet {

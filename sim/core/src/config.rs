@@ -166,6 +166,45 @@ pub struct SensorConfig {
     /// Measured-instrument tolerance for accelerometer noise, m/s^2.
     #[serde(default = "default_accel_noise_range")]
     pub accel_noise_range: Range,
+
+    // --- Allan-variance instrument model ---------------------------------
+    // All default to 0 (off), which keeps the legacy white-noise/bias model
+    // and its RNG draw order untouched. A positive ARW replaces the discrete
+    // noise std with `arw / sqrt(dt)`; a positive bias stability adds a seeded
+    // random walk to the constant bias.
+    /// Gyro angle random walk, rad/s/sqrt(Hz) (rad/s at 1 s integration).
+    #[serde(default)]
+    pub gyro_arw: f64,
+    /// Gyro bias stability, rad/s.
+    #[serde(default)]
+    pub gyro_bias_stability: f64,
+    /// Accelerometer velocity random walk, m/s^2/sqrt(Hz).
+    #[serde(default)]
+    pub accel_arw: f64,
+    /// Accelerometer bias stability, m/s^2.
+    #[serde(default)]
+    pub accel_bias_stability: f64,
+
+    // --- Non-ideal instrument effects ------------------------------------
+    /// Whole-frame measurement delay applied to gyro/accel/baro/pitot.
+    #[serde(default)]
+    pub latency_steps: usize,
+    /// Per-channel quantization; 0 means "use `quant_step`".
+    #[serde(default)]
+    pub gyro_quant_step: f64,
+    #[serde(default)]
+    pub accel_quant_step: f64,
+    /// Additional saturation limits; 0 means "no limit".
+    #[serde(default)]
+    pub mag_sat: f64,
+    #[serde(default)]
+    pub baro_sat: f64,
+    /// Per-frame probability of injecting a measurement spike (0 = off).
+    #[serde(default)]
+    pub spike_probability: f64,
+    /// Spike magnitude added to one gyro/accel axis.
+    #[serde(default)]
+    pub spike_amplitude: f64,
 }
 
 fn default_gyro_noise_range() -> Range {
@@ -176,9 +215,33 @@ fn default_accel_noise_range() -> Range {
     Range(0.008, 0.014)
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AeroSource {
+    /// Legacy analytic coefficients (default). Prints a COUNTED marker.
+    Placeholder,
+    /// Bilinear interpolation of a 2-D (Mach, alpha) TOML coefficient card.
+    Card,
+}
+
+impl Default for AeroSource {
+    fn default() -> Self {
+        Self::Placeholder
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AeroConfig {
     pub area_m2: f64,
+    /// Coefficient source; `placeholder` is the default and keeps old configs
+    /// byte-identical.
+    #[serde(default)]
+    pub source: AeroSource,
+    /// Card path when `source = "card"`; resolved relative to CWD, then to
+    /// the workspace `config/` directory (same rule as `boundary_profile`).
+    #[serde(default)]
+    pub card_path: Option<PathBuf>,
+
     pub cd0: f64,
     /// Manufacturing tolerance on cd0; sampled per episode.
     #[serde(default = "default_cd0_range")]
@@ -279,6 +342,10 @@ pub struct OutputConfig {
     pub mode: OutputMode,
     /// Training features exported to the validation file.
     pub features: Vec<String>,
+    /// Write the truth-extended v2 metadata (39 floats per episode instead
+    /// of 17). Off by default: classic v2 and v1 files stay the default.
+    #[serde(default)]
+    pub truth_metadata: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -382,6 +449,32 @@ impl Config {
                 "aero tables need at least two knots".into(),
             ));
         }
+        if self.aero.source == AeroSource::Card && self.aero.card_path.is_none() {
+            return Err(SimError::Config(
+                "aero.source = \"card\" needs aero.card_path".into(),
+            ));
+        }
+        let s = &self.sensor;
+        check("sensor.gyro_arw", s.gyro_arw, 0.0, 100.0)?;
+        check("sensor.gyro_bias_stability", s.gyro_bias_stability, 0.0, 100.0)?;
+        check("sensor.accel_arw", s.accel_arw, 0.0, 1000.0)?;
+        check(
+            "sensor.accel_bias_stability",
+            s.accel_bias_stability,
+            0.0,
+            1000.0,
+        )?;
+        check("sensor.gyro_quant_step", s.gyro_quant_step, 0.0, 1.0)?;
+        check("sensor.accel_quant_step", s.accel_quant_step, 0.0, 100.0)?;
+        check("sensor.mag_sat", s.mag_sat, 0.0, 1e6)?;
+        check("sensor.baro_sat", s.baro_sat, 0.0, 1e9)?;
+        check(
+            "sensor.spike_probability",
+            s.spike_probability,
+            0.0,
+            1.0,
+        )?;
+        check("sensor.spike_amplitude", s.spike_amplitude, 0.0, 1e6)?;
         Ok(())
     }
 

@@ -14,4 +14,13 @@ pub enum SimError {
     NonFinite { step: usize, what: &'static str },
     #[error("invalid validation file: {0}")]
     InvalidValidation(String),
+    #[error("aero card error: {0}")]
+    AeroCard(String),
+    #[error("aero card out of grid: {axis}={value} outside [{lo}, {hi}]")]
+    AeroOutOfGrid {
+        axis: String,
+        value: f64,
+        lo: f64,
+        hi: f64,
+    },
 }

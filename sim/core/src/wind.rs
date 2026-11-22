@@ -144,6 +144,15 @@ impl Wind {
         self.cfg.shear_delta
     }
 
+    /// Effective shear-layer altitude/thickness for this scenario, m.
+    pub fn shear_altitude(&self) -> f64 {
+        self.cfg.shear_altitude
+    }
+
+    pub fn shear_thickness(&self) -> f64 {
+        self.cfg.shear_thickness
+    }
+
     pub fn v_ref(&self) -> f64 {
         self.v_ref
     }

@@ -6,6 +6,8 @@
 //! `f_b = R(q)^T (a_world - g_world) + b_a + v`, so gravity leaks between body
 //! axes when the vehicle tilts. All noise uses a per-episode seeded `StdRng`.
 
+use std::collections::VecDeque;
+
 use potok_protocol as proto;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 
@@ -47,6 +49,9 @@ pub struct Frame {
     pub gust: bool,
     pub shear: bool,
     pub saturated: bool,
+    /// True when a seeded spike was injected into this frame; also sets the
+    /// canonical FAULT bit so the AI interlock rejects the sample.
+    pub spike: bool,
     pub pitot_valid: bool,
     /// Six physics features from the RK4 state; no wire representation.
     pub physics: [f32; 6],
@@ -118,6 +123,7 @@ impl Frame {
             gust: false,
             shear: false,
             saturated: proto::flag_has(wire.flags, FLAG_FAULT),
+            spike: false,
             pitot_valid: proto::flag_has(wire.flags, FLAG_PITOT_OK),
             physics: [0.0; 6],
         };
@@ -165,9 +171,21 @@ pub fn wire_flags(phase: Phase, sensor_ok: bool, pitot_valid: bool, saturated: b
     flags
 }
 
+/// One frame's worth of delayed measurements.
+#[derive(Debug, Clone, Copy)]
+struct Delayed {
+    gyro: Vec3,
+    accel: Vec3,
+    mag: Vec3,
+    baro: f64,
+    pitot: f64,
+    spike: bool,
+}
+
 pub struct Sensor {
     cfg: SensorConfig,
     dt: f64,
+    sqrt_dt: f64,
     gyro_lag: Vec3,
     accel_lag: Vec3,
     baro_lag: f64,
@@ -177,6 +195,15 @@ pub struct Sensor {
     mag_bias: Vec3,
     mag_world: Vec3,
     rng: StdRng,
+    /// Allan bias random walks. Only advanced when the corresponding
+    /// stability knob is positive, so legacy RNG draw order is unchanged.
+    gyro_rw_bias: Vec3,
+    accel_rw_bias: Vec3,
+    allan_gyro: bool,
+    allan_accel: bool,
+    /// Frame-delay line. Capacity 0 returns the current measurement.
+    latency: usize,
+    delayed: VecDeque<Delayed>,
 }
 
 impl Sensor {
@@ -201,9 +228,16 @@ impl Sensor {
         sensor_cfg.gyro_noise = domain.gyro_noise;
         sensor_cfg.accel_noise = domain.accel_noise;
         sensor_cfg.lag_tau *= lag_scale;
+        let allan_gyro =
+            sensor_cfg.gyro_arw > 0.0 || sensor_cfg.gyro_bias_stability > 0.0;
+        let allan_accel =
+            sensor_cfg.accel_arw > 0.0 || sensor_cfg.accel_bias_stability > 0.0;
+        let latency = sensor_cfg.latency_steps.min(1024);
+        let dt = cfg.run.dt;
         Self {
             cfg: sensor_cfg,
-            dt: cfg.run.dt,
+            dt,
+            sqrt_dt: dt.sqrt(),
             gyro_lag: [0.0; 3],
             accel_lag: [0.0; 3],
             baro_lag: 0.0,
@@ -213,6 +247,12 @@ impl Sensor {
             mag_bias,
             mag_world,
             rng,
+            gyro_rw_bias: [0.0; 3],
+            accel_rw_bias: [0.0; 3],
+            allan_gyro,
+            allan_accel,
+            latency,
+            delayed: VecDeque::with_capacity(latency + 1),
         }
     }
 
@@ -239,33 +279,57 @@ impl Sensor {
         let pitot_true = 0.5 * air.density * norm(v_rel) * norm(v_rel);
 
         let a = (-self.dt / self.cfg.lag_tau.max(1e-6)).exp();
+        let gq = if self.cfg.gyro_quant_step > 0.0 {
+            self.cfg.gyro_quant_step
+        } else {
+            self.cfg.quant_step
+        };
+        let aq = if self.cfg.accel_quant_step > 0.0 {
+            self.cfg.accel_quant_step
+        } else {
+            self.cfg.quant_step
+        };
         let mut gyro = [0.0; 3];
         let mut acc = [0.0; 3];
         let mut mag = [0.0; 3];
-        let mut saturated = false;
         for i in 0..3 {
-            let g_raw = s.omega()[i]
-                + self.cfg.gyro_bias[i] * self.bias_scale[i]
-                + self.gauss() * self.cfg.gyro_noise * self.noise_scale[0];
-            let a_raw = spec_body[i]
-                + self.cfg.accel_bias[i] * self.bias_scale[i + 1]
-                + self.gauss() * self.cfg.accel_noise * self.noise_scale[1];
+            // Allan bias stability is a seeded random walk on top of the
+            // legacy constant bias. The legacy branch draws exactly two
+            // gaussians per axis, in the original order.
+            let g_bias = if self.allan_gyro {
+                let dw = self.gauss();
+                self.gyro_rw_bias[i] += self.cfg.gyro_bias_stability * self.sqrt_dt * dw;
+                self.cfg.gyro_bias[i] * self.bias_scale[i] + self.gyro_rw_bias[i]
+            } else {
+                self.cfg.gyro_bias[i] * self.bias_scale[i]
+            };
+            let g_std = if self.allan_gyro {
+                self.cfg.gyro_arw / self.sqrt_dt
+            } else {
+                self.cfg.gyro_noise * self.noise_scale[0]
+            };
+            let g_raw = s.omega()[i] + g_bias + self.gauss() * g_std;
+            let a_bias = if self.allan_accel {
+                let dw = self.gauss();
+                self.accel_rw_bias[i] += self.cfg.accel_bias_stability * self.sqrt_dt * dw;
+                self.cfg.accel_bias[i] * self.bias_scale[i + 1] + self.accel_rw_bias[i]
+            } else {
+                self.cfg.accel_bias[i] * self.bias_scale[i + 1]
+            };
+            let a_std = if self.allan_accel {
+                self.cfg.accel_arw / self.sqrt_dt
+            } else {
+                self.cfg.accel_noise * self.noise_scale[1]
+            };
+            let a_raw = spec_body[i] + a_bias + self.gauss() * a_std;
             self.gyro_lag[i] = a * self.gyro_lag[i] + (1.0 - a) * g_raw;
             self.accel_lag[i] = a * self.accel_lag[i] + (1.0 - a) * a_raw;
-            gyro[i] = quant(self.gyro_lag[i], self.cfg.quant_step);
-            acc[i] = quant(self.accel_lag[i], self.cfg.quant_step);
+            gyro[i] = quant(self.gyro_lag[i], gq);
+            acc[i] = quant(self.accel_lag[i], aq);
             mag[i] = quant(
                 mag_body[i] + self.mag_bias[i] + self.gauss() * self.cfg.mag_noise,
                 self.cfg.quant_step,
             );
-            if gyro[i].abs() > self.cfg.gyro_sat {
-                gyro[i] = clamp(gyro[i], -self.cfg.gyro_sat, self.cfg.gyro_sat);
-                saturated = true;
-            }
-            if acc[i].abs() > self.cfg.accel_sat {
-                acc[i] = clamp(acc[i], -self.cfg.accel_sat, self.cfg.accel_sat);
-                saturated = true;
-            }
         }
         let baro_raw = s.pos()[2]
             + self.cfg.baro_bias * self.bias_scale[2]
@@ -277,18 +341,75 @@ impl Sensor {
             + self.gauss() * self.cfg.pitot_noise * self.noise_scale[3];
         self.pitot_lag = a * self.pitot_lag + (1.0 - a) * pitot_raw;
         let pitot = quant(self.pitot_lag, self.cfg.quant_step);
-        if pitot.abs() > self.cfg.pitot_sat || pitot > i16::MAX as f64 || pitot < i16::MIN as f64 {
+
+        // Whole-frame latency: capacity 0 returns this frame's samples, so
+        // the legacy path is untouched.
+        self.delayed.push_back(Delayed {
+            gyro,
+            accel: acc,
+            mag,
+            baro,
+            pitot,
+            spike: false,
+        });
+        let mut out = if self.delayed.len() > self.latency {
+            self.delayed.pop_front().unwrap()
+        } else {
+            *self.delayed.front().unwrap()
+        };
+
+        // Seeded fault injection. All draws happen only when enabled.
+        if self.cfg.spike_probability > 0.0
+            && self.rng.gen::<f64>() < self.cfg.spike_probability
+        {
+            let axis = self.rng.gen_range(0..3);
+            let sign = if self.rng.gen::<bool>() { 1.0 } else { -1.0 };
+            out.gyro[axis] += sign * self.cfg.spike_amplitude;
+            out.spike = true;
+        }
+
+        let mut saturated = false;
+        for i in 0..3 {
+            if out.gyro[i].abs() > self.cfg.gyro_sat {
+                out.gyro[i] = clamp(out.gyro[i], -self.cfg.gyro_sat, self.cfg.gyro_sat);
+                saturated = true;
+            }
+            if out.accel[i].abs() > self.cfg.accel_sat {
+                out.accel[i] = clamp(out.accel[i], -self.cfg.accel_sat, self.cfg.accel_sat);
+                saturated = true;
+            }
+            if self.cfg.mag_sat > 0.0 && out.mag[i].abs() > self.cfg.mag_sat {
+                out.mag[i] = clamp(out.mag[i], -self.cfg.mag_sat, self.cfg.mag_sat);
+                saturated = true;
+            }
+        }
+        if self.cfg.baro_sat > 0.0 && out.baro.abs() > self.cfg.baro_sat {
+            out.baro = clamp(out.baro, -self.cfg.baro_sat, self.cfg.baro_sat);
+            saturated = true;
+        }
+        let pitot = out.pitot;
+        if pitot.abs() > self.cfg.pitot_sat
+            || pitot > i16::MAX as f64
+            || pitot < i16::MIN as f64
+        {
             saturated = true;
         }
         let pitot_dp = clamp(pitot, i16::MIN as f64, i16::MAX as f64).round() as i16;
         let pitot_valid = norm(v_rel) > 3.0 && pitot_dp > 0;
+        if out.spike {
+            saturated = true;
+        }
+        let gyro = out.gyro;
+        let acc = out.accel;
+        let mag = out.mag;
+        let baro = out.baro;
         let sensor_ok = gyro
             .iter()
             .chain(acc.iter())
             .chain(mag.iter())
             .chain([&baro])
             .all(|x| x.is_finite());
-        let flags = wire_flags(phase, sensor_ok, pitot_valid, saturated);
+        let flags = wire_flags(phase, sensor_ok && !out.spike, pitot_valid, saturated);
         let mut f = Frame {
             seq,
             time_us: (t * 1_000_000.0).round() as u32,
@@ -303,6 +424,7 @@ impl Sensor {
             gust,
             shear,
             saturated,
+            spike: out.spike,
             pitot_valid,
             physics: [0.0; 6],
         };

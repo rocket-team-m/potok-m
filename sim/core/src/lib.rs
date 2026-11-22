@@ -3,6 +3,7 @@
 //! All stochastic inputs derive from `config.run.seed` and the episode index.
 //! There is no global RNG, no wall-clock dependence, and no host/GPU coupling.
 
+pub mod aero;
 pub mod atmosphere;
 pub mod config;
 pub mod dynamics;
@@ -16,8 +17,9 @@ pub mod sensor;
 pub mod validation;
 pub mod wind;
 
+pub use aero::{AeroCard, AeroChannel, AeroCoeffs};
 pub use atmosphere::Atmosphere;
-pub use config::{Conditioning, Config, DomainParams, OutputMode};
+pub use config::{AeroSource, Conditioning, Config, DomainParams, OutputMode};
 pub use dynamics::{Phase, State, Vehicle};
 pub use episode::{Episode, EpisodeMeta, Episodes, Simulator};
 pub use error::{Result, SimError};
@@ -25,4 +27,5 @@ pub use optimizer::{ReferenceOptimizer, Target};
 pub use physics::{PhysicsFeatures, PHYSICS_FEATURES};
 pub use scenario::{is_held_out, scenario, Scenario, Split, SCENARIO_COUNT};
 pub use sensor::{FlagSet, Frame, Sensor};
+pub use validation::{TruthRecord, META_V2_TRUTH, TRUTH_COUNT};
 pub use wind::Wind;

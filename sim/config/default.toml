@@ -60,9 +60,36 @@ gyro_sat = 12.0
 accel_sat = 250.0
 pitot_sat = 30000.0
 
+# Allan-variance instrument model. 0 (the default) keeps the legacy
+# white-noise + constant-bias model and its RNG draw order unchanged. ARW is
+# a density (rad/s/sqrt(Hz), m/s^2/sqrt(Hz)); the discrete std is arw/sqrt(dt).
+# Bias stability drives a seeded random walk on top of the constant bias.
+gyro_arw = 0.0
+gyro_bias_stability = 0.0
+accel_arw = 0.0
+accel_bias_stability = 0.0
+# Other non-ideal effects; all 0/off by default for legacy behaviour.
+# Whole-frame measurement delay (frames) on gyro/accel/mag/baro/pitot.
+latency_steps = 0
+# Per-channel quantization; 0 means "use quant_step above".
+gyro_quant_step = 0.0
+accel_quant_step = 0.0
+# Extra saturation limits; 0 means "no limit".
+mag_sat = 0.0
+baro_sat = 0.0
+# Per-frame seeded spike injection (probability, magnitude).
+spike_probability = 0.0
+spike_amplitude = 0.0
+
 [aero]
 # User-stated TTX: diameter 0.102 m -> A = pi*(0.102/2)^2 = 0.00817 m^2.
 area_m2 = 0.00817
+# "placeholder" (default) uses the analytic coefficients below and prints a
+# COUNTED marker. "card" loads the 2-D (Mach, alpha) grid named by card_path;
+# out-of-grid queries are a LOUD error. config/aero_card.toml is generated
+# from these placeholder values and reproduces them when selected.
+source = "placeholder"
+# card_path = "config/aero_card.toml"
 # PLACEHOLDER aero coefficients (NOT from the real Potok-M aero model):
 # cd0, cna, pitch_damping, roll_damping and the cd_mach table are estimates.
 # Their uncertainty is unquantified; a real OpenRocket/Ansys card would replace
@@ -101,3 +128,6 @@ thrust_profile = [
 mode = "both"
 # Feature vector consumed by the AI model (window 50 x 8).
 features = ["gyro_x", "gyro_y", "gyro_z", "acc_x", "acc_y", "acc_z", "baro_h", "pitot_q"]
+# false writes classic v2 (17 metadata floats). true appends 22 truth floats
+# (true wind, gust, shear and the full 6-DoF state) as v2 metadata (39 total).
+truth_metadata = false

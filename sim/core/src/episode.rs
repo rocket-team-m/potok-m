@@ -6,15 +6,17 @@ use rand::{rngs::StdRng, Rng, SeedableRng};
 use rayon::prelude::*;
 
 use crate::{
+    aero::{count_placeholder, AeroCard},
     atmosphere::Atmosphere,
-    config::{sample_domain, Conditioning, Config, Range},
+    config::{sample_domain, AeroSource, Conditioning, Config, Range},
     dynamics::{phase_at, rk4, State, Vehicle},
     error::{Result, SimError},
-    math::episode_seed,
+    math::{episode_seed, mat_t_vec, norm, quat_to_matrix, sub},
     optimizer::{ReferenceOptimizer, Target},
     physics::PhysicsFeatures,
     scenario::{scenario, Split},
     sensor::{feature, Frame, Sensor, FEATURE_NAMES},
+    validation::TruthRecord,
     wind::Wind,
 };
 
@@ -53,6 +55,9 @@ pub struct Episode {
     /// Truth telemetry from the integrated state (not the noisy baro frame).
     pub apogee_m: f64,
     pub max_speed_mps: f64,
+    /// Ground truth at the last 50 Hz tick: true wind, gust, shear layer and
+    /// the full 6-DoF state. Written to truth-extended v2 metadata.
+    pub truth: Option<TruthRecord>,
 }
 
 impl Episode {
@@ -68,6 +73,7 @@ impl Episode {
 pub struct Simulator {
     cfg: Config,
     atm: Atmosphere,
+    card: Option<AeroCard>,
 }
 
 impl Simulator {
@@ -77,10 +83,25 @@ impl Simulator {
                 return Err(SimError::Config(format!("unknown output feature {f:?}")));
             }
         }
-        let profile = resolve_profile(&cfg.sim.boundary_profile);
+        let profile = resolve_config_path(&cfg.sim.boundary_profile);
         let atm =
             Atmosphere::load_with_fast(&profile, cfg.sim.altitude_grid_m, cfg.run.fast_field)?;
-        Ok(Self { cfg, atm })
+        let card = match cfg.aero.source {
+            AeroSource::Placeholder => {
+                let n = count_placeholder();
+                eprintln!(
+                    "[potok-sim] aero=placeholder count={n} (COUNTED: set [aero] source=\"card\" to use a coefficient card)"
+                );
+                None
+            }
+            AeroSource::Card => {
+                let path = cfg.aero.card_path.as_ref().ok_or_else(|| {
+                    SimError::Config("aero.source=card needs aero.card_path".into())
+                })?;
+                Some(AeroCard::from_file(&resolve_config_path(path))?)
+            }
+        };
+        Ok(Self { cfg, atm, card })
     }
 
     pub fn config(&self) -> &Config {
@@ -113,6 +134,9 @@ impl Simulator {
         let mut vehicle = Vehicle::from_config(cfg, mass, thrust_scale, gimbal_deg);
         vehicle.aero.cd0 = domain.cd0;
         vehicle.aero.static_margin_m = domain.static_margin_cal * diameter + cg_offset;
+        if let Some(card) = &self.card {
+            vehicle.aero_card = Some(card.clone());
+        }
         let thrust_peak_n = cfg
             .aero
             .thrust_profile
@@ -145,6 +169,7 @@ impl Simulator {
         let mut nan_frames = 0;
         let mut apogee_m: f64 = 0.0;
         let mut max_speed_mps: f64 = 0.0;
+        let mut truth: Option<TruthRecord> = None;
         let gust_info = wind.gust_info();
 
         for step in 0..steps {
@@ -153,7 +178,42 @@ impl Simulator {
             let w = wind.at(step, state.pos()[2], air.wind_factor);
             let phase = phase_at(t, &state, &vehicle);
 
+            // Tick coefficients for the exported physics features. The
+            // integrator queries the card at each RK4 sub-stage; both queries
+            // are fallible, so out-of-grid is LOUD, never clamped.
+            if vehicle.aero_card.is_some() {
+                let v_rel = sub(state.vel(), w);
+                let mach = norm(v_rel) / air.speed_of_sound.max(1.0);
+                let vb = mat_t_vec(quat_to_matrix(state.quat()), v_rel);
+                let alpha_deg = state.omega()[2].atan2(vb[0]).to_degrees();
+                let coeffs = vehicle
+                    .aero_card
+                    .as_ref()
+                    .unwrap()
+                    .coeffs(mach, alpha_deg, vehicle.aero.cd0)?;
+                vehicle.card_coeffs = coeffs;
+            }
+
             if step % spf == 0 {
+                truth = Some(TruthRecord {
+                    wind: [w[0] as f32, w[1] as f32, w[2] as f32],
+                    gust_start_s: gust_info.map(|g| g.0).unwrap_or(-1.0) as f32,
+                    gust_amplitude: gust_info.map(|g| g.2).unwrap_or(0.0) as f32,
+                    shear_altitude_m: wind.shear_altitude() as f32,
+                    shear_delta: wind.shear_delta() as f32,
+                    shear_thickness_m: wind.shear_thickness() as f32,
+                    pos: cast3(state.pos()),
+                    vel: cast3(state.vel()),
+                    quat: [
+                        state.quat()[0] as f32,
+                        state.quat()[1] as f32,
+                        state.quat()[2] as f32,
+                        state.quat()[3] as f32,
+                    ],
+                    omega: cast3(state.omega()),
+                    mass_kg: state.mass() as f32,
+                });
+
                 frames_generated += 1;
                 if cfg.sim.sensors {
                     let mut frame = sensor.measure(
@@ -195,6 +255,14 @@ impl Simulator {
             }
 
             state = rk4(t, &state, cfg.run.dt, w, &self.atm, &vehicle);
+            if let Some(f) = vehicle.card_fault.take() {
+                return Err(SimError::AeroOutOfGrid {
+                    axis: f.axis.to_string(),
+                    value: f.value,
+                    lo: f.lo,
+                    hi: f.hi,
+                });
+            }
             apogee_m = apogee_m.max(state.pos[2]);
             max_speed_mps = max_speed_mps.max(crate::math::norm(state.vel));
             if !state.is_finite() {
@@ -233,6 +301,7 @@ impl Simulator {
             nan_frames,
             apogee_m,
             max_speed_mps,
+            truth,
         })
     }
 
@@ -254,9 +323,13 @@ impl Simulator {
     }
 }
 
-/// Resolve a config-relative profile against the CWD, then against the
+fn cast3(v: [f64; 3]) -> [f32; 3] {
+    [v[0] as f32, v[1] as f32, v[2] as f32]
+}
+
+/// Resolve a config-relative path against the CWD, then against the
 /// workspace `config/` directory baked into the binary at build time.
-fn resolve_profile(p: &Path) -> std::path::PathBuf {
+fn resolve_config_path(p: &Path) -> std::path::PathBuf {
     if p.is_absolute() || p.exists() {
         return p.to_path_buf();
     }

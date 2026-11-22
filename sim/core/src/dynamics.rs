@@ -5,9 +5,13 @@
 //! the integrator never touches a flat 14-element index space. Body +Z is the
 //! rocket axis; world +Z is up. Inertia is diagonal and scales with mass.
 
+use std::cell::Cell;
+
 use crate::{
+    aero::{AeroCard, AeroCoeffs},
     atmosphere::Atmosphere,
     config::{AeroConfig, Config},
+    error::SimError,
     math::{
         add, clamp, cross, dot, lerp_table, mat_t_vec, mat_vec, norm, quat_normalize, quat_rate,
         quat_to_matrix, scale, sub, Quat, Vec3,
@@ -74,6 +78,31 @@ pub struct Vehicle {
     pub aero: AeroConfig,
     pub cd_table: Vec<(f64, f64)>,
     pub thrust_table: Vec<(f64, f64, f64)>,
+    /// Set only in card mode. Coefficients are evaluated at every RK4
+    /// sub-stage, not frozen: the legacy Mach table varies within a step.
+    pub aero_card: Option<AeroCard>,
+    /// Coefficients at the current tick, used by the exported physics
+    /// features. The integrator itself queries the card per sub-stage.
+    pub card_coeffs: AeroCoeffs,
+    /// An out-of-grid query inside `derivative` is recorded here and returned
+    /// as a `SimError::AeroOutOfGrid` by the episode loop. No silent clamp.
+    pub card_fault: Cell<Option<CardFault>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CardFault {
+    pub axis: &'static str,
+    pub value: f64,
+    pub lo: f64,
+    pub hi: f64,
+}
+
+fn fault_axis(axis: &str) -> &'static str {
+    match axis {
+        "mach" => "mach",
+        "alpha_deg" => "alpha_deg",
+        _ => "card",
+    }
 }
 
 impl Vehicle {
@@ -96,6 +125,57 @@ impl Vehicle {
             aero: cfg.aero.clone(),
             cd_table: cfg.aero.cd_mach.clone(),
             thrust_table: cfg.aero.thrust_profile.clone(),
+            aero_card: None,
+            card_coeffs: AeroCoeffs {
+                cd0: cfg.aero.cd0,
+                cna: cfg.aero.cna,
+                pitch_damping: cfg.aero.pitch_damping,
+                cm_delta: 0.0,
+            },
+            card_fault: Cell::new(None),
+        }
+    }
+
+    /// Total axial drag coefficient. The placeholder branch is the original
+    /// expression, unchanged bit-for-bit; the card branch reads the cached
+    /// per-step coefficients already shifted by the episode's `cd0`.
+    #[inline]
+    pub fn effective_cd(&self, mach: f64) -> f64 {
+        if self.aero_card.is_some() {
+            self.card_coeffs.cd0
+        } else {
+            let cd_base = self.cd_table.first().map(|p| p.1).unwrap_or(self.aero.cd0);
+            (self.aero.cd0 - cd_base) + lerp_table(&self.cd_table, mach)
+        }
+    }
+
+    #[inline]
+    pub fn effective_cna(&self) -> f64 {
+        if self.aero_card.is_some() {
+            self.card_coeffs.cna
+        } else {
+            self.aero.cna
+        }
+    }
+
+    /// Damping multiplier before the `x 10` and the dynamic-pressure scaling
+    /// in `derivative`.
+    #[inline]
+    pub fn effective_pitch_damping(&self) -> f64 {
+        if self.aero_card.is_some() {
+            self.card_coeffs.pitch_damping
+        } else {
+            self.aero.pitch_damping
+        }
+    }
+
+    /// Gimbal control-moment coefficient; zero in placeholder mode.
+    #[inline]
+    pub fn effective_cm_delta(&self) -> f64 {
+        if self.aero_card.is_some() {
+            self.card_coeffs.cm_delta
+        } else {
+            0.0
         }
     }
 
@@ -244,8 +324,40 @@ pub fn derivative(t: f64, s: &State, wind: Vec3, atm: &Atmosphere, v: &Vehicle) 
     let vb = mat_t_vec(r, v_rel);
     let mach = speed / air.speed_of_sound.max(1.0);
 
-    let cd_base = v.cd_table.first().map(|p| p.1).unwrap_or(v.aero.cd0);
-    let cd = (v.aero.cd0 - cd_base) + lerp_table(&v.cd_table, mach);
+    // Card coefficients are evaluated at the sub-stage's own (Mach, alpha),
+    // matching the legacy table's per-stage lookup. The placeholder branch
+    // below is the original expression, unchanged bit-for-bit.
+    let alpha_deg = s.omega()[2].atan2(vb[0]).to_degrees();
+    let (cd, cna, pitch_k, cm_delta) = if let Some(card) = &v.aero_card {
+        match card.coeffs(mach, alpha_deg, v.aero.cd0) {
+            Ok(c) => (c.cd0, c.cna, c.pitch_damping, c.cm_delta),
+            Err(SimError::AeroOutOfGrid { axis, value, lo, hi }) => {
+                v.card_fault.set(Some(CardFault {
+                    axis: fault_axis(&axis),
+                    value,
+                    lo,
+                    hi,
+                }));
+                (0.0, 0.0, 0.0, 0.0)
+            }
+            Err(_) => {
+                v.card_fault.set(Some(CardFault {
+                    axis: "card",
+                    value: mach,
+                    lo: f64::NAN,
+                    hi: f64::NAN,
+                }));
+                (0.0, 0.0, 0.0, 0.0)
+            }
+        }
+    } else {
+        (
+            v.effective_cd(mach),
+            v.effective_cna(),
+            v.effective_pitch_damping(),
+            0.0,
+        )
+    };
     let qdyn = 0.5 * air.density * speed * speed;
     let vhat = if speed > 1e-6 {
         scale(vb, 1.0 / speed)
@@ -258,8 +370,8 @@ pub fn derivative(t: f64, s: &State, wind: Vec3, atm: &Atmosphere, v: &Vehicle) 
     // Normal force pushes the nose toward the relative wind. With the CP
     // ahead of the CG (positive static_margin) this is restoring.
     let normal = [
-        qdyn * v.aero.area_m2 * v.aero.cna * (vb[0] / az),
-        qdyn * v.aero.area_m2 * v.aero.cna * (vb[1] / az),
+        qdyn * v.aero.area_m2 * cna * (vb[0] / az),
+        qdyn * v.aero.area_m2 * cna * (vb[1] / az),
         0.0,
     ];
     let thrust = scale(v.thrust_dir, v.thrust_at(t));
@@ -276,13 +388,22 @@ pub fn derivative(t: f64, s: &State, wind: Vec3, atm: &Atmosphere, v: &Vehicle) 
     // at dt <= 0.01 s (angular decay rate <= 100 1/s).
     let damp_raw = qdyn * v.aero.area_m2 * v.aero.static_margin_m;
     let damp_cap = 100.0 * i_xx;
-    let pitch_damp = (10.0 * v.aero.pitch_damping * damp_raw).min(damp_cap);
+    let pitch_damp = (10.0 * pitch_k * damp_raw).min(damp_cap);
     let roll_damp = (10.0 * v.aero.roll_damping * damp_raw).min(0.5 * damp_cap);
-    let moment = [
+    let mut moment = [
         moment_aero[0] - pitch_damp * w[0],
         moment_aero[1] - pitch_damp * w[1],
         -roll_damp * w[2],
     ];
+    // `cm_delta` is the gimbal control-moment coefficient. The generated
+    // example card sets it to zero, so a card run reproduces the placeholder
+    // exactly; a real card adds a finite control moment here.
+    if cm_delta != 0.0 {
+        let diameter = 2.0 * (v.aero.area_m2 / std::f64::consts::PI).sqrt();
+        let cm = cm_delta * qdyn * v.aero.area_m2 * diameter;
+        moment[0] += cm * v.thrust_dir[0];
+        moment[1] += cm * v.thrust_dir[1];
+    }
 
     // Launch-rail constraint: before liftoff the rail carries the weight, so
     // the inertial acceleration is exactly zero and the accelerometer reads 1 g.

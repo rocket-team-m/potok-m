@@ -197,3 +197,48 @@ new files; no files outside `sim/` were touched here.
 Max speed TTX: M=0.5–0.6 ± (~170–200 m/s at 3 km).
 At the nominal seed the simulator reaches ~203 m/s, so the speed target is met;
 the remaining gap is apogee (~2.4 km vs ~3 km).
+
+## Ideal loop — physics side (SPEC_ENGINE_IDEAL.md)
+
+All changes inside `sim/`; no GPU jobs, no push.
+
+```
+cargo check --workspace --offline -> Finished, no warnings
+cargo test  --workspace --offline -> 32 passed, 0 failed
+  (4 CLI + 15 sim + 6 smart-sim + 7 new ideal-loop; all old tests green)
+```
+
+What changed:
+
+- `core/src/aero.rs` (new): 2-D (Mach, alpha) coefficient card reader with
+  bilinear interpolation. Out-of-grid is a LOUD `SimError::AeroOutOfGrid`
+  (direct call and runtime propagation through `run_episode`), never a clamp.
+  Selecting the placeholder path increments a COUNTED marker and prints a
+  stderr line. `config/aero_card.toml` is generated from the current
+  placeholder coefficients; selecting it reproduces the legacy trajectory
+  bit-for-bit (frame bytes, features and apogee all equal).
+- `core/src/config.rs`: `[aero] source = "placeholder"|"card"` +
+  `card_path`; Allan ARW/bias-stability, per-channel quantization, frame
+  latency, extra saturation and seeded spike injection under `[sensor]`;
+  `output.truth_metadata`. Every new field serde-defaults to the legacy value.
+- `core/src/dynamics.rs` / `physics.rs`: card coefficients are evaluated at
+  each RK4 sub-stage (the legacy Mach table varies within a step); the
+  placeholder branch is the original expression, unchanged. `cm_delta` adds a
+  gimbal control moment, zero in the example card.
+- `core/src/validation.rs`: v2 metadata may carry 39 floats instead of 17 —
+  the classic 17 plus true wind, gust start/amplitude, shear layer and the
+  full 6-DoF state at the last frame tick. `meta_count` is the authority;
+  `read_validation` accepts v1 (9), classic v2 (17) and truth v2 (39).
+  `sim/README.md` documents the field layout.
+- `core/src/sensor.rs`: Allan white-noise density and bias random walk,
+  per-channel quantization, whole-frame latency, mag/baro saturation and
+  seeded spikes (FAULT bit + AI gating), all off by default so the original
+  RNG draw order and test vectors are untouched.
+- `core/tests/ideal_loop_tests.rs` (new, 7 tests): grid nodes + bilinear
+  midpoint, out-of-grid error (including a run-time narrow card), generated
+  card == placeholder and marker counting, truth round-trip with v1/v2 legacy
+  readers, seeded determinism with faults, fault gating, Allan effect.
+
+Skipped: CFD convergence grid (needs an external solver), bicubic (bilinear
+meets the spec and is exact at nodes), and AI/edge reader changes (outside
+`sim/`).

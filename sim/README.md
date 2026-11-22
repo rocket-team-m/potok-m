@@ -214,6 +214,58 @@ writes the original 9-metadata layout with version 1 and a zeroed
 nominal Potok-M conditioning (scenario 0, train) from the defaults. Both
 paths are covered by round-trip tests.
 
+#### Truth-extended v2 metadata
+
+`output.truth_metadata = true` (or `write_validation_with_truth`) still writes
+**version 2**, but with `meta_count = 39`: the classic 17 floats plus a
+22-float truth record captured at the episode's last 50 Hz tick. The header
+`meta_count` is the authority; `read_validation` accepts 9 (v1), 17 (classic
+v2) and 39 (truth-extended v2), so old files and old readers keep working.
+`ValidationEpisode.truth` is `None` for the first two.
+
+| index (after the 17) | field | units |
+|---|---|---|
+| 0–2 | true wind vector at the tick (world X/Y/Z) | m/s |
+| 3 | gust start (`-1` = none) | s |
+| 4 | gust amplitude | m/s |
+| 5 | shear-layer altitude | m |
+| 6 | shear-layer velocity jump | m/s |
+| 7 | shear-layer thickness | m |
+| 8–10 | true position (world X/Y/Z) | m |
+| 11–13 | true velocity (world X/Y/Z) | m/s |
+| 14–17 | true quaternion `(w, x, y, z)` | — |
+| 18–20 | true body angular rate (X/Y/Z) | rad/s |
+| 21 | true mass at the tick | kg |
+
+## Aero coefficient card
+
+`[aero] source = "placeholder"` (default) keeps the legacy analytic model and
+prints a **COUNTED** marker line to stderr on each `Simulator::new`
+(`aero::placeholder_uses()` is the counter). `source = "card"` loads the 2-D
+grid named by `card_path`, resolved like `boundary_profile`.
+`config/aero_card.toml` is a documented example generated from the
+placeholder coefficients: selecting it reproduces the current trajectory
+bit-for-bit (covered by `generated_card_reproduces_placeholder_and_placeholder_is_counted`).
+
+Each channel (`cd0`, `cna`, `pitch_damping`, `cm_delta`) is a rectangular grid
+of `values[alpha][mach]` rows. Interpolation is bilinear and coefficients are
+evaluated at each RK4 sub-stage. Any query outside a grid axis is a **LOUD**
+`SimError::AeroOutOfGrid` (returned by `interpolate`, and propagated out of
+`run_episode`); nothing is clamped. `cm_delta` adds a gimbal control moment
+proportional to `q_dyn·A·D`; the example card sets it to zero.
+
+## Sensor realism knobs
+
+All new `[sensor]` knobs default to **off/zero**, so old configs and tests are
+unchanged. `gyro_arw` / `accel_arw` are Allan angle/velocity random-walk
+densities (discrete std = ARW / √dt); `gyro_bias_stability` /
+`accel_bias_stability` drive a seeded random walk on the constant bias.
+`latency_steps` delays whole frames; `gyro_quant_step` / `accel_quant_step`
+override `quant_step` per channel; `mag_sat` / `baro_sat` add optional limits;
+`spike_probability` / `spike_amplitude` inject a seeded measurement spike that
+sets the canonical FAULT bit and gates the AI. Every draw comes from the
+episode's `SENS` sub-seed, so runs stay reproducible.
+
 `potok_sim::validation::read_validation` parses the format; a round-trip test
 covers it. Note that an AI-side reader must use the v2 layout when consuming
 files produced by the new writer.
