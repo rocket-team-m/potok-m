@@ -16,7 +16,7 @@
 | [potok-m-sim](https://github.com/rocket-team-m/potok-m-sim) | 6-DoF симулятор, рандомизация, генерация данных |
 | [potok-m-protocol](https://github.com/rocket-team-m/potok-m-protocol) | UART-протокол, генератор биндингов, план прошивки STM32 |
 
-Папки `ai/`, `sim/`, `protocol/`, `edge/` здесь остаются как рабочие копии;
+Код вынесен в отдельные репозитории; здесь остаются только docs, hardware, vehicle, flights и общие артефакты;
 изменения кодам вносить в канонических репозиториях.
 
 ## Структура
