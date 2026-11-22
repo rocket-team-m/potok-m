@@ -3,6 +3,8 @@
 //! Lives under scripts/ and only READS sim/ through its public API. The CLI's
 //! --control-file applies one TSV to every episode in a run, so per-episode
 //! controls need this driver: it calls `run_episode_with_control(index, ...)`.
+//! TSV values are desired lateral accelerations in m/s^2. `--oracle` uses
+//! `run_episode_with_oracle`, i.e. `fin_accel_command`, with no TSV at all.
 //! Writes validation.bin plus the flown-truth trajectory sidecar.
 
 use std::{error::Error, fs, path::PathBuf};
@@ -19,6 +21,7 @@ struct Args {
     out_dir: PathBuf,
     indices: Vec<u64>,
     commands_dir: Option<PathBuf>,
+    oracle: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -28,10 +31,15 @@ fn parse_args() -> Result<Args, String> {
     let mut out_dir = None;
     let mut indices = None;
     let mut commands_dir = None;
+    let mut oracle = false;
     let mut i = 0;
     while i < raw.len() {
         let key = raw[i].as_str();
         i += 1;
+        if key == "--oracle" {
+            oracle = true;
+            continue;
+        }
         let value = raw.get(i).ok_or_else(|| format!("{key} needs a value"))?.clone();
         i += 1;
         match key {
@@ -57,6 +65,7 @@ fn parse_args() -> Result<Args, String> {
         out_dir: out_dir.ok_or("--out-dir is required")?,
         indices: indices.ok_or("--indices is required")?,
         commands_dir,
+        oracle,
     })
 }
 
@@ -69,15 +78,22 @@ fn run(args: Args) -> Result<(), Box<dyn Error>> {
     let frames = cfg.frames_per_episode();
     let sim = Simulator::new(cfg.clone())?;
     fs::create_dir_all(&args.out_dir)?;
+    if args.oracle && args.commands_dir.is_some() {
+        return Err("--oracle and --commands-dir are mutually exclusive".into());
+    }
 
     let mut episodes = Vec::with_capacity(args.indices.len());
     for index in &args.indices {
-        let episode = match &args.commands_dir {
-            None => sim.run_episode(*index)?,
-            Some(dir) => {
-                let path = dir.join(format!("{index}.tsv"));
-                let table = ControlFile::from_path(&path, frames)?;
-                sim.run_episode_with_control(*index, &|f| table.for_frame(f).unwrap())?
+        let episode = if args.oracle {
+            sim.run_episode_with_oracle(*index)?
+        } else {
+            match &args.commands_dir {
+                None => sim.run_episode(*index)?,
+                Some(dir) => {
+                    let path = dir.join(format!("{index}.tsv"));
+                    let table = ControlFile::from_path(&path, frames)?;
+                    sim.run_episode_with_control(*index, &|f| table.for_frame(f).unwrap())?
+                }
             }
         };
         println!(

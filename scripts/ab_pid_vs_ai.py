@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import struct
 import subprocess
 import sys
@@ -35,13 +36,20 @@ sys.path.insert(0, str(ROOT / "ai" / "src"))
 from potok_ai.data import read_validation  # noqa: E402
 from potok_ai.export import load_student_export  # noqa: E402
 from potok_ai.loopwm_lite import LiteConfig, LiteModel  # noqa: E402
-from potok_ai.physics import physics_baseline  # noqa: E402
+from potok_ai.physics import ALPHA0, BETA0, physics_baseline  # noqa: E402
 
-RAD_PER_NORM = 0.12  # sim/core/src/optimizer.rs:41, g_theta clamp, same mapping as the old surrogate
-DEG_PER_RAD = 180.0 / np.pi
-MAX_DEG = 10.0  # sim/core/src/control.rs:28, hard actuator limit (LOUD if exceeded)
+# The seam now takes desired lateral acceleration (m/s^2), not fin degrees.
+# ai/src/potok_ai/physics.py:27-28 normalises angle errors by 10 deg; the
+# corresponding lateral acceleration is g*tan(10 deg). This is the documented
+# physics_baseline unit scale, not a gain fitted to an A/B result.
+G_MPS2 = 9.80665  # sim/core/src/dynamics.rs gravity
+if ALPHA0 != BETA0:
+    raise ValueError(f"baseline angle scales differ: alpha={ALPHA0}, beta={BETA0}")
+ACCEL_PER_NORM = G_MPS2 * math.tan(math.radians(BETA0))
+MAX_ACCEL_MPS2 = 10.0  # sim/core/src/control.rs MAX_COMMAND_MPS2 (LOUD if exceeded)
 INTERVENTION_EPS = 1e-9
 STUDENTS = ("loopwm", "lrs", "lite")
+REPORT_ARMS = ("oracle_gtheta",) + STUDENTS
 PRIMARY = "loopwm"
 
 CONFIG = ROOT / "ai" / "out" / "run4" / "sim.toml"
@@ -93,7 +101,7 @@ class LiteArm:
 
 
 def run_helper(seed: int, indices: list[int], out_dir: Path,
-               commands_dir: Path | None) -> dict[int, tuple[float, float]]:
+               commands_dir: Path | None, oracle: bool = False) -> dict[int, tuple[float, float]]:
     if not HELPER.is_file():
         raise FileNotFoundError(
             f"missing {HELPER.relative_to(ROOT)}; build with: cargo build --release "
@@ -104,7 +112,9 @@ def run_helper(seed: int, indices: list[int], out_dir: Path,
         str(HELPER), "--config", str(CONFIG), "--seed", str(seed),
         "--indices", ",".join(map(str, indices)), "--out-dir", str(out_dir),
     ]
-    if commands_dir is not None:
+    if oracle:
+        cmd += ["--oracle"]
+    elif commands_dir is not None:
         cmd += ["--commands-dir", str(commands_dir)]
     proc = subprocess.run(cmd, cwd=ROOT / "sim", capture_output=True, text=True)
     if proc.returncode != 0:
@@ -189,7 +199,7 @@ def build_controls(baseline, spec: dict, out_dir: Path) -> dict:
     model = spec["model"]
     stats = {"rows": 0, "ai_healthy_ticks": 0, "gate_open_ticks": 0,
              "gate_trips": 0, "interventions": 0, "clipped_ticks": 0,
-             "max_command_deg": 0.0, "tracking_sq": 0.0}
+             "max_command_mps2": 0.0, "tracking_sq": 0.0}
     for ep in baseline.episodes:
         features = np.asarray(ep.frames[:, :14], dtype=np.float32)
         cond = np.asarray(ep.conditioning, dtype=np.float32)
@@ -208,22 +218,23 @@ def build_controls(baseline, spec: dict, out_dir: Path) -> dict:
         gate = (targets[:, 3] > 0.5) & (conf >= spec["threshold"])
 
         command = np.where(gate[:, None], b + delta, 0.0)
-        deg = command * RAD_PER_NORM * DEG_PER_RAD
-        clipped = np.abs(deg) > MAX_DEG
-        deg = np.clip(deg, -MAX_DEG, MAX_DEG)
+        accel = command * ACCEL_PER_NORM
+        clipped = np.abs(accel) > MAX_ACCEL_MPS2
+        accel = np.clip(accel, -MAX_ACCEL_MPS2, MAX_ACCEL_MPS2)
         with (out_dir / f"{ep.index}.tsv").open("w") as handle:
-            handle.write("# frame_index g_roll_deg g_pitch_deg\n")
-            for i, (roll, pitch) in enumerate(deg):
+            handle.write("# frame_index g_roll_mps2 g_pitch_mps2\n")
+            for i, (roll, pitch) in enumerate(accel):
                 handle.write(f"{i} {roll:.6f} {pitch:.6f}\n")
 
-        active = gate & (np.max(np.abs(deg), axis=1) > INTERVENTION_EPS)
-        stats["rows"] += len(deg)
+        active = gate & (np.max(np.abs(accel), axis=1) > INTERVENTION_EPS)
+        stats["rows"] += len(accel)
         stats["ai_healthy_ticks"] += int((targets[:, 3] > 0.5).sum())
         stats["gate_open_ticks"] += int(gate.sum())
         stats["gate_trips"] += int((~gate).sum())
         stats["interventions"] += int(active.sum())
         stats["clipped_ticks"] += int(clipped.any(axis=1).sum())
-        stats["max_command_deg"] = max(stats["max_command_deg"], float(np.max(np.abs(deg))))
+        stats["max_command_mps2"] = max(
+            stats["max_command_mps2"], float(np.max(np.abs(accel))))
         if gate.any():
             stats["tracking_sq"] += float(np.sum((command[gate] - targets[gate, :2]) ** 2))
     stats["tracking_rmse_norm"] = float(
@@ -286,9 +297,13 @@ def markdown(report: dict) -> str:
         "Apogee and lateral RMS are now measured directly from the flown-truth "
         "`validation.trajectory` sidecar (POTOKTRJ v1, per-tick x/y/z/vx/vy/vz)",
         "produced by `potok-sim`'s command→dynamics seam "
-        "(`Simulator::run_episode_with_control`, `sim/core/src/episode.rs:130`).",
-        "No sim source or config was changed; `scripts/ab_control/` is a read-only "
-        "driver because the CLI's `--control-file` applies one TSV to every episode.",
+        "(`Simulator::run_episode_with_control`, `sim/core/src/episode.rs:155`).",
+        "Commands are desired lateral accelerations in m/s², resolved to fin "
+        "deflection by `dynamics::solve_fin_deflection`. No sim source or config "
+        "was changed; `scripts/ab_control/` is a read-only driver because the "
+        "CLI's `--control-file` applies one TSV to every episode.",
+        "The earlier `ab_diagnosis.md` root-cause record used the superseded "
+        "degree-valued seam; it is kept as history, not as the current contract.",
         "",
         "## Protocol",
         "",
@@ -300,6 +315,10 @@ def markdown(report: dict) -> str:
         "the exports were NOT retrained, so these are off-training generalization "
         "checks, not a seed sweep of the training procedure.",
         "- Baseline arm: no control file, zero command on every tick.",
+        "- Positive control `oracle_gtheta`: `sim.run_episode_with_oracle` calls "
+        "`ReferenceOptimizer::fin_accel_command` on live full state/wind/phase "
+        "(`sim/core/src/optimizer.rs:98-113`); no degree or acceleration "
+        "conversion is done by this harness for that arm.",
         "- Assisted arm: per-tick `command = physics_baseline(frame) + model Delta`. "
         "`loopwm`/`lrs` use the exported v2 stateful students with their trained "
         "forward (`load_student_export(...).to_model()`). `lite` uses the exported "
@@ -310,10 +329,13 @@ def markdown(report: dict) -> str:
         "are read from each run4 `calibration.json` (loopwm "
         f"{report['calibration']['loopwm']:.6g}, lrs {report['calibration']['lrs']:.6g}, "
         f"lite {report['calibration']['lite']:.6g}). Nothing is hardcoded.",
-        f"- Unit mapping: normalised command × {RAD_PER_NORM} rad × 180/π = degrees "
-        f"(the reference optimizer's ±0.12 rad clamp, same scale as the old "
-        f"surrogate). Commands beyond the seam's ±{MAX_DEG:.0f}° actuator limit are "
-        f"clipped and counted (`clipped_ticks`); no physics or gains were tuned.",
+        f"- Student conversion: the command is in `physics_baseline` units "
+        f"(normalised angle error); `ai/src/potok_ai/physics.py:27-28` divides "
+        f"angle errors by BETA0=ALPHA0=10°, so one unit is `g·tan(10°) = "
+        f"{ACCEL_PER_NORM:.6f} m/s²` with g=9.80665. TSV values are "
+        f"`(b+Δ) × {ACCEL_PER_NORM:.6f}` m/s², clipped at the seam's ±"
+        f"{MAX_ACCEL_MPS2:.0f} m/s² (`clipped_ticks`). This scale comes from the "
+        f"AI baseline's documented units, not from an A/B fit.",
         "- `interventions` counts gate-open ticks with a non-zero applied command; "
         "`gate_trips` counts ticks with the interlock closed. Both are summed over "
         "episodes. `tracking_rmse_norm` is the assisted command's RMS error against "
@@ -323,6 +345,7 @@ def markdown(report: dict) -> str:
         "",
     ]
     s1 = report["seeds"]["1"][PRIMARY]["aggregate"]
+    o1 = report["seeds"]["1"]["oracle_gtheta"]["aggregate"]
     verdict = report["verdict"]
     out += [
         "## Verdict (primary: loopwm student, seed 1)",
@@ -335,15 +358,21 @@ def markdown(report: dict) -> str:
         f"{fmt(s1['assisted']['apogee_m'])} m "
         f"({fmt(s1['apogee_delta_m'], 4)} m, "
         f"{fmt(s1['apogee_retention_pct'], 5)} % retention).",
+        f"- positive control oracle: lateral "
+        f"{fmt(o1['baseline']['lateral_rms_m'], 6)} -> "
+        f"{fmt(o1['assisted']['lateral_rms_m'], 6)} m "
+        f"({fmt(o1['lateral_delta_m'], 6)} m), apogee "
+        f"{fmt(o1['apogee_delta_m'], 4)} m.",
         f"- overall **{'PASS' if verdict['pass'] else 'FAIL'}** (exit {report['exit_code']}).",
         "",
     ]
     for seed in report["seed_order"]:
-        for name in STUDENTS:
+        for name in REPORT_ARMS:
             entry = report["seeds"][str(seed)][name]
             agg = entry["aggregate"]
             out += [
-                f"## Seed {seed} · student `{name}`"
+                f"## Seed {seed} · arm `{name}`"
+                + (" (positive control)" if name == "oracle_gtheta" else "")
                 + (" (primary)" if name == PRIMARY and seed == 1 else "")
                 + (" (off-training)" if seed != 1 else ""),
                 "",
@@ -369,14 +398,36 @@ def markdown(report: dict) -> str:
                 f"| {fmt(agg['lateral_delta_m'], 6)} | {fmt(agg['lateral_ratio_pct'], 6)} |",
                 "",
                 f"interventions {agg['interventions']} / {agg['rows']} ticks; "
-                f"gate trips {agg['gate_trips']}; clipped ticks {agg['clipped_ticks']}; "
-                f"max applied command {fmt(agg['max_command_deg'])}°; "
-                f"g_theta tracking RMSE {fmt(agg['tracking_rmse_norm'], 4)}. "
+                f"gate trips {agg['gate_trips']}; clipped ticks "
+                f"{agg['clipped_ticks'] if agg['clipped_ticks'] is not None else 'n/a (sim-internal)'}; "
+                f"max applied command "
+                f"{('n/a (sim-internal)' if agg['max_command_mps2'] is None else fmt(agg['max_command_mps2'], 4) + ' m/s²')}; "
+                f"g_theta tracking RMSE "
+                f"{('n/a' if agg['tracking_rmse_norm'] is None else fmt(agg['tracking_rmse_norm'], 4))}. "
                 f"Trajectory sha256: baseline `{entry['sha256']['baseline']}`, "
                 f"assisted `{entry['sha256']['assisted']}`.",
                 "",
             ]
     out += [
+        "## Why the student still fails while the oracle works",
+        "",
+        "The oracle and the student are not the same signal in different units. "
+        "`ReferenceOptimizer::fin_accel_command` emits the world-frame lateral "
+        "acceleration demand `[ay, -ax]` from live full state and wind "
+        "(`sim/core/src/optimizer.rs:98-113`, `sim/core/src/episode.rs:167-181`). "
+        "`solve()` converts that SAME demand into a tilt target `g_theta` by "
+        "`atan(ax/axial)`, attitude error and body-rate damping, clamped to "
+        "±0.12 rad (`sim/core/src/optimizer.rs:115-146`). The AI exports were "
+        "trained against `targets[:,:2] = g_theta`, i.e. the angle-domain "
+        "signal (`ai/src/potok_ai/engine.py:400-402`), not against "
+        "`fin_accel_command`. Our `g·tan(10°)` conversion maps the student's "
+        "normalised angle-error units to an acceleration magnitude; it does not "
+        "undo the attitude/attitude-rate/axial conversion or the `[ay,-ax]` sign "
+        "convention in `solve()`. The student therefore feeds an angle-domain "
+        "P/D residual into an actuator that now expects an acceleration demand. "
+        "This is a training-target mismatch, not a gate, scale or actuator-fit "
+        "problem — no gain or threshold was changed to try to fix it.",
+        "",
         "## Honesty notes",
         "",
         "- Commands are replayed open-loop from the baseline run's recorded frames; "
@@ -392,7 +443,8 @@ def markdown(report: dict) -> str:
         "- The calibration `isotonic` map itself is not exported in calibration.json; "
         "only its threshold is available, and it is applied to the raw confidence. "
         "This is an upper bound on how often the gate opens.",
-        "- `clipped_ticks` is the seam's hard ±10° actuator bound, not a tuning knob.",
+        "- `clipped_ticks` counts demands beyond the seam's ±10 m/s² envelope, "
+        "not a tuning knob.",
         "- Measurement floor: the sidecar stores f32 positions. One ULP is about "
         f"{float(np.spacing(np.float32(s1['baseline']['lateral_rms_m']))):.2e} m at the "
         f"measured lateral scale and {float(np.spacing(np.float32(s1['baseline']['apogee_m']))):.2e} "
@@ -422,7 +474,6 @@ def main() -> None:
     if len(indices) != 20 or reference.header.frames_per_episode != 1500:
         raise ValueError(f"expected 20 x 1500-frame held-out episodes, got "
                          f"{len(indices)} x {reference.header.frames_per_episode}")
-        raise ValueError(f"expected 20 held-out indices, got {len(indices)}")
     for seed in seed_order:
         work = args.work_dir / f"seed{seed}"
         baseline_dir = work / "baseline"
@@ -438,6 +489,23 @@ def main() -> None:
         if len(indices) != 20 or len(baseline_track) != 20:
             raise ValueError(f"seed {seed}: expected 20 held-out episodes, got {len(indices)}")
         report_seeds[str(seed)] = {}
+        oracle_dir = work / "oracle_gtheta" / "flown"
+        run_helper(seed, indices, oracle_dir, None, oracle=True)
+        oracle_track = read_track(oracle_dir / "validation.trajectory")
+        active = int(sum((e.targets[:, 3] > 0.5).sum() for e in baseline.episodes))
+        total = int(sum(len(e.targets) for e in baseline.episodes))
+        oracle_control = {
+            "rows": total, "ai_healthy_ticks": active, "gate_open_ticks": active,
+            "gate_trips": total - active, "interventions": active,
+            "clipped_ticks": None, "max_command_mps2": None,
+            "tracking_rmse_norm": None,
+        }
+        oracle_summary = summarise(baseline_track, oracle_track, oracle_control)
+        oracle_summary["sha256"] = {
+            "baseline": sha256(baseline_dir / "validation.trajectory"),
+            "assisted": sha256(oracle_dir / "validation.trajectory"),
+        }
+        report_seeds[str(seed)]["oracle_gtheta"] = oracle_summary
         for spec in specs:
             name = spec["name"]
             tsv_dir = work / name / "commands"
@@ -464,7 +532,9 @@ def main() -> None:
         "supersedes": "12 s closed-loop A/B (commit 42df574) and surrogate A/B "
                       "(commit 237920a); both void",
         "measurement": "POTOKTRJ v1 flown-truth sidecar, not surrogate",
-        "sim_source": "commit c25eabb control seam, read-only via scripts/ab_control",
+        "sim_source": "commit e1b12cb acceleration fin mapping, read-only via "
+                      "scripts/ab_control; oracle uses run_episode_with_oracle / "
+                      "ReferenceOptimizer::fin_accel_command",
         "config": str(CONFIG.relative_to(ROOT)),
         "calibration": {s["name"]: s["threshold"] for s in specs},
         "calibration_source": "run4 <model>/calibration.json; the v2 export binary "
@@ -475,11 +545,21 @@ def main() -> None:
                      "not a training seed sweep",
         "held_out_indices": indices,
         "conversion": {
-            "rad_per_normalised_command": RAD_PER_NORM,
-            "actuator_limit_deg": MAX_DEG,
+            "command_units": "desired lateral acceleration m/s^2 (not fin degrees)",
+            "accel_per_normalised_command_mps2": ACCEL_PER_NORM,
+            "derivation": "ai/src/potok_ai/physics.py:27-28 BETA0=ALPHA0=10 deg; "
+                          "g*tan(10 deg), g=9.80665; no A/B fitting",
+            "gravity_mps2": G_MPS2,
+            "actuator_limit_mps2": MAX_ACCEL_MPS2,
+            "oracle": "sim-internal fin_accel_command, no harness conversion",
             "interlock": "recorded ai_healthy AND calibrated confidence >= threshold",
         },
         "students": [{k: v for k, v in s.items() if k != "model"} for s in specs],
+        "failure_location": "AI exports are trained on g_theta (angle-domain target, "
+                            "ai/src/potok_ai/engine.py:400-402; sim/core/src/optimizer.rs:115-146), "
+                            "while the actuator now consumes fin_accel_command "
+                            "(world-frame m/s^2, optimizer.rs:98-113). The harness's g*tan(10deg) "
+                            "conversion rescales units but cannot invert that target mismatch.",
         "seeds": report_seeds,
         "verdict": {
             "primary": PRIMARY,

@@ -46,10 +46,11 @@ script reports it as FAIL and exits 1 until the engine closes it.
 
 ## PID vs AI assistant (`ab_pid_vs_ai.py`) — FINAL run4, closed-loop
 
-This is the FINAL report. It SUPERSEDES the 12 s closed-loop report (commit
-`42df574`) and the gravity/tilt surrogate report (commit `237920a`); both are
-void. The simulator's command→dynamics seam (`c25eabb`) is used read-only, and
-apogee/lateral RMS come from the flown-truth POTOKTRJ v1 sidecar.
+This is the FINAL report under the corrected actuator contract (`e1b12cb`).
+It SUPERSEDES the 12 s report (`42df574`), the surrogate (`237920a`), and the
+degree-valued run4 A/B (all void). The simulator's acceleration seam is used
+read-only; apogee/lateral RMS come from the flown-truth POTOKTRJ v1 sidecar.
+`ab_diagnosis.md` is kept as the root-cause record of the OLD degree mapping.
 
 ```bash
 cargo build --release --manifest-path scripts/ab_control/Cargo.toml \
@@ -58,15 +59,20 @@ ai/.venv/bin/python scripts/ab_pid_vs_ai.py
 ```
 
 `scripts/ab_control/` is a thin Rust driver reading `sim/` through its public
-API (`run_episode_with_control`); the CLI's `--control-file` applies one TSV to
-all episodes, so per-episode control needs the API. No sim source/config is
-touched; artifacts land in `scripts/ab_work/`.
+API: `run_episode_with_control` for TSVs (values are desired lateral
+accelerations in m/s²) and `run_episode_with_oracle` / `fin_accel_command` for
+the positive control. The CLI's `--control-file` applies one TSV to all episodes,
+so per-episode control needs the API. No sim source/config is touched; artifacts
+land in `scripts/ab_work/`.
 
 Scope: run4, 20 OR-aligned held-out episodes / 4 scenarios (indices
 16..19,36..39,56..59,76..79,96..99), 1500 frames each, 30 s, 50 Hz, seed 1.
-Baseline = zero command. Assisted = `physics_baseline(frame) + model Delta`,
-mapped ×0.12 rad ×180/π to degrees and emitted only where `ai_healthy`
-(AI_READY/no FAULT/phase interlock) is set and confidence clears the threshold.
+Baseline = zero command. Oracle = sim-internal `fin_accel_command` on live
+full state/wind/phase. Assisted = `physics_baseline(frame) + model Delta`, in
+`ai/src/potok_ai/physics.py` units (angle errors normalised by 10°); converted
+to acceleration as `g·tan(10°) = 1.729177 m/s²` per unit, clipped at ±10 m/s²,
+and emitted only where `ai_healthy` (AI_READY/no FAULT/phase interlock) is set
+and confidence clears the threshold. No gain or threshold was fitted to win.
 Run4 exports: `loopwm_student.bin` (primary), `lrs.bin`, and the windowed
 `lite.pt` (50-frame window). The v2 binary has NO calibration field — thresholds
 are read from run4 `calibration.json` (loopwm 0, lrs 0.313924, lite 0.011412),
@@ -79,14 +85,19 @@ Writes `ab_report.json` (per-scenario, aggregate, per-seed, sidecar sha256) and
 `ab_report.md`. Exit `0` iff the primary assisted arm reduces lateral RMS on
 seed 1, `1` otherwise; numbers are written before exiting either way.
 
-FINAL result (seed 1, loopwm): lateral RMS 1528.366295 → 1528.725432 m
-(+0.359 m, 100.023498 % of baseline), apogee 1734.977 → 1733.811 m (-1.167 m).
-`lrs` (+0.067 m lateral, -0.198 m apogee) and `lite` (+0.161 m, -0.474 m) also
-worsen. Seeds 2/3 agree in sign for all three arms. The script exits 1.
-Differences are real above the f32 ULP (~1.2e-4 m at this scale) but small
-(0.004–0.026 % of lateral RMS). No physics, gain or threshold was tuned to win.
-The paired interlock schedule comes from the baseline run; commands are
-replayed by frame index, so later states diverge — that is the closed loop.
+FINAL result (seed 1): the oracle positive control works — lateral RMS
+1528.366 → 1035.228 m (−493.139 m), apogee +2236.22 m. The primary loopwm
+student still fails: lateral 1528.366 → 1542.362 m (+13.996 m, 100.915726 %),
+apogee −43.74 m. `lrs` (+2.34 m lateral, −7.51 m apogee) and `lite` (+6.08 m,
+−18.20 m) also worsen; seeds 2/3 agree in sign. Exit status 1.
+
+The failure is a training-target mismatch, not a mapping or gate problem: the
+exports were distilled against `g_theta` (angle-domain target, `engine.py:400`;
+`optimizer.rs:115-146`), while the actuator now consumes `fin_accel_command`
+(world-frame m/s², `optimizer.rs:98-113`). The harness's unit conversion cannot
+undo that difference. Exact file:line evidence is in `ab_report.md` under
+"Why the student still fails while the oracle works". No physics, gain or
+threshold was tuned to win.
 
 ## Root-cause diagnosis (`ab_diagnose.py`)
 
