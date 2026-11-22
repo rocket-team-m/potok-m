@@ -21,7 +21,7 @@ pub fn dot_scalar(a: &[f32], b: &[f32]) -> f32 {
 #[cfg(target_arch = "aarch64")]
 #[target_feature(enable = "neon")]
 unsafe fn dot_neon(a: &[f32], b: &[f32]) -> f32 {
-    use std::arch::aarch64::{vaddq_f32, vld1q_f32, vmulq_f32, vst1q_f32, vdupq_n_f32};
+    use std::arch::aarch64::{vaddq_f32, vdupq_n_f32, vld1q_f32, vmulq_f32, vst1q_f32};
     let n = a.len().min(b.len());
     let mut acc = vdupq_n_f32(0.0);
     let mut i = 0usize;

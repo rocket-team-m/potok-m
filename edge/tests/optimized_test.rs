@@ -21,14 +21,24 @@ fn optimized_matches_baseline() {
         let slow = forward_naive(rt.potm_model().unwrap(), rt.last_window());
         for (a, b) in fast.iter().zip(slow.iter()) {
             max_err = max_err.max((a - b).abs());
-            assert!((a - b).abs() <= 1e-4 * (1.0 + b.abs()), "optimized {a} vs baseline {b}");
+            assert!(
+                (a - b).abs() <= 1e-4 * (1.0 + b.abs()),
+                "optimized {a} vs baseline {b}"
+            );
         }
-        if fast.iter().zip(slow.iter()).all(|(a, b)| a.to_bits() == b.to_bits()) {
+        if fast
+            .iter()
+            .zip(slow.iter())
+            .all(|(a, b)| a.to_bits() == b.to_bits())
+        {
             bit_identical += 1;
         }
     }
     #[cfg(not(target_arch = "aarch64"))]
-    assert_eq!(bit_identical, n, "scalar fallback must be bit-identical to baseline");
+    assert_eq!(
+        bit_identical, n,
+        "scalar fallback must be bit-identical to baseline"
+    );
     #[cfg(target_arch = "aarch64")]
     assert!(max_err < 1e-4, "NEON summation error {max_err}");
 }

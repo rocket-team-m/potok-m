@@ -4,8 +4,9 @@
 //! The frame layout is a separate trait (`FrameLayout`) so the local protocol
 //! copy can be swapped for the generated `potok-protocol` crate in one place.
 
-use crate::frame::{FrameError, FrameLayout, RequestFrame, REQUEST_LEN, REPLY_LEN};
+use crate::frame::{FrameError, FrameLayout, ReplyFrame, RequestFrame, REPLY_LEN, REQUEST_LEN};
 use crate::runtime::Runtime;
+use crate::speculative::SpeculativeRuntime;
 use serialport::SerialPort;
 use std::io::Read;
 use std::time::{Duration, Instant};
@@ -69,6 +70,28 @@ pub fn handle_request<L: FrameLayout>(
         }
     };
     let reply = runtime.on_request(&req);
+    layout.encode_reply(&reply, reply_buf).map_err(|_| ())
+}
+
+/// Speculative counterpart of `handle_request`. A bad frame gets a fault
+/// reply (`ai_healthy = 0`) and never reaches either model.
+pub fn handle_spec_request<L: FrameLayout>(
+    layout: &L,
+    runtime: &mut SpeculativeRuntime,
+    bytes: &[u8],
+    reply_buf: &mut [u8; REPLY_LEN],
+) -> Result<(), ()> {
+    let reply = match layout.decode_request(bytes) {
+        Ok(req) => runtime.on_request(&req),
+        Err(FrameError::VersionMismatch(_)) => {
+            runtime.disable_now();
+            ReplyFrame::muted(0, false)
+        }
+        Err(_) => {
+            runtime.on_invalid_frame();
+            ReplyFrame::muted(0, false)
+        }
+    };
     layout.encode_reply(&reply, reply_buf).map_err(|_| ())
 }
 

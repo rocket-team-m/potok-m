@@ -28,6 +28,10 @@ path = "src/bin/bench.rs"
 name = "make-fixture"
 path = "src/bin/make_fixture.rs"
 
+[[bin]]
+name = "bench-spec"
+path = "src/bin/bench_spec.rs"
+
 [profile.release]
 opt-level = 3
 lto = true

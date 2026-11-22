@@ -196,8 +196,13 @@ impl ModelV2 {
         let flags = r.u32()?;
         let n_records = r.u32()? as usize;
 
-        if in_features != 8 || width == 0 || out_features != 3 || rank == 0 || kernel == 0
-            || n_blocks == 0 || dilations.iter().any(|&d| d == 0)
+        if in_features != 8
+            || width == 0
+            || out_features != 3
+            || rank == 0
+            || kernel == 0
+            || n_blocks == 0
+            || dilations.iter().any(|&d| d == 0)
             || n_records != 5 * n_blocks + 6
         {
             return Err(V2Error::InvalidField("header counts"));
@@ -210,7 +215,9 @@ impl ModelV2 {
             let kind = r.u8()?;
             let name_len = r.u32()? as usize;
             let name_bytes = r.take(name_len)?;
-            let name = std::str::from_utf8(name_bytes).map_err(|_| V2Error::Utf8)?.to_owned();
+            let name = std::str::from_utf8(name_bytes)
+                .map_err(|_| V2Error::Utf8)?
+                .to_owned();
             let layer = match kind {
                 TSCT_LAYER => {
                     let d_in = r.u32()? as usize;
@@ -221,7 +228,16 @@ impl ModelV2 {
                     let u = r.codes(d_in.checked_mul(d_rank).ok_or(V2Error::Truncated)?)?;
                     let s = r.f32s(d_rank)?;
                     let v = r.codes(d_out.checked_mul(d_rank).ok_or(V2Error::Truncated)?)?;
-                    LayerData::Tsct { in_dim: d_in, out_dim: d_out, rank: d_rank, alpha_u, alpha_v, u, s, v }
+                    LayerData::Tsct {
+                        in_dim: d_in,
+                        out_dim: d_out,
+                        rank: d_rank,
+                        alpha_u,
+                        alpha_v,
+                        u,
+                        s,
+                        v,
+                    }
                 }
                 FP32_LAYER => {
                     let ndim = r.u32()? as usize;
@@ -236,7 +252,10 @@ impl ModelV2 {
                         n = n.checked_mul(d).ok_or(V2Error::Truncated)?;
                         shape.push(d);
                     }
-                    LayerData::F32 { shape, data: r.f32s(n)? }
+                    LayerData::F32 {
+                        shape,
+                        data: r.f32s(n)?,
+                    }
                 }
                 other => return Err(V2Error::UnknownKind(other)),
             };
@@ -250,14 +269,18 @@ impl ModelV2 {
 
         let tensor = |name: &str, want: &[usize]| -> Result<Vec<f32>, V2Error> {
             match layers.get(name) {
-                Some(LayerData::F32 { shape, data }) if shape.as_slice() == want => Ok(data.clone()),
+                Some(LayerData::F32 { shape, data }) if shape.as_slice() == want => {
+                    Ok(data.clone())
+                }
                 Some(LayerData::F32 { .. }) => Err(V2Error::ShapeMismatch("tensor shape")),
                 Some(_) => Err(V2Error::InvalidField("tensor layer kind")),
                 None => Err(V2Error::MissingLayer(name.to_owned())),
             }
         };
         let tsct = |name: &str| -> Result<&LayerData, V2Error> {
-            layers.get(name).ok_or_else(|| V2Error::MissingLayer(name.to_owned()))
+            layers
+                .get(name)
+                .ok_or_else(|| V2Error::MissingLayer(name.to_owned()))
         };
 
         let stem_w = tensor("stem.weight", &[width, in_features, 1])?;
@@ -271,9 +294,16 @@ impl ModelV2 {
             let norm_b = tensor(&format!("{prefix}.norm.bias"), &[width])?;
             let name = format!("{prefix}.pw");
             let (d_in, d_out, d_rank, alpha_u, alpha_v, uc, sc, vc) = match tsct(&name)? {
-                LayerData::Tsct { in_dim, out_dim, rank: r, alpha_u, alpha_v, u, s, v } => {
-                    (*in_dim, *out_dim, *r, *alpha_u, *alpha_v, u, s, v)
-                }
+                LayerData::Tsct {
+                    in_dim,
+                    out_dim,
+                    rank: r,
+                    alpha_u,
+                    alpha_v,
+                    u,
+                    s,
+                    v,
+                } => (*in_dim, *out_dim, *r, *alpha_u, *alpha_v, u, s, v),
                 LayerData::F32 { .. } => return Err(V2Error::InvalidField("pw kind")),
             };
             if d_in != width || d_out != width || d_rank != rank || sc.len() != rank {
@@ -293,7 +323,13 @@ impl ModelV2 {
                     }
                 }
             }
-            blocks.push(Block { dw_w, dw_b, norm_w, norm_b, pw_w });
+            blocks.push(Block {
+                dw_w,
+                dw_b,
+                norm_w,
+                norm_b,
+                pw_w,
+            });
         }
         let norm_w = tensor("norm.weight", &[width])?;
         let norm_b = tensor("norm.bias", &[width])?;
@@ -327,12 +363,22 @@ impl ModelV2 {
     }
 
     pub fn memory_bytes(&self) -> usize {
-        let weights = self.stem_w.len() + self.stem_b.len() + self.norm_w.len() + self.norm_b.len()
-            + self.head_w.len() + self.head_b.len()
-            + self.x.len() + self.block_in.len() + self.conv.len() + self.ln.len() + self.head.len();
-        let blocks: usize = self.blocks.iter().map(|b| {
-            b.dw_w.len() + b.dw_b.len() + b.norm_w.len() + b.norm_b.len() + b.pw_w.len()
-        }).sum();
+        let weights = self.stem_w.len()
+            + self.stem_b.len()
+            + self.norm_w.len()
+            + self.norm_b.len()
+            + self.head_w.len()
+            + self.head_b.len()
+            + self.x.len()
+            + self.block_in.len()
+            + self.conv.len()
+            + self.ln.len()
+            + self.head.len();
+        let blocks: usize = self
+            .blocks
+            .iter()
+            .map(|b| b.dw_w.len() + b.dw_b.len() + b.norm_w.len() + b.norm_b.len() + b.pw_w.len())
+            .sum();
         (weights + blocks) * std::mem::size_of::<f32>()
     }
 

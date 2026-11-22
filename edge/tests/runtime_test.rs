@@ -2,8 +2,8 @@ mod common;
 
 use common::{fixture, request};
 use potok_edge::frame::{
-    build_request, crc16, FrameError, PotokUartV1, ReplyFrame, RequestFrame, PHASE_ARMED,
-    PHASE_FAULT, PHASE_FLIGHT, PHASE_LANDING, REPLY_LEN, REQUEST_LEN, FLAG_MOTOR_ARMED,
+    build_request, crc16, FrameError, PotokUartV1, ReplyFrame, RequestFrame, FLAG_MOTOR_ARMED,
+    PHASE_ARMED, PHASE_FAULT, PHASE_FLIGHT, PHASE_LANDING, REPLY_LEN, REQUEST_LEN,
 };
 use potok_edge::model::Model;
 use potok_edge::runtime::{PhasePolicy, Runtime, MAX_CONSECUTIVE_MISSES};
@@ -23,7 +23,10 @@ fn deterministic_output_for_fixed_fixture() {
         let req = request(seq);
         let ra = a.on_request(&req);
         let rb = b.on_request(&req);
-        assert_eq!(ra, rb, "same fixture + same frames must give bit-identical replies");
+        assert_eq!(
+            ra, rb,
+            "same fixture + same frames must give bit-identical replies"
+        );
         assert_eq!(ra.seq, seq);
         assert_eq!(ra.ai_healthy, 1);
         replies.push(ra);
@@ -80,14 +83,23 @@ fn crc_and_version_errors_are_refused() {
     assert!(layout.decode_request(&bytes).is_ok());
 
     bytes[30] ^= 0x80;
-    assert!(matches!(layout.decode_request(&bytes), Err(FrameError::CrcMismatch { .. })));
+    assert!(matches!(
+        layout.decode_request(&bytes),
+        Err(FrameError::CrcMismatch { .. })
+    ));
 
     let mut bytes = [0u8; REQUEST_LEN];
     let mut bad = request(4);
     bad.version = 2;
     build_request(&bad, &mut bytes).unwrap();
-    assert!(matches!(layout.decode_request(&bytes), Err(FrameError::VersionMismatch(2))));
-    assert_eq!(crc16(&bytes[..REQUEST_LEN - 2]), u16::from_le_bytes([bytes[54], bytes[55]]));
+    assert!(matches!(
+        layout.decode_request(&bytes),
+        Err(FrameError::VersionMismatch(2))
+    ));
+    assert_eq!(
+        crc16(&bytes[..REQUEST_LEN - 2]),
+        u16::from_le_bytes([bytes[54], bytes[55]])
+    );
 }
 
 #[test]
@@ -136,14 +148,19 @@ fn version_mismatch_disables_immediately() {
     build_request(&bad, &mut bytes).unwrap();
     let mut reply = [0u8; REPLY_LEN];
     assert!(handle_request(&PotokUartV1, &mut rt, &bytes, &mut reply).is_err());
-    assert!(rt.is_disabled(), "protocol version mismatch is fatal on the first frame");
+    assert!(
+        rt.is_disabled(),
+        "protocol version mismatch is fatal on the first frame"
+    );
 }
 
 #[test]
 fn reply_layout_uses_seq_and_ai_healthy() {
     let layout = PotokUartV1;
     let mut buf = [0u8; REPLY_LEN];
-    layout.encode_reply(&ReplyFrame::muted(77, false), &mut buf).unwrap();
+    layout
+        .encode_reply(&ReplyFrame::muted(77, false), &mut buf)
+        .unwrap();
     assert_eq!(u16::from_le_bytes([buf[2], buf[3]]), 77);
     assert_eq!(buf[9], 0);
     assert_eq!(crc16(&buf[..12]), u16::from_le_bytes([buf[12], buf[13]]));

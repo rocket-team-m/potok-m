@@ -127,3 +127,127 @@ runtime loads v2 and mutes on a forbidden phase.
 
 `cargo test`: 19/19 pass, no warnings. `cargo check`: clean. All files read
 from `ai/` were read-only; nothing outside `edge/` was modified.
+
+## 2026-11-22 — stateful student and speculative dispatch
+
+Added `src/student_runtime.rs` (v2 `model_kind=2` reader, dequantized TSCT
+factors, per-frame state, warmup), `src/speculative.rs` (`SpeculativeRuntime`
+holding the existing windowed teacher **and** the student), `src/bin/bench_spec.rs`
+(p50/p99 for all three dispatch paths), and `tests/speculative_test.rs`
+(12 tests) plus `tests/real_models_spec_test.rs` (3 tests, skips when the data
+volume is not mounted). Wired through `src/lib.rs`, `src/runtime.rs`
+(`infer_window`, `max_correction`), `src/uart.rs` (`handle_spec_request`) and
+`src/frame.rs` (`PHASE_BURN` alias). No files outside `edge/` were modified.
+
+### Format mismatch found against the real export — FIXED
+
+The first reader was written from SPEC_STUDENT.md alone, using a 40-byte
+header (`width, blocks, loops, decay, g_max, n_records`) and a private fixture.
+The real `ai/src/potok_ai/export.py::export_student` file uses the canonical
+v2 header extended with `model_kind`: **56 bytes** —
+`in_features, width, out_features, rank, n_blocks, loops, decay, g_max, flags,
+n_layers` — and 20 layer records (`blocks.{b}.proj` TSCT,
+`blocks.{b}.rec_h/rec_x`, `stem`, `norm`, `alloc_logits`, `g_max`,
+`head_corr`, `head_conf`). The per-frame input is **10** floats (8 sensors +
+phase + flags), not 8. The Python forward also has a stem projection, a
+LayerNorm before the head, learned `alloc_logits` softmax, **outer** loop over
+iterations with **inner** block chain, and scales corrections by
+`tanh(|g_max|)` from the `g_max` tensor. The reader and the in-crate fixture
+writer were rewritten to this exact layout; `ai/` was not touched. TSCT
+dequantization keeps the canonical square-map convention
+(`W[out,in] = U[out,k]·alpha_u·s[k]·V[in,k]·alpha_v`) already used by the
+teacher reader. LayerNorm uses the **biased** variance (divide by n): the first
+attempt used n−1 and read 0.9 % low against the Python model. Real-export
+cross-check on a fixed 10-float frame: Rust
+`[0.07282478, -0.02531921, 0.9089091]` vs Python
+`[0.07282476, -0.02531959, 0.90890908]` — max error **5.3e-7**, asserted at
+1e-6 in `real_models_spec_test.rs`.
+
+Two naming/threshold facts, recorded rather than silently changed:
+
+- `protocol/uart.yaml` calls phase 0 **BURN**; the edge frame copy calls it
+  `PHASE_IDLE`. Added `PHASE_BURN` as an alias of the same byte and used it in
+  the phase gate; no protocol file was edited.
+- Both model heads are `tanh`-bounded by `g_max`, so `|g_t - g_s| <= 2·g_max`
+  and the specified `> 3·g_max` divergence trip is unreachable with shared
+  bounds. Kept the literal 3.0 as the default `divergence_factor`, with a
+  public knob to exercise the log+warmup path in tests. Separately, the legacy
+  POTM teacher returns **raw** head logits through `infer_window`, so the
+  dispatch clamps both models to the system bound before applying or
+  comparing them (this also fixed an 80 ms/cycle warmup storm).
+
+### Verification
+
+- `cargo check --all-targets`: clean, no warnings.
+- `cargo test`: **35/35 pass** (5 lib, 4 model, 1 optimized, 7 runtime,
+  12 speculative, 3 real-export, 3 v2 fixture). `cargo fmt` applied.
+- Acceptance tests cover model_kind dispatch, student determinism and state
+  reset, warmup replay, BURN/motor-armed phase gate, low-confidence teacher
+  call, 20-frame forced-check cadence and its reset, CRC/seq bypass,
+  checksum refusal, 30 s (1500 steps) finite bounded state, divergence log,
+  and a <10 ms worst-case cycle.
+- Release benchmark, 2000 synthetic frames, `bench-spec` (x86_64 dev box):
+  normal p50/p99 **69.8 / 93.1 us**, low-confidence **186.8 / 224.7 us**,
+  forced-check **132.1 / 205.2 us**; worst cycle 0.835 ms incl. 0.61 ms UART
+  wire, well under 10 ms.
+- Release benchmark with the **real exports** (`distill.bin` teacher,
+  `student.bin` student): normal **47.1 / 87.0 us**, low-confidence
+  **330.5 / 350.5 us**, forced-check **236.4 / 332.9 us**; worst cycle
+  **0.960 ms** / 10 ms. Debug-build integration run (600 frames) measured
+  p99 0.84 / 6.56 / 6.92 ms — also under budget.
+- At most one teacher call per cycle is enforced by construction (single
+  `if low_conf || forced` block), a `debug_assert!` on the counter delta, and
+  a benchmark assertion `teacher_calls <= frames`.
+
+Skipped: no GPU jobs, no pushes, no `ai/` edits. Outcome of a real A/B of
+student vs teacher quality is out of scope here — this change only wires and
+times the dispatch.
+
+## 2026-11-22 — Python student forward update (supersedes the cross-check above)
+
+`ai/src/potok_ai/student.py` changed during training work; read-only, not
+modified. `src/student_runtime.rs` now matches it exactly. The new real export
+(`potok-m-data/models/student.bin`, 75 611 B, g_max 0.910741) loads and runs.
+
+### Spec deviations (authoritative, replace the older SPEC_STUDENT.md reading)
+
+1. **Recurrent state is leaky.** Python
+   `_StateBlock.forward`: `candidate = tanh(rec_x(x) + rec_h(h_prev))`,
+   `h = 0.8*h_prev + 0.2*candidate`, and the TSCT projection is applied to the
+   **new** `h`. SPEC_STUDENT.md's `h = tanh(W_h h_prev + W_x x)` with no carry
+   is obsolete. The 0.8/0.2 coefficients are literals in the Python forward,
+   not the model's `decay` field.
+2. **Final feature is `LayerNorm(total + source)`**, where `total` is the
+   decayed/allocated sum of loop outputs and `source` is the last block's
+   output of the last iteration (the stem vector is overwritten by the block
+   chain). Normalizing `total` alone is obsolete.
+3. **Head:** `corrections = tanh(|g_max|) * tanh(head_corr(z))`,
+   `confidence = sigmoid(head_conf(z))`, with `g_max` taken from the exported
+   tensor. This part already matched; kept unchanged.
+
+The module doc in `src/student_runtime.rs` carries the same three deviations.
+Dispatch wiring (one teacher call per cycle, 20-frame forced check, BURN gate,
+CRC/seq bypass, divergence log) is unchanged.
+
+### Cross-check and verification
+
+Python goldens regenerated from the **new** export with the `ai` venv
+(`load_student_export(...).to_model().step/warmup`), read-only. Rust errors
+are at most **1e-8**, asserted at 1e-5 in `tests/real_models_spec_test.rs`:
+
+| case | Rust `[g0, g1, confidence]` | Python reference |
+|---|---|---|
+| zero state, one frame | `[0.012839871, -0.110565000, 0.813980000]` | `[0.012839884, -0.110564999, 0.813979983]` |
+| after 3-frame warmup | `[0.004873989, -0.107443390, 0.817990240]` | `[0.004873985, -0.107443415, 0.817990184]` |
+| after 50-frame warmup | `[-0.002074861, -0.110135900, 0.818366600]` | `[-0.002074862, -0.110135905, 0.818366587]` |
+
+The 5.3e-7 agreement recorded in the previous section was against the **old**
+export and old forward; it is superseded by the table above.
+
+- `cargo fmt`, `cargo check --all-targets`: clean.
+- `cargo test`: **35/35 pass**, including the 30 s bounded-state test (the
+  convex `0.8/0.2` update keeps `|h| <= 1`).
+- Release bench with the new real exports, 2000 frames: normal p50/p99
+  **47.4 / 67.3 us**, low-confidence **294.4 / 461.5 us**, forced-check
+  **285.4 / 372.5 us**; worst cycle **1.071 ms** incl. 0.61 ms UART wire,
+  under the 10 ms budget.

@@ -3,8 +3,8 @@
 //! No Python, no checkpoint files and no network are needed.
 
 use crate::model::{
-    CHECKSUM_BYTES, FORMAT_VERSION, HEADER_BYTES, LAYER_DESC_BYTES, MAGIC, TENSOR_DESC_BYTES,
-    TENSORS_PER_LAYER,
+    CHECKSUM_BYTES, FORMAT_VERSION, HEADER_BYTES, LAYER_DESC_BYTES, MAGIC, TENSORS_PER_LAYER,
+    TENSOR_DESC_BYTES,
 };
 use sha2::{Digest, Sha256};
 
@@ -39,7 +39,10 @@ struct Lcg(u64);
 
 impl Lcg {
     fn next(&mut self) -> u32 {
-        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.0 = self
+            .0
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         (self.0 >> 33) as u32
     }
 
@@ -88,7 +91,6 @@ impl Blob {
             Self::Ternary(_, _) => 2,
         }
     }
-
 }
 
 fn f32s(rng: &mut Lcg, n: usize, magnitude: f32) -> Blob {
@@ -119,7 +121,11 @@ pub fn build_fixture(cfg: FixtureConfig, seed: u64) -> Vec<u8> {
     push(f32s(&mut rng, c * i, 0.4), c, i); // in_w
     push(f32s(&mut rng, c, 0.1), c, 0); // in_b
     push(Blob::F32(vec![1.0; c]), c, 0); // final_norm
-    push(f32s(&mut rng, cfg.out_features * c, 0.3), cfg.out_features, c); // out_w
+    push(
+        f32s(&mut rng, cfg.out_features * c, 0.3),
+        cfg.out_features,
+        c,
+    ); // out_w
     push(f32s(&mut rng, cfg.out_features, 0.05), cfg.out_features, 0); // out_b
 
     for _ in 0..cfg.layers {
@@ -154,7 +160,11 @@ pub fn build_fixture(cfg: FixtureConfig, seed: u64) -> Vec<u8> {
     put_u32(&mut body, 36, d as u32);
     put_u32(&mut body, 40, n_tensors as u32);
     for l in 0..cfg.layers {
-        put_u32(&mut body, HEADER_BYTES + l * LAYER_DESC_BYTES, (5 + l * TENSORS_PER_LAYER) as u32);
+        put_u32(
+            &mut body,
+            HEADER_BYTES + l * LAYER_DESC_BYTES,
+            (5 + l * TENSORS_PER_LAYER) as u32,
+        );
     }
 
     let mut cursor = 0usize;

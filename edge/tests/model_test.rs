@@ -18,7 +18,10 @@ fn refuses_checksum_mismatch() {
     let mut bytes = fixture();
     let last = bytes.len() - 1;
     bytes[last] ^= 0x01;
-    assert_eq!(Model::from_bytes(&bytes).unwrap_err(), ModelError::ChecksumMismatch);
+    assert_eq!(
+        Model::from_bytes(&bytes).unwrap_err(),
+        ModelError::ChecksumMismatch
+    );
 }
 
 #[test]
@@ -43,7 +46,10 @@ fn refuses_bad_magic_and_unsupported_version() {
 
 #[test]
 fn refuses_truncated_file() {
-    assert_eq!(Model::from_bytes(&fixture()[..HEADER_BYTES]).unwrap_err(), ModelError::Truncated);
+    assert_eq!(
+        Model::from_bytes(&fixture()[..HEADER_BYTES]).unwrap_err(),
+        ModelError::Truncated
+    );
 }
 
 fn digester(body: &[u8], out: &mut [u8]) {

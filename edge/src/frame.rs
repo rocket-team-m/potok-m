@@ -15,7 +15,10 @@ pub const MAGIC_REPLY: u16 = 0x5250; // "RP"
 pub const PROTOCOL_VERSION: u8 = 1;
 pub const CORRECTION_SCALE: f32 = 0.001;
 
+/// Phase 0 is `BURN` in `protocol/uart.yaml`; the local reimplementation
+/// inherited the older name `Idle`. Same byte, one meaning.
 pub const PHASE_IDLE: u8 = 0;
+pub const PHASE_BURN: u8 = PHASE_IDLE;
 pub const PHASE_ARMED: u8 = 1;
 pub const PHASE_FLIGHT: u8 = 2;
 pub const PHASE_LANDING: u8 = 3;
@@ -137,7 +140,10 @@ pub struct PotokUartV1;
 impl FrameLayout for PotokUartV1 {
     fn decode_request(&self, bytes: &[u8]) -> Result<RequestFrame, FrameError> {
         if bytes.len() < REQUEST_LEN {
-            return Err(FrameError::TooShort { got: bytes.len(), want: REQUEST_LEN });
+            return Err(FrameError::TooShort {
+                got: bytes.len(),
+                want: REQUEST_LEN,
+            });
         }
         let magic = u16::from_le_bytes([bytes[0], bytes[1]]);
         if magic != MAGIC_REQUEST {
@@ -156,9 +162,8 @@ impl FrameLayout for PotokUartV1 {
         let time_us = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
         let phase = bytes[8];
         let flags = bytes[10];
-        let f32_at = |off: usize| -> f32 {
-            f32::from_le_bytes(bytes[off..off + 4].try_into().unwrap())
-        };
+        let f32_at =
+            |off: usize| -> f32 { f32::from_le_bytes(bytes[off..off + 4].try_into().unwrap()) };
         Ok(RequestFrame {
             seq,
             time_us,
@@ -175,7 +180,10 @@ impl FrameLayout for PotokUartV1 {
 
     fn encode_reply(&self, reply: &ReplyFrame, out: &mut [u8]) -> Result<(), FrameError> {
         if out.len() < REPLY_LEN {
-            return Err(FrameError::TooShort { got: out.len(), want: REPLY_LEN });
+            return Err(FrameError::TooShort {
+                got: out.len(),
+                want: REPLY_LEN,
+            });
         }
         out.fill(0);
         out[0..2].copy_from_slice(&MAGIC_REPLY.to_le_bytes());
@@ -194,7 +202,10 @@ impl FrameLayout for PotokUartV1 {
 /// Build a request frame for tests and synthetic benchmarks.
 pub fn build_request(req: &RequestFrame, out: &mut [u8]) -> Result<(), FrameError> {
     if out.len() < REQUEST_LEN {
-        return Err(FrameError::TooShort { got: out.len(), want: REQUEST_LEN });
+        return Err(FrameError::TooShort {
+            got: out.len(),
+            want: REQUEST_LEN,
+        });
     }
     out.fill(0);
     out[0..2].copy_from_slice(&MAGIC_REQUEST.to_le_bytes());
@@ -204,7 +215,12 @@ pub fn build_request(req: &RequestFrame, out: &mut [u8]) -> Result<(), FrameErro
     out[9] = req.version;
     out[10] = req.flags;
     let mut at = 12usize;
-    for v in req.gyro.iter().chain(req.accel.iter()).chain(req.mag.iter()) {
+    for v in req
+        .gyro
+        .iter()
+        .chain(req.accel.iter())
+        .chain(req.mag.iter())
+    {
         out[at..at + 4].copy_from_slice(&v.to_le_bytes());
         at += 4;
     }
@@ -242,7 +258,10 @@ mod tests {
         build_request(&sample(), &mut buf).unwrap();
         assert_eq!(layout.decode_request(&buf).unwrap(), sample());
         buf[20] ^= 0x01;
-        assert!(matches!(layout.decode_request(&buf), Err(FrameError::CrcMismatch { .. })));
+        assert!(matches!(
+            layout.decode_request(&buf),
+            Err(FrameError::CrcMismatch { .. })
+        ));
     }
 
     #[test]

@@ -42,7 +42,11 @@ fn main() {
     });
     eprintln!(
         "potok-edge: {}, {} bytes resident, 50-frame window",
-        if runtime.is_v2() { "v2 export" } else { "legacy POTM" },
+        if runtime.is_v2() {
+            "v2 export"
+        } else {
+            "legacy POTM"
+        },
         runtime.memory_bytes()
     );
     if let Err(e) = serve(runtime, &device, baud) {

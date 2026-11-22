@@ -1,11 +1,11 @@
 //! Frame-to-frame safety state: sliding window, phase gate, sequence and
 //! miss accounting. No I/O and no allocation happens per frame.
 
-use crate::frame::{
-    ReplyFrame, RequestFrame, FLAG_MOTOR_ARMED, PHASE_ARMED, PHASE_FAULT, PHASE_IDLE,
-    CORRECTION_SCALE,
-};
 use crate::format_v2::ModelV2;
+use crate::frame::{
+    ReplyFrame, RequestFrame, CORRECTION_SCALE, FLAG_MOTOR_ARMED, PHASE_ARMED, PHASE_FAULT,
+    PHASE_IDLE,
+};
 use crate::model::{Model, Scratch};
 use std::collections::VecDeque;
 use std::fs;
@@ -38,11 +38,18 @@ impl PhasePolicy {
         forbidden_phases[PHASE_IDLE as usize] = true;
         forbidden_phases[PHASE_ARMED as usize] = true;
         forbidden_phases[PHASE_FAULT as usize] = true;
-        Self { forbidden_phases, forbid_motor_armed: true }
+        Self {
+            forbidden_phases,
+            forbid_motor_armed: true,
+        }
     }
 
     pub fn is_forbidden(&self, phase: u8, flags: u8) -> bool {
-        let p = self.forbidden_phases.get(phase as usize).copied().unwrap_or(true);
+        let p = self
+            .forbidden_phases
+            .get(phase as usize)
+            .copied()
+            .unwrap_or(true);
         p || (self.forbid_motor_armed && flags & FLAG_MOTOR_ARMED != 0)
     }
 }
@@ -123,7 +130,10 @@ impl Runtime {
 
     pub fn with_policy(model: Model, policy: PhasePolicy) -> Self {
         Self::from_engine(
-            Engine::PotM { scratch: Scratch::new(&model), model },
+            Engine::PotM {
+                scratch: Scratch::new(&model),
+                model,
+            },
             policy,
         )
     }
@@ -197,6 +207,18 @@ impl Runtime {
     /// Current 50x8 sliding window, oldest first, flattened row-major.
     pub fn last_window(&self) -> &[f32] {
         &self.flat
+    }
+
+    /// Run the windowed model on an explicit flattened window without
+    /// touching sequence, phase or miss state. Speculative dispatch owns its
+    /// own window and uses this to make at most one teacher call per cycle.
+    pub fn infer_window(&mut self, window: &[f32]) -> [f32; 3] {
+        self.engine.forward(window)
+    }
+
+    /// Largest correction this engine's head can emit, in radians.
+    pub fn max_correction(&self) -> f32 {
+        self.engine.max_correction()
     }
 
     /// Total bytes owned by the dequantized weights and the reusable buffers.
@@ -274,7 +296,9 @@ impl Runtime {
         let bound = self.engine.max_correction();
         let clamp = |v: f32| -> i16 {
             let v = v.clamp(-bound, bound);
-            (v / CORRECTION_SCALE).round().clamp(i16::MIN as f32, i16::MAX as f32) as i16
+            (v / CORRECTION_SCALE)
+                .round()
+                .clamp(i16::MIN as f32, i16::MAX as f32) as i16
         };
         let confidence = conf.clamp(0.0, 1.0);
         ReplyFrame {

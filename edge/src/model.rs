@@ -165,8 +165,14 @@ impl Model {
             return Err(ModelError::ShapeMismatch("header reserved field"));
         }
 
-        if n_layers == 0 || channels == 0 || kernel == 0 || rank == 0 || ff_width == 0
-            || window == 0 || in_features == 0 || out_features != 3
+        if n_layers == 0
+            || channels == 0
+            || kernel == 0
+            || rank == 0
+            || ff_width == 0
+            || window == 0
+            || in_features == 0
+            || out_features != 3
             || n_tensors != 5 + n_layers * TENSORS_PER_LAYER
         {
             return Err(ModelError::ShapeMismatch("header counts"));
@@ -216,7 +222,8 @@ impl Model {
             }
         };
         for (kind, rows, cols, offset, len) in &descs {
-            if table_end + offset + len > body.len() || *len != expected_bytes(*kind, *rows, *cols) {
+            if table_end + offset + len > body.len() || *len != expected_bytes(*kind, *rows, *cols)
+            {
                 return Err(ModelError::ShapeMismatch("tensor payload size"));
             }
         }
@@ -246,38 +253,49 @@ impl Model {
             let base = table_end + off;
             let mut v = Vec::with_capacity(rows * cols.max(1));
             for i in 0..rows * cols.max(1) {
-                v.push(f32::from_le_bytes(body[base + i * 4..base + i * 4 + 4].try_into().unwrap()));
+                v.push(f32::from_le_bytes(
+                    body[base + i * 4..base + i * 4 + 4].try_into().unwrap(),
+                ));
             }
             Ok(v)
         };
-        let ternary_tensor = |idx: usize, rows: usize, cols: usize| -> Result<Vec<f32>, ModelError> {
-            let (kind, r, c, off, _) = descs.get(idx).ok_or(ModelError::BadTensorIndex(idx))?;
-            if *kind != TensorKind::Ternary || *r != rows || *c != cols {
-                return Err(ModelError::ShapeMismatch("ternary tensor"));
-            }
-            let base = table_end + off;
-            let mut scales = Vec::with_capacity(rows);
-            for i in 0..rows {
-                scales.push(f32::from_le_bytes(body[base + i * 4..base + i * 4 + 4].try_into().unwrap()));
-            }
-            let codes_at = base + rows * 4;
-            let mut out = Vec::with_capacity(rows * cols);
-            for r in 0..rows {
-                for c in 0..cols {
-                    let code = body[codes_at + r * cols + c];
-                    let q = match code {
-                        0 => -1.0f32,
-                        1 => 0.0,
-                        2 => 1.0,
-                        other => return Err(ModelError::InvalidTernaryCode(other)),
-                    };
-                    out.push(q * scales[r]);
+        let ternary_tensor =
+            |idx: usize, rows: usize, cols: usize| -> Result<Vec<f32>, ModelError> {
+                let (kind, r, c, off, _) = descs.get(idx).ok_or(ModelError::BadTensorIndex(idx))?;
+                if *kind != TensorKind::Ternary || *r != rows || *c != cols {
+                    return Err(ModelError::ShapeMismatch("ternary tensor"));
                 }
-            }
-            Ok(out)
-        };
+                let base = table_end + off;
+                let mut scales = Vec::with_capacity(rows);
+                for i in 0..rows {
+                    scales.push(f32::from_le_bytes(
+                        body[base + i * 4..base + i * 4 + 4].try_into().unwrap(),
+                    ));
+                }
+                let codes_at = base + rows * 4;
+                let mut out = Vec::with_capacity(rows * cols);
+                for r in 0..rows {
+                    for c in 0..cols {
+                        let code = body[codes_at + r * cols + c];
+                        let q = match code {
+                            0 => -1.0f32,
+                            1 => 0.0,
+                            2 => 1.0,
+                            other => return Err(ModelError::InvalidTernaryCode(other)),
+                        };
+                        out.push(q * scales[r]);
+                    }
+                }
+                Ok(out)
+            };
         // Dense TSCT reconstruction: W = U diag(s) V^T.
-        let low_rank = |u_idx: usize, v_idx: usize, s_idx: usize, u_rows: usize, v_rows: usize, rank: usize| -> Result<Vec<f32>, ModelError> {
+        let low_rank = |u_idx: usize,
+                        v_idx: usize,
+                        s_idx: usize,
+                        u_rows: usize,
+                        v_rows: usize,
+                        rank: usize|
+         -> Result<Vec<f32>, ModelError> {
             let u = ternary_tensor(u_idx, u_rows, rank)?;
             let v = ternary_tensor(v_idx, v_rows, rank)?;
             let s = f32_tensor(s_idx, rank, 0)?;
@@ -387,7 +405,8 @@ impl Model {
                     let mean = src.iter().map(|v| v * v).sum::<f32>() / c as f32;
                     let inv = 1.0 / (mean + 1e-6f32).sqrt();
                     let dst = &mut scratch.norm1[base..base + c];
-                    for ((dst, src), gain) in dst.iter_mut().zip(src.iter()).zip(layer.norm1.iter()) {
+                    for ((dst, src), gain) in dst.iter_mut().zip(src.iter()).zip(layer.norm1.iter())
+                    {
                         *dst = *src * inv * *gain;
                     }
                 }

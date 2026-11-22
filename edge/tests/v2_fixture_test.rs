@@ -2,7 +2,7 @@
 //! Read-only: this test never writes into another directory.
 
 use potok_edge::format_v2::ModelV2;
-use potok_edge::frame::{RequestFrame, PHASE_FAULT, PHASE_LANDING, PROTOCOL_VERSION, FLAG_IMU_OK};
+use potok_edge::frame::{RequestFrame, FLAG_IMU_OK, PHASE_FAULT, PHASE_LANDING, PROTOCOL_VERSION};
 use potok_edge::runtime::Runtime;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -21,8 +21,17 @@ fn read_npy_f32(path: PathBuf) -> Vec<f32> {
     assert!(header.contains("'<f4'"), "expected float32 fixture");
     assert!(!header.contains("'fortran_order': True"));
     let shape_text = header.split("'shape':").nth(1).unwrap();
-    let inside = shape_text.split('(').nth(1).unwrap().split(')').next().unwrap();
-    let dims: Vec<usize> = inside.split(',').filter_map(|s| s.trim().parse().ok()).collect();
+    let inside = shape_text
+        .split('(')
+        .nth(1)
+        .unwrap()
+        .split(')')
+        .next()
+        .unwrap();
+    let dims: Vec<usize> = inside
+        .split(',')
+        .filter_map(|s| s.trim().parse().ok())
+        .collect();
     let count: usize = dims.iter().product();
     let data = &d[10 + hlen..10 + hlen + count * 4];
     data.chunks_exact(4)
@@ -50,7 +59,10 @@ fn loads_python_v2_fixture_and_matches_expected() {
     let got = model.forward(&fixture_window());
     for i in 0..3 {
         let err = (got[i] - expected[i]).abs();
-        println!("out[{i}]: got {:?}, expected {:?}, abs err {err:.3e}", got[i], expected[i]);
+        println!(
+            "out[{i}]: got {:?}, expected {:?}, abs err {err:.3e}",
+            got[i], expected[i]
+        );
         // fp32 accumulation order differs between Rust and PyTorch's CPU
         // kernels. Measured max error on this fixture is 1.2e-7 (~1 ULP);
         // the documented bound is 1e-6 absolute (~8 ULPs at these magnitudes).
