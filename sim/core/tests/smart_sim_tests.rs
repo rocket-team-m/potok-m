@@ -219,8 +219,7 @@ fn validation_v2_roundtrip_carries_conditioning_and_split() {
             mass_kg: episodes[0].meta.conditioning.mass_kg,
             area_m2: 0.011,
             cd0: 0.4,
-            static_margin_cal: (0.0765 / (2.0 * (0.011_f64 / std::f64::consts::PI).sqrt()))
-                as f32,
+            static_margin_cal: (0.0765 / (2.0 * (0.011_f64 / std::f64::consts::PI).sqrt())) as f32,
             thrust_peak_n: 590.0,
             gyro_noise: 0.0015,
         }

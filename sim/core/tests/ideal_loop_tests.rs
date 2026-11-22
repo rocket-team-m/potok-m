@@ -178,7 +178,10 @@ fn generated_card_reproduces_placeholder_and_placeholder_is_counted() {
     for (a, b) in card.features.iter().zip(placeholder.features.iter()) {
         assert!((a - b).abs() < 1e-2, "feature {a} vs {b}");
     }
-    assert!((card.apogee_m - placeholder.apogee_m).abs() < 1e-3, "card apogee mismatch");
+    assert!(
+        (card.apogee_m - placeholder.apogee_m).abs() < 1e-3,
+        "card apogee mismatch"
+    );
 }
 
 #[test]
