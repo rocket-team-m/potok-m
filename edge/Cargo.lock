@@ -158,6 +158,7 @@ dependencies = [
 [[package]]
 name = "potok-protocol"
 version = "0.1.0"
+source = "git+https://github.com/rocket-team-m/potok-m-protocol.git?branch=main#78338eebc8229baafeb897899e6bbd7393dbb484"
 
 [[package]]
 name = "proc-macro2"

@@ -11,7 +11,7 @@ license = "MIT"
 [dependencies]
 sha2 = "0.10"
 serialport = "4"
-potok-protocol = { path = "../protocol/potok-protocol" }
+potok-protocol = { git = "https://github.com/rocket-team-m/potok-m-protocol.git", branch = "main" }
 
 [lib]
 name = "potok_edge"
