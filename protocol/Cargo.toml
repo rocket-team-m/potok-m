@@ -1,7 +1,0 @@
-[workspace]
-resolver = "2"
-members = ["generator", "potok-protocol"]
-
-[workspace.package]
-edition = "2021"
-license = "MIT"
