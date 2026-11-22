@@ -96,6 +96,9 @@ jobs:
           for f in files:
               with open(f, encoding="utf-8", errors="replace") as fh:
                   text = fh.read()
+              # Examples inside code fences/spans are not links.
+              text = re.sub(r'```.*?```', '', text, flags=re.S)
+              text = re.sub(r'`[^`\n]*`', '', text)
               targets = [m.group(1) for m in LINK.finditer(text)]
               targets += [m.group(1) for m in REF.finditer(text)]
               for target in targets:

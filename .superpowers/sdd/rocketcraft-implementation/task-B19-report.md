@@ -1,7 +1,7 @@
 # Task B19 — CI hardening
 
 **Status:** implemented; one inherited (pre-existing) blocker on the binary-size check is flagged below.
-**Commit:** `8dd4571` (`ci: add GPL license gate and markdown link checks to guard workflow`), local only, no push.
+**Commit:** `8dd4571` (`ci: add GPL license gate and markdown link checks to guard workflow`) plus local follow-up fixes, no push.
 
 ## Scope
 
