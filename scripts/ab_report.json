@@ -1,0 +1,1151 @@
+{
+  "aggregate": {
+    "loopwm": {
+      "apogee_retention_pct": 100.0004140216145,
+      "assisted": {
+        "apogee_m": 1300.2597522907788,
+        "lateral_rms_m": 0.008701956519009915,
+        "tracking_rmse_norm": 0.7084718623006628
+      },
+      "baseline": {
+        "apogee_m": 1300.2543689566478,
+        "lateral_rms_m": 0.05152838635789812,
+        "tracking_rmse_norm": 0.9425195765671012
+      },
+      "episodes": 20,
+      "gate_open_ticks": 401,
+      "gate_trips": 11599,
+      "interventions": 401,
+      "lateral_rms_ratio_pct": 16.88769459724427,
+      "max_correction_all_ticks": 0.8311668038368225,
+      "max_correction_applied": 0.8311230540275574
+    },
+    "lrs": {
+      "apogee_retention_pct": 100.00042917404325,
+      "assisted": {
+        "apogee_m": 1300.2599493108955,
+        "lateral_rms_m": 0.0063393442345490054,
+        "tracking_rmse_norm": 0.707575007566494
+      },
+      "baseline": {
+        "apogee_m": 1300.2543689566478,
+        "lateral_rms_m": 0.05152838635789812,
+        "tracking_rmse_norm": 0.9425195765671012
+      },
+      "episodes": 20,
+      "gate_open_ticks": 401,
+      "gate_trips": 11599,
+      "interventions": 401,
+      "lateral_rms_ratio_pct": 12.302625179290771,
+      "max_correction_all_ticks": 0.876974880695343,
+      "max_correction_applied": 0.8769737482070923
+    }
+  },
+  "data": {
+    "gate_open_ticks_primary": 401,
+    "held_episodes": 20,
+    "held_scenarios": [
+      "scenario_16",
+      "scenario_17",
+      "scenario_18",
+      "scenario_19"
+    ],
+    "held_ticks": 12000,
+    "seed": 1,
+    "seed_note": "3 seeds not used: generation seed is fixed by the task and both students were trained at seed 1; the 4 held-out scenarios (20 episodes) are the independent cells.",
+    "seeds_used": [
+      1
+    ],
+    "train_episodes": 80,
+    "train_scenarios": [
+      "scenario_00",
+      "scenario_01",
+      "scenario_02",
+      "scenario_03",
+      "scenario_04",
+      "scenario_05",
+      "scenario_06",
+      "scenario_07",
+      "scenario_08",
+      "scenario_09",
+      "scenario_10",
+      "scenario_11",
+      "scenario_12",
+      "scenario_13",
+      "scenario_14",
+      "scenario_15"
+    ]
+  },
+  "deterministic": true,
+  "exit_code": 0,
+  "gate_thresholds": {
+    "loopwm": 0.03968253968253968,
+    "lrs": 0.0001229213791769127
+  },
+  "per_episode": {
+    "loopwm": [
+      {
+        "assisted": {
+          "apogee_m": 1221.2178876296614,
+          "lateral_y_sq": 5.134379058933204e-07,
+          "tracking_e_sq": 0.5068312156870832
+        },
+        "baseline": {
+          "apogee_m": 1221.217489105903,
+          "lateral_y_sq": 1.800309592645199e-05,
+          "tracking_e_sq": 0.8429714317594256
+        },
+        "gate_trips": 593,
+        "index": 16,
+        "interventions": 7,
+        "max_correction_all": 0.8311668038368225,
+        "max_correction_applied": 0.8311230540275574,
+        "mean_correction_applied": 0.8311230540275574,
+        "scenario": "scenario_16",
+        "ticks_gate_open": 7,
+        "ticks_total": 600
+      },
+      {
+        "assisted": {
+          "apogee_m": 1495.9147105498796,
+          "lateral_y_sq": 4.44452388857494e-05,
+          "tracking_e_sq": 0.5025740693981942
+        },
+        "baseline": {
+          "apogee_m": 1495.9098481674405,
+          "lateral_y_sq": 0.0015584199957773901,
+          "tracking_e_sq": 0.8824000023066997
+        },
+        "gate_trips": 580,
+        "index": 17,
+        "interventions": 20,
+        "max_correction_all": 0.8311634063720703,
+        "max_correction_applied": 0.8311230540275574,
+        "mean_correction_applied": 0.8311230540275574,
+        "scenario": "scenario_17",
+        "ticks_gate_open": 20,
+        "ticks_total": 600
+      },
+      {
+        "assisted": {
+          "apogee_m": 1194.8189218609382,
+          "lateral_y_sq": 7.908681540592469e-05,
+          "tracking_e_sq": 0.5052217126753727
+        },
+        "baseline": {
+          "apogee_m": 1194.8128684003696,
+          "lateral_y_sq": 0.002773086108228041,
+          "tracking_e_sq": 0.8578782637243687
+        },
+        "gate_trips": 577,
+        "index": 18,
+        "interventions": 23,
+        "max_correction_all": 0.8311538696289062,
+        "max_correction_applied": 0.8311230540275574,
+        "mean_correction_applied": 0.8311230540275574,
+        "scenario": "scenario_18",
+        "ticks_gate_open": 23,
+        "ticks_total": 600
+      },
+      {
+        "assisted": {
+          "apogee_m": 1351.27311728603,
+          "lateral_y_sq": 1.007365171362695e-05,
+          "tracking_e_sq": 0.5012784140947039
+        },
+        "baseline": {
+          "apogee_m": 1351.2707396026244,
+          "lateral_y_sq": 0.00035322074207698814,
+          "tracking_e_sq": 0.894400002038479
+        },
+        "gate_trips": 586,
+        "index": 19,
+        "interventions": 14,
+        "max_correction_all": 0.8311662673950195,
+        "max_correction_applied": 0.8311230540275574,
+        "mean_correction_applied": 0.8311230540275574,
+        "scenario": "scenario_19",
+        "ticks_gate_open": 14,
+        "ticks_total": 600
+      },
+      {
+        "assisted": {
+          "apogee_m": 1328.035741009678,
+          "lateral_y_sq": 5.43654384908868e-05,
+          "tracking_e_sq": 0.5080651716210175
+        },
+        "baseline": {
+          "apogee_m": 1328.03118320795,
+          "lateral_y_sq": 0.0019062601202615905,
+          "tracking_e_sq": 0.8315428605863027
+        },
+        "gate_trips": 579,
+        "index": 36,
+        "interventions": 21,
+        "max_correction_all": 0.8311572074890137,
+        "max_correction_applied": 0.8311230540275574,
+        "mean_correction_applied": 0.8311230540275574,
+        "scenario": "scenario_16",
+        "ticks_gate_open": 21,
+        "ticks_total": 600
+      },
+      {
+        "assisted": {
+          "apogee_m": 1402.0898464908744,
+          "lateral_y_sq": 7.908681540592469e-05,
+          "tracking_e_sq": 0.5018417425342936
+        },
+        "baseline": {
+          "apogee_m": 1402.0833762128696,
+          "lateral_y_sq": 0.002773086108228041,
+          "tracking_e_sq": 0.889182610850749
+        },
+        "gate_trips": 577,
+        "index": 37,
+        "interventions": 23,
+        "max_correction_all": 0.8311499953269958,
+        "max_correction_applied": 0.8311230540275574,
+        "mean_correction_applied": 0.8311230540275574,
+        "scenario": "scenario_17",
+        "ticks_gate_open": 23,
+        "ticks_total": 600
+      },
+      {
+        "assisted": {
+          "apogee_m": 1102.4895799035098,
+          "lateral_y_sq": 2.8732248515280425e-05,
+          "tracking_e_sq": 0.5055972649132704
+        },
+        "baseline": {
+          "apogee_m": 1102.4858562837594,
+          "lateral_y_sq": 0.0010074624804011388,
+          "tracking_e_sq": 0.8544000029325487
+        },
+        "gate_trips": 582,
+        "index": 38,
+        "interventions": 18,
+        "max_correction_all": 0.8311606645584106,
+        "max_correction_applied": 0.8311230540275574,
+        "mean_correction_applied": 0.8311230540275574,
+        "scenario": "scenario_18",
+        "ticks_gate_open": 18,
+        "ticks_total": 600
+      },
+      {
+        "assisted": {
+          "apogee_m": 1444.1257313398412,
+          "lateral_y_sq": 2.8732248515280425e-05,
+          "tracking_e_sq": 0.4955199529593535
+        },
+        "baseline": {
+          "apogee_m": 1444.1213543306344,
+          "lateral_y_sq": 0.0010074624804011388,
+          "tracking_e_sq": 0.9477333341797194
+        },
+        "gate_trips": 582,
+        "index": 39,
+        "interventions": 18,
+        "max_correction_all": 0.831148087978363,
+        "max_correction_applied": 0.8311230540275574,
+        "mean_correction_applied": 0.8311230540275574,
+        "scenario": "scenario_19",
+        "ticks_gate_open": 18,
+        "ticks_total": 600
+      },
+      {
+        "assisted": {
+          "apogee_m": 1320.6324324833952,
+          "lateral_y_sq": 0.0001114093903812975,
+          "tracking_e_sq": 0.4997236294921772
+        },
+        "baseline": {
+          "apogee_m": 1320.6242348741355,
+          "lateral_y_sq": 0.003906439160646572,
+          "tracking_e_sq": 0.9088000017166138
+        },
+        "gate_trips": 575,
+        "index": 56,
+        "interventions": 25,
+        "max_correction_all": 0.831153929233551,
+        "max_correction_applied": 0.8311230540275574,
+        "mean_correction_applied": 0.8311230540275574,
+        "scenario": "scenario_16",
+        "ticks_gate_open": 25,
+        "ticks_total": 600
+      },
+      {
+        "assisted": {
+          "apogee_m": 1294.2029788105665,
+          "lateral_y_sq": 7.377707755451714e-06,
+          "tracking_e_sq": 0.5022750707002495
+        },
+        "baseline": {
+          "apogee_m": 1294.2008890407994,
+          "lateral_y_sq": 0.0002586906399277871,
+          "tracking_e_sq": 0.8851692330140335
+        },
+        "gate_trips": 587,
+        "index": 57,
+        "interventions": 13,
+        "max_correction_all": 0.8311545848846436,
+        "max_correction_applied": 0.8311230540275574,
+        "mean_correction_applied": 0.8311230540275574,
+        "scenario": "scenario_17",
+        "ticks_gate_open": 13,
+        "ticks_total": 600
+      },
+      {
+        "assisted": {
+          "apogee_m": 1112.7673818471742,
+          "lateral_y_sq": 9.421216951056151e-05,
+          "tracking_e_sq": 0.5045175483109569
+        },
+        "baseline": {
+          "apogee_m": 1112.7605720679046,
+          "lateral_y_sq": 0.0033034388495075465,
+          "tracking_e_sq": 0.8644000027090311
+        },
+        "gate_trips": 576,
+        "index": 58,
+        "interventions": 24,
+        "max_correction_all": 0.8311639428138733,
+        "max_correction_applied": 0.8311230540275574,
+        "mean_correction_applied": 0.8311230540275574,
+        "scenario": "scenario_18",
+        "ticks_gate_open": 24,
+        "ticks_total": 600
+      },
+      {
+        "assisted": {
+          "apogee_m": 1245.4030952726562,
+          "lateral_y_sq": 0.0004945231167417011,
+          "tracking_e_sq": 0.5005586057214766
+        },
+        "baseline": {
+          "apogee_m": 1245.3869109278626,
+          "lateral_y_sq": 0.017339871104878387,
+          "tracking_e_sq": 0.9010666685561338
+        },
+        "gate_trips": 564,
+        "index": 59,
+        "interventions": 36,
+        "max_correction_all": 0.8311620354652405,
+        "max_correction_applied": 0.8311230540275574,
+        "mean_correction_applied": 0.8311230540275574,
+        "scenario": "scenario_19",
+        "ticks_gate_open": 36,
+        "ticks_total": 600
+      },
+      {
+        "assisted": {
+          "apogee_m": 1185.914603305357,
+          "lateral_y_sq": 1.7606180745317266e-05,
+          "tracking_e_sq": 0.5028979811476681
+        },
+        "baseline": {
+          "apogee_m": 1185.9116140408,
+          "lateral_y_sq": 0.0006173400078533669,
+          "tracking_e_sq": 0.8794000023737549
+        },
+        "gate_trips": 584,
+        "index": 76,
+        "interventions": 16,
+        "max_correction_all": 0.8311589360237122,
+        "max_correction_applied": 0.8311230540275574,
+        "mean_correction_applied": 0.8311230540275574,
+        "scenario": "scenario_16",
+        "ticks_gate_open": 16,
+        "ticks_total": 600
+      },
+      {
+        "assisted": {
+          "apogee_m": 1340.5794443357972,
+          "lateral_y_sq": 2.8732248515280425e-05,
+          "tracking_e_sq": 0.5027180310893882
+        },
+        "baseline": {
+          "apogee_m": 1340.575822104072,
+          "lateral_y_sq": 0.0010074624804011388,
+          "tracking_e_sq": 0.8810666690031689
+        },
+        "gate_trips": 582,
+        "index": 77,
+        "interventions": 18,
+        "max_correction_all": 0.8311638832092285,
+        "max_correction_applied": 0.8311230540275574,
+        "mean_correction_applied": 0.8311230540275574,
+        "scenario": "scenario_17",
+        "ticks_gate_open": 18,
+        "ticks_total": 600
+      },
+      {
+        "assisted": {
+          "apogee_m": 1331.9982855009937,
+          "lateral_y_sq": 4.44452388857494e-05,
+          "tracking_e_sq": 0.4999827602537487
+        },
+        "baseline": {
+          "apogee_m": 1331.9933442611905,
+          "lateral_y_sq": 0.0015584199957773901,
+          "tracking_e_sq": 0.9064000017702579
+        },
+        "gate_trips": 580,
+        "index": 78,
+        "interventions": 20,
+        "max_correction_all": 0.8311578035354614,
+        "max_correction_applied": 0.8311230540275574,
+        "mean_correction_applied": 0.8311230540275574,
+        "scenario": "scenario_18",
+        "ticks_gate_open": 20,
+        "ticks_total": 600
+      },
+      {
+        "assisted": {
+          "apogee_m": 1278.8793678452578,
+          "lateral_y_sq": 0.0001114093903812975,
+          "tracking_e_sq": 0.5038697246189411
+        },
+        "baseline": {
+          "apogee_m": 1278.8722817491355,
+          "lateral_y_sq": 0.003906439160646572,
+          "tracking_e_sq": 0.8704000025749207
+        },
+        "gate_trips": 575,
+        "index": 79,
+        "interventions": 25,
+        "max_correction_all": 0.8311554789543152,
+        "max_correction_applied": 0.8311230540275574,
+        "mean_correction_applied": 0.8311230540275574,
+        "scenario": "scenario_19",
+        "ticks_gate_open": 25,
+        "ticks_total": 600
+      },
+      {
+        "assisted": {
+          "apogee_m": 1330.6160588568027,
+          "lateral_y_sq": 4.44452388857494e-05,
+          "tracking_e_sq": 0.49868710373595315
+        },
+        "baseline": {
+          "apogee_m": 1330.6107759018155,
+          "lateral_y_sq": 0.0015584199957773901,
+          "tracking_e_sq": 0.918400001502037
+        },
+        "gate_trips": 580,
+        "index": 96,
+        "interventions": 20,
+        "max_correction_all": 0.8311583399772644,
+        "max_correction_applied": 0.8311230540275574,
+        "mean_correction_applied": 0.8311230540275574,
+        "scenario": "scenario_16",
+        "ticks_gate_open": 20,
+        "ticks_total": 600
+      },
+      {
+        "assisted": {
+          "apogee_m": 1489.4070879670476,
+          "lateral_y_sq": 5.43654384908868e-05,
+          "tracking_e_sq": 0.49695956821561005
+        },
+        "baseline": {
+          "apogee_m": 1489.4011783251376,
+          "lateral_y_sq": 0.0019062601202615905,
+          "tracking_e_sq": 0.9344000011444092
+        },
+        "gate_trips": 579,
+        "index": 97,
+        "interventions": 21,
+        "max_correction_all": 0.8311569094657898,
+        "max_correction_applied": 0.8311230540275574,
+        "mean_correction_applied": 0.8311230540275574,
+        "scenario": "scenario_17",
+        "ticks_gate_open": 21,
+        "ticks_total": 600
+      },
+      {
+        "assisted": {
+          "apogee_m": 1218.0575388927598,
+          "lateral_y_sq": 3.6382999916071304e-06,
+          "tracking_e_sq": 0.500100548118117
+        },
+        "baseline": {
+          "apogee_m": 1218.0561356457374,
+          "lateral_y_sq": 0.00012757270744190443,
+          "tracking_e_sq": 0.9053090927037327
+        },
+        "gate_trips": 589,
+        "index": 98,
+        "interventions": 11,
+        "max_correction_all": 0.8311598300933838,
+        "max_correction_applied": 0.8311230540275574,
+        "mean_correction_applied": 0.8311230540275574,
+        "scenario": "scenario_18",
+        "ticks_gate_open": 11,
+        "ticks_total": 600
+      },
+      {
+        "assisted": {
+          "apogee_m": 1316.7712346273563,
+          "lateral_y_sq": 0.0001772806300513164,
+          "tracking_e_sq": 0.4994274781478086
+        },
+        "baseline": {
+          "apogee_m": 1316.760904882817,
+          "lateral_y_sq": 0.006216136658556,
+          "tracking_e_sq": 0.9115428587981632
+        },
+        "gate_trips": 572,
+        "index": 99,
+        "interventions": 28,
+        "max_correction_all": 0.8311634659767151,
+        "max_correction_applied": 0.8311230540275574,
+        "mean_correction_applied": 0.8311230540275574,
+        "scenario": "scenario_19",
+        "ticks_gate_open": 28,
+        "ticks_total": 600
+      }
+    ],
+    "lrs": [
+      {
+        "assisted": {
+          "apogee_m": 1221.217984972092,
+          "lateral_y_sq": 2.7248511361055107e-07,
+          "tracking_e_sq": 0.4580777816126759
+        },
+        "baseline": {
+          "apogee_m": 1221.217489105903,
+          "lateral_y_sq": 1.800309592645199e-05,
+          "tracking_e_sq": 0.8429714317594256
+        },
+        "gate_trips": 593,
+        "index": 16,
+        "interventions": 7,
+        "max_correction_all": 0.876974880695343,
+        "max_correction_applied": 0.8769737482070923,
+        "mean_correction_applied": 0.8769737482070923,
+        "scenario": "scenario_16",
+        "ticks_gate_open": 7,
+        "ticks_total": 600
+      },
+      {
+        "assisted": {
+          "apogee_m": 1495.9148686204815,
+          "lateral_y_sq": 2.3587401374583746e-05,
+          "tracking_e_sq": 0.4950843196371405
+        },
+        "baseline": {
+          "apogee_m": 1495.9098481674405,
+          "lateral_y_sq": 0.0015584199957773901,
+          "tracking_e_sq": 0.8824000023066997
+        },
+        "gate_trips": 580,
+        "index": 17,
+        "interventions": 20,
+        "max_correction_all": 0.876974880695343,
+        "max_correction_applied": 0.8769737482070923,
+        "mean_correction_applied": 0.8769737482070923,
+        "scenario": "scenario_17",
+        "ticks_gate_open": 20,
+        "ticks_total": 600
+      },
+      {
+        "assisted": {
+          "apogee_m": 1194.8195736074713,
+          "lateral_y_sq": 4.197193006910092e-05,
+          "tracking_e_sq": 0.47206891395405076
+        },
+        "baseline": {
+          "apogee_m": 1194.8128684003696,
+          "lateral_y_sq": 0.002773086108228041,
+          "tracking_e_sq": 0.8578782637243687
+        },
+        "gate_trips": 577,
+        "index": 18,
+        "interventions": 23,
+        "max_correction_all": 0.876974880695343,
+        "max_correction_applied": 0.8769737482070923,
+        "mean_correction_applied": 0.8769737482070923,
+        "scenario": "scenario_18",
+        "ticks_gate_open": 23,
+        "ticks_total": 600
+      },
+      {
+        "assisted": {
+          "apogee_m": 1351.2730955189904,
+          "lateral_y_sq": 5.3461579290390126e-06,
+          "tracking_e_sq": 0.5063471792583325
+        },
+        "baseline": {
+          "apogee_m": 1351.2707396026244,
+          "lateral_y_sq": 0.00035322074207698814,
+          "tracking_e_sq": 0.894400002038479
+        },
+        "gate_trips": 586,
+        "index": 19,
+        "interventions": 14,
+        "max_correction_all": 0.876974880695343,
+        "max_correction_applied": 0.8769737482070923,
+        "mean_correction_applied": 0.8769737482070923,
+        "scenario": "scenario_19",
+        "ticks_gate_open": 14,
+        "ticks_total": 600
+      },
+      {
+        "assisted": {
+          "apogee_m": 1328.0367000263652,
+          "lateral_y_sq": 2.885212118864213e-05,
+          "tracking_e_sq": 0.44735125435519024
+        },
+        "baseline": {
+          "apogee_m": 1328.03118320795,
+          "lateral_y_sq": 0.0019062601202615905,
+          "tracking_e_sq": 0.8315428605863027
+        },
+        "gate_trips": 579,
+        "index": 36,
+        "interventions": 21,
+        "max_correction_all": 0.876974880695343,
+        "max_correction_applied": 0.8769737482070923,
+        "mean_correction_applied": 0.8769737482070923,
+        "scenario": "scenario_16",
+        "ticks_gate_open": 21,
+        "ticks_total": 600
+      },
+      {
+        "assisted": {
+          "apogee_m": 1402.090104529293,
+          "lateral_y_sq": 4.197193006910092e-05,
+          "tracking_e_sq": 0.501450283845005
+        },
+        "baseline": {
+          "apogee_m": 1402.0833762128696,
+          "lateral_y_sq": 0.002773086108228041,
+          "tracking_e_sq": 0.889182610850749
+        },
+        "gate_trips": 577,
+        "index": 37,
+        "interventions": 23,
+        "max_correction_all": 0.876974880695343,
+        "max_correction_applied": 0.8769737482070923,
+        "mean_correction_applied": 0.8769737482070923,
+        "scenario": "scenario_17",
+        "ticks_gate_open": 23,
+        "ticks_total": 600
+      },
+      {
+        "assisted": {
+          "apogee_m": 1102.4898660589652,
+          "lateral_y_sq": 1.5248406693602137e-05,
+          "tracking_e_sq": 0.4688043174032579
+        },
+        "baseline": {
+          "apogee_m": 1102.4858562837594,
+          "lateral_y_sq": 0.0010074624804011388,
+          "tracking_e_sq": 0.8544000029325487
+        },
+        "gate_trips": 582,
+        "index": 38,
+        "interventions": 18,
+        "max_correction_all": 0.876974880695343,
+        "max_correction_applied": 0.8769737482070923,
+        "mean_correction_applied": 0.8769737482070923,
+        "scenario": "scenario_18",
+        "ticks_gate_open": 18,
+        "ticks_total": 600
+      },
+      {
+        "assisted": {
+          "apogee_m": 1444.1254003312054,
+          "lateral_y_sq": 1.5248406693602137e-05,
+          "tracking_e_sq": 0.5564043323723467
+        },
+        "baseline": {
+          "apogee_m": 1444.1213543306344,
+          "lateral_y_sq": 0.0010074624804011388,
+          "tracking_e_sq": 0.9477333341797194
+        },
+        "gate_trips": 582,
+        "index": 39,
+        "interventions": 18,
+        "max_correction_all": 0.876974880695343,
+        "max_correction_applied": 0.8769737482070923,
+        "mean_correction_applied": 0.8769737482070923,
+        "scenario": "scenario_19",
+        "ticks_gate_open": 18,
+        "ticks_total": 600
+      },
+      {
+        "assisted": {
+          "apogee_m": 1320.6322697061532,
+          "lateral_y_sq": 5.912574830740602e-05,
+          "tracking_e_sq": 0.5198626074576586
+        },
+        "baseline": {
+          "apogee_m": 1320.6242348741355,
+          "lateral_y_sq": 0.003906439160646572,
+          "tracking_e_sq": 0.9088000017166138
+        },
+        "gate_trips": 575,
+        "index": 56,
+        "interventions": 25,
+        "max_correction_all": 0.876974880695343,
+        "max_correction_applied": 0.8769737482070923,
+        "mean_correction_applied": 0.8769737482070923,
+        "scenario": "scenario_16",
+        "ticks_gate_open": 25,
+        "ticks_total": 600
+      },
+      {
+        "assisted": {
+          "apogee_m": 1294.2028999868826,
+          "lateral_y_sq": 3.915401478650073e-06,
+          "tracking_e_sq": 0.4976834402716483
+        },
+        "baseline": {
+          "apogee_m": 1294.2008890407994,
+          "lateral_y_sq": 0.0002586906399277871,
+          "tracking_e_sq": 0.8851692330140335
+        },
+        "gate_trips": 587,
+        "index": 57,
+        "interventions": 13,
+        "max_correction_all": 0.876974880695343,
+        "max_correction_applied": 0.8769737482070923,
+        "mean_correction_applied": 0.8769737482070923,
+        "scenario": "scenario_17",
+        "ticks_gate_open": 13,
+        "ticks_total": 600
+      },
+      {
+        "assisted": {
+          "apogee_m": 1112.7679114209336,
+          "lateral_y_sq": 4.9999062044156366e-05,
+          "tracking_e_sq": 0.4781900324867873
+        },
+        "baseline": {
+          "apogee_m": 1112.7605720679046,
+          "lateral_y_sq": 0.0033034388495075465,
+          "tracking_e_sq": 0.8644000027090311
+        },
+        "gate_trips": 576,
+        "index": 58,
+        "interventions": 24,
+        "max_correction_all": 0.876974880695343,
+        "max_correction_applied": 0.8769737482070923,
+        "mean_correction_applied": 0.8769737482070923,
+        "scenario": "scenario_18",
+        "ticks_gate_open": 24,
+        "ticks_total": 600
+      },
+      {
+        "assisted": {
+          "apogee_m": 1245.403929603098,
+          "lateral_y_sq": 0.00026244690176109397,
+          "tracking_e_sq": 0.5126043211263956
+        },
+        "baseline": {
+          "apogee_m": 1245.3869109278626,
+          "lateral_y_sq": 0.017339871104878387,
+          "tracking_e_sq": 0.9010666685561338
+        },
+        "gate_trips": 564,
+        "index": 59,
+        "interventions": 36,
+        "max_correction_all": 0.876974880695343,
+        "max_correction_applied": 0.8769737482070923,
+        "mean_correction_applied": 0.8769737482070923,
+        "scenario": "scenario_19",
+        "ticks_gate_open": 36,
+        "ticks_total": 600
+      },
+      {
+        "assisted": {
+          "apogee_m": 1185.9147408419183,
+          "lateral_y_sq": 9.343724149639343e-06,
+          "tracking_e_sq": 0.4922686051120817
+        },
+        "baseline": {
+          "apogee_m": 1185.9116140408,
+          "lateral_y_sq": 0.0006173400078533669,
+          "tracking_e_sq": 0.8794000023737549
+        },
+        "gate_trips": 584,
+        "index": 76,
+        "interventions": 16,
+        "max_correction_all": 0.876974880695343,
+        "max_correction_applied": 0.8769737482070923,
+        "mean_correction_applied": 0.8769737482070923,
+        "scenario": "scenario_16",
+        "ticks_gate_open": 16,
+        "ticks_total": 600
+      },
+      {
+        "assisted": {
+          "apogee_m": 1340.579826258093,
+          "lateral_y_sq": 1.5248406693602137e-05,
+          "tracking_e_sq": 0.4938328909593367
+        },
+        "baseline": {
+          "apogee_m": 1340.575822104072,
+          "lateral_y_sq": 0.0010074624804011388,
+          "tracking_e_sq": 0.8810666690031689
+        },
+        "gate_trips": 582,
+        "index": 77,
+        "interventions": 18,
+        "max_correction_all": 0.876974880695343,
+        "max_correction_applied": 0.8769737482070923,
+        "mean_correction_applied": 0.8769737482070923,
+        "scenario": "scenario_17",
+        "ticks_gate_open": 18,
+        "ticks_total": 600
+      },
+      {
+        "assisted": {
+          "apogee_m": 1331.9983690862641,
+          "lateral_y_sq": 2.3587401374583746e-05,
+          "tracking_e_sq": 0.5176100358376114
+        },
+        "baseline": {
+          "apogee_m": 1331.9933442611905,
+          "lateral_y_sq": 0.0015584199957773901,
+          "tracking_e_sq": 0.9064000017702579
+        },
+        "gate_trips": 580,
+        "index": 78,
+        "interventions": 20,
+        "max_correction_all": 0.876974880695343,
+        "max_correction_applied": 0.8769737482070923,
+        "mean_correction_applied": 0.8769737482070923,
+        "scenario": "scenario_18",
+        "ticks_gate_open": 20,
+        "ticks_total": 600
+      },
+      {
+        "assisted": {
+          "apogee_m": 1278.880254956312,
+          "lateral_y_sq": 5.912574830740602e-05,
+          "tracking_e_sq": 0.4838214615369051
+        },
+        "baseline": {
+          "apogee_m": 1278.8722817491355,
+          "lateral_y_sq": 0.003906439160646572,
+          "tracking_e_sq": 0.8704000025749207
+        },
+        "gate_trips": 575,
+        "index": 79,
+        "interventions": 25,
+        "max_correction_all": 0.876974880695343,
+        "max_correction_applied": 0.8769737482070923,
+        "mean_correction_applied": 0.8769737482070923,
+        "scenario": "scenario_19",
+        "ticks_gate_open": 25,
+        "ticks_total": 600
+      },
+      {
+        "assisted": {
+          "apogee_m": 1330.615819672364,
+          "lateral_y_sq": 2.3587401374583746e-05,
+          "tracking_e_sq": 0.5288728939378469
+        },
+        "baseline": {
+          "apogee_m": 1330.6107759018155,
+          "lateral_y_sq": 0.0015584199957773901,
+          "tracking_e_sq": 0.918400001502037
+        },
+        "gate_trips": 580,
+        "index": 96,
+        "interventions": 20,
+        "max_correction_all": 0.876974880695343,
+        "max_correction_applied": 0.8769737482070923,
+        "mean_correction_applied": 0.8769737482070923,
+        "scenario": "scenario_16",
+        "ticks_gate_open": 20,
+        "ticks_total": 600
+      },
+      {
+        "assisted": {
+          "apogee_m": 1489.4067700926842,
+          "lateral_y_sq": 2.885212118864213e-05,
+          "tracking_e_sq": 0.5438900380714943
+        },
+        "baseline": {
+          "apogee_m": 1489.4011783251376,
+          "lateral_y_sq": 0.0019062601202615905,
+          "tracking_e_sq": 0.9344000011444092
+        },
+        "gate_trips": 579,
+        "index": 97,
+        "interventions": 21,
+        "max_correction_all": 0.876974880695343,
+        "max_correction_applied": 0.8769737482070923,
+        "mean_correction_applied": 0.8769737482070923,
+        "scenario": "scenario_17",
+        "ticks_gate_open": 21,
+        "ticks_total": 600
+      },
+      {
+        "assisted": {
+          "apogee_m": 1218.0575294758262,
+          "lateral_y_sq": 1.9308714358310747e-06,
+          "tracking_e_sq": 0.51658614239529
+        },
+        "baseline": {
+          "apogee_m": 1218.0561356457374,
+          "lateral_y_sq": 0.00012757270744190443,
+          "tracking_e_sq": 0.9053090927037327
+        },
+        "gate_trips": 589,
+        "index": 98,
+        "interventions": 11,
+        "max_correction_all": 0.876974880695343,
+        "max_correction_applied": 0.8769737482070923,
+        "mean_correction_applied": 0.8769737482070923,
+        "scenario": "scenario_18",
+        "ticks_gate_open": 11,
+        "ticks_total": 600
+      },
+      {
+        "assisted": {
+          "apogee_m": 1316.7710714525201,
+          "lateral_y_sq": 9.408407923531819e-05,
+          "tracking_e_sq": 0.5224369750234266
+        },
+        "baseline": {
+          "apogee_m": 1316.760904882817,
+          "lateral_y_sq": 0.006216136658556,
+          "tracking_e_sq": 0.9115428587981632
+        },
+        "gate_trips": 572,
+        "index": 99,
+        "interventions": 28,
+        "max_correction_all": 0.876974880695343,
+        "max_correction_applied": 0.8769737482070923,
+        "mean_correction_applied": 0.8769737482070923,
+        "scenario": "scenario_19",
+        "ticks_gate_open": 28,
+        "ticks_total": 600
+      }
+    ]
+  },
+  "primary": "loopwm",
+  "proxy": {
+    "apogee_m": "max over gate-open ticks of (recorded baro_h_t - surrogate tilt-induced vertical loss_t)",
+    "assisted_command": "physics_baseline(frame) + exported student Delta",
+    "baseline_command": "physics_baseline(frame), ai/src/potok_ai/physics.py:37",
+    "gate": "target ai_healthy AND raw sigmoid confidence >= calibration threshold",
+    "gravity_mps2": 9.80665,
+    "integration": "trapezoid, zero initial v/y, gate-open ticks only, 50 Hz",
+    "intervention_eps": 1e-06,
+    "reference_command": "g_theta from validation targets, diagnostic only",
+    "tilt_rad_per_normalised_command": 0.12
+  },
+  "proxy_not_flight": true,
+  "rows": {
+    "loopwm": [
+      {
+        "apogee_retention_pct": 100.00033549683809,
+        "assisted": {
+          "apogee_m": 1277.283344656979,
+          "lateral_rms_m": 0.00675780565581971,
+          "tracking_rmse_norm": 0.7093948268325474
+        },
+        "baseline": {
+          "apogee_m": 1277.279059426121,
+          "lateral_rms_m": 0.04001615268979608,
+          "tracking_rmse_norm": 0.9360677644207319
+        },
+        "episodes": 5,
+        "gate_open_ticks": 89,
+        "gate_trips": 2911,
+        "interventions": 89,
+        "lateral_rms_ratio_pct": 16.88769459724427,
+        "max_correction_all_ticks": 0.8311668038368225,
+        "max_correction_applied": 0.8311230540275574,
+        "scenario": "scenario_16"
+      },
+      {
+        "apogee_retention_pct": 100.0003268832883,
+        "assisted": {
+          "apogee_m": 1404.438813630833,
+          "lateral_rms_m": 0.006542284754629578,
+          "tracking_rmse_norm": 0.7080068476982034
+        },
+        "baseline": {
+          "apogee_m": 1404.4342227700636,
+          "lateral_rms_m": 0.03873995184456467,
+          "tracking_rmse_norm": 0.9457503387595545
+        },
+        "episodes": 5,
+        "gate_open_ticks": 95,
+        "gate_trips": 2905,
+        "interventions": 95,
+        "lateral_rms_ratio_pct": 16.887694597244266,
+        "max_correction_all_ticks": 0.8311638832092285,
+        "max_correction_applied": 0.8311230540275574,
+        "scenario": "scenario_17"
+      },
+      {
+        "apogee_retention_pct": 100.0003847471124,
+        "assisted": {
+          "apogee_m": 1192.0263416010753,
+          "lateral_rms_m": 0.0070726907511798245,
+          "tracking_rmse_norm": 0.70928412279868
+        },
+        "baseline": {
+          "apogee_m": 1192.0217553317923,
+          "lateral_rms_m": 0.04188073576563817,
+          "tracking_rmse_norm": 0.9368444229262337
+        },
+        "episodes": 5,
+        "gate_open_ticks": 96,
+        "gate_trips": 2904,
+        "interventions": 96,
+        "lateral_rms_ratio_pct": 16.887694597244266,
+        "max_correction_all_ticks": 0.8311639428138733,
+        "max_correction_applied": 0.8311230540275574,
+        "scenario": "scenario_18"
+      },
+      {
+        "apogee_retention_pct": 100.0006080827547,
+        "assisted": {
+          "apogee_m": 1327.2905092742283,
+          "lateral_rms_m": 0.01282200481518567,
+          "tracking_rmse_norm": 0.707199289527681
+        },
+        "baseline": {
+          "apogee_m": 1327.2824382986148,
+          "lateral_rms_m": 0.07592513437137807,
+          "tracking_rmse_norm": 0.9513298971594887
+        },
+        "episodes": 5,
+        "gate_open_ticks": 121,
+        "gate_trips": 2879,
+        "interventions": 121,
+        "lateral_rms_ratio_pct": 16.887694597244273,
+        "max_correction_all_ticks": 0.8311662673950195,
+        "max_correction_applied": 0.8311230540275574,
+        "scenario": "scenario_19"
+      }
+    ],
+    "lrs": [
+      {
+        "apogee_retention_pct": 100.00034789716662,
+        "assisted": {
+          "apogee_m": 1277.2835030437786,
+          "lateral_rms_m": 0.004923037276598295,
+          "tracking_rmse_norm": 0.6994902633311565
+        },
+        "baseline": {
+          "apogee_m": 1277.279059426121,
+          "lateral_rms_m": 0.04001615268979608,
+          "tracking_rmse_norm": 0.9360677644207319
+        },
+        "episodes": 5,
+        "gate_open_ticks": 89,
+        "gate_trips": 2911,
+        "interventions": 89,
+        "lateral_rms_ratio_pct": 12.302625179290775,
+        "max_correction_all_ticks": 0.876974880695343,
+        "max_correction_applied": 0.8769737482070923,
+        "scenario": "scenario_16"
+      },
+      {
+        "apogee_retention_pct": 100.00033259851885,
+        "assisted": {
+          "apogee_m": 1404.4388938974869,
+          "lateral_rms_m": 0.004766031070074533,
+          "tracking_rmse_norm": 0.7116095801469545
+        },
+        "baseline": {
+          "apogee_m": 1404.4342227700636,
+          "lateral_rms_m": 0.03873995184456467,
+          "tracking_rmse_norm": 0.9457503387595545
+        },
+        "episodes": 5,
+        "gate_open_ticks": 95,
+        "gate_trips": 2905,
+        "interventions": 95,
+        "lateral_rms_ratio_pct": 12.302625179290773,
+        "max_correction_all_ticks": 0.876974880695343,
+        "max_correction_applied": 0.8769737482070923,
+        "scenario": "scenario_17"
+      },
+      {
+        "apogee_retention_pct": 100.0004106131518,
+        "assisted": {
+          "apogee_m": 1192.026649929892,
+          "lateral_rms_m": 0.005152429943575638,
+          "tracking_rmse_norm": 0.7004654798170995
+        },
+        "baseline": {
+          "apogee_m": 1192.0217553317923,
+          "lateral_rms_m": 0.04188073576563817,
+          "tracking_rmse_norm": 0.9368444229262337
+        },
+        "episodes": 5,
+        "gate_open_ticks": 96,
+        "gate_trips": 2904,
+        "interventions": 96,
+        "lateral_rms_ratio_pct": 12.302625179290773,
+        "max_correction_all_ticks": 0.876974880695343,
+        "max_correction_applied": 0.8769737482070923,
+        "scenario": "scenario_18"
+      },
+      {
+        "apogee_retention_pct": 100.00062624755442,
+        "assisted": {
+          "apogee_m": 1327.290750372425,
+          "lateral_rms_m": 0.009340784698583512,
+          "tracking_rmse_norm": 0.7185560895737237
+        },
+        "baseline": {
+          "apogee_m": 1327.2824382986148,
+          "lateral_rms_m": 0.07592513437137807,
+          "tracking_rmse_norm": 0.9513298971594887
+        },
+        "episodes": 5,
+        "gate_open_ticks": 121,
+        "gate_trips": 2879,
+        "interventions": 121,
+        "lateral_rms_ratio_pct": 12.302625179290773,
+        "max_correction_all_ticks": 0.876974880695343,
+        "max_correction_applied": 0.8769737482070923,
+        "scenario": "scenario_19"
+      }
+    ]
+  },
+  "sim": {
+    "command": "/home/sehaxe/potok-m/sim/target/release/potok-cli --config /home/sehaxe/potok-m/ai/out/run2/sim.toml --seed 1 --episodes 100 --physics-features --split held-out --validation-out <tmp>",
+    "sha256": "59b0ed4dfaf8287eb16278a916aa03ecf9094711fa49df430646dd8968eaac1c",
+    "verified": true
+  },
+  "students": [
+    {
+      "bin": "ai/out/run2/loopwm/loopwm_student.bin",
+      "calibration": "ai/out/run2/loopwm/calibration.json",
+      "calibration_method": "isotonic",
+      "g_max": 1.2222872972488403,
+      "name": "loopwm",
+      "sha256": "419725a9231070059ecd7e0dd9f1378a1e41a4eaa171e81b820dfd0bc9c87f10",
+      "threshold": 0.03968253968253968
+    },
+    {
+      "bin": "ai/out/run2/lrs/lrs.bin",
+      "calibration": "ai/out/run2/lrs/calibration.json",
+      "calibration_method": "temperature",
+      "g_max": 1.3625925779342651,
+      "name": "lrs",
+      "sha256": "4507be92543ca4921a8a186e84d614a6556189a05772428821aa4e66f5a0ef7c",
+      "threshold": 0.0001229213791769127
+    }
+  ],
+  "task": "what does the AI assistant give over pure PID on OR-aligned wind/gust scenarios",
+  "verdict": {
+    "apogee_retention_pct": 100.0004140216145,
+    "beats_apogee": true,
+    "beats_lateral": true,
+    "lateral_rms_ratio_pct": 16.88769459724427,
+    "pass": true
+  }
+}
