@@ -1,0 +1,317 @@
+{
+  "schema_version": 1,
+  "config_hash": "1969edcc0829536c4b2ee1bff0ba7d663a22fa36dec588fac67c96107379fed6",
+  "seed": 1,
+  "split": "held-out",
+  "scenario_ids": [
+    16,
+    17,
+    18,
+    19
+  ],
+  "episode_count": 20,
+  "frame_count": 30000,
+  "frames_per_episode": 1500,
+  "feature_names": [
+    "gyro_x",
+    "gyro_y",
+    "gyro_z",
+    "acc_x",
+    "acc_y",
+    "acc_z",
+    "baro_h",
+    "pitot_q",
+    "alpha_deg",
+    "beta_deg",
+    "q_dyn_kpa",
+    "a_lat_resid",
+    "drag_est",
+    "static_margin_cal"
+  ],
+  "target_names": [
+    "g_roll",
+    "g_pitch",
+    "confidence",
+    "ai_healthy",
+    "g_accel_y",
+    "g_accel_x"
+  ],
+  "truth_names": [
+    "pos_x",
+    "pos_y",
+    "pos_z",
+    "vel_x",
+    "vel_y",
+    "vel_z",
+    "quat_w",
+    "quat_x",
+    "quat_y",
+    "quat_z",
+    "omega_x",
+    "omega_y",
+    "omega_z",
+    "mass_kg",
+    "wind_x",
+    "wind_y",
+    "wind_z",
+    "gust_start_s",
+    "gust_amplitude",
+    "shear_altitude_m",
+    "shear_delta",
+    "shear_thickness_m",
+    "g_theta_roll",
+    "g_theta_pitch",
+    "g_accel_y",
+    "g_accel_x"
+  ],
+  "bounds": {
+    "features": [
+      {
+        "name": "gyro_x",
+        "min": -0.0215000007301569,
+        "max": 0.17800000309944153
+      },
+      {
+        "name": "gyro_y",
+        "min": -0.3785000145435333,
+        "max": 0.05050000175833702
+      },
+      {
+        "name": "gyro_z",
+        "min": -0.0005000000237487257,
+        "max": 0.0020000000949949026
+      },
+      {
+        "name": "acc_x",
+        "min": -1.1480000019073486,
+        "max": 0.17299999296665192
+      },
+      {
+        "name": "acc_y",
+        "min": -0.5590000152587891,
+        "max": 0.054499998688697815
+      },
+      {
+        "name": "acc_z",
+        "min": -38.39500045776367,
+        "max": 74.84249877929688
+      },
+      {
+        "name": "baro_h",
+        "min": -0.4959999918937683,
+        "max": 2027.824462890625
+      },
+      {
+        "name": "pitot_q",
+        "min": -5.0,
+        "max": 32767.0
+      },
+      {
+        "name": "alpha_deg",
+        "min": -180.0,
+        "max": 180.0
+      },
+      {
+        "name": "beta_deg",
+        "min": -177.35513305664062,
+        "max": 160.47836303710938
+      },
+      {
+        "name": "q_dyn_kpa",
+        "min": 0.0111569007858634,
+        "max": 57.5533447265625
+      },
+      {
+        "name": "a_lat_resid",
+        "min": 0.011158556677401066,
+        "max": 0.27274462580680847
+      },
+      {
+        "name": "drag_est",
+        "min": 0.003289375454187393,
+        "max": 26.160724639892578
+      },
+      {
+        "name": "static_margin_cal",
+        "min": 0.43717318773269653,
+        "max": 0.7921620607376099
+      }
+    ],
+    "targets": [
+      {
+        "name": "g_roll",
+        "min": -0.11999999731779099,
+        "max": 0.11999999731779099
+      },
+      {
+        "name": "g_pitch",
+        "min": -0.11999999731779099,
+        "max": 0.11999999731779099
+      },
+      {
+        "name": "confidence",
+        "min": 0.0,
+        "max": 0.0
+      },
+      {
+        "name": "ai_healthy",
+        "min": 0.0,
+        "max": 1.0
+      },
+      {
+        "name": "g_accel_y",
+        "min": 0.0,
+        "max": 10.0
+      },
+      {
+        "name": "g_accel_x",
+        "min": 0.0,
+        "max": 10.0
+      }
+    ],
+    "truth": [
+      {
+        "name": "pos_x",
+        "min": -2233.49951171875,
+        "max": 0.0
+      },
+      {
+        "name": "pos_y",
+        "min": -1038.041748046875,
+        "max": 0.0
+      },
+      {
+        "name": "pos_z",
+        "min": 0.0,
+        "max": 2028.566650390625
+      },
+      {
+        "name": "vel_x",
+        "min": -197.95654296875,
+        "max": 0.0
+      },
+      {
+        "name": "vel_y",
+        "min": -91.98969268798828,
+        "max": 0.0
+      },
+      {
+        "name": "vel_z",
+        "min": -92.28468322753906,
+        "max": 205.3538055419922
+      },
+      {
+        "name": "quat_w",
+        "min": 0.3340115547180176,
+        "max": 1.0
+      },
+      {
+        "name": "quat_x",
+        "min": 0.0,
+        "max": 0.39896613359451294
+      },
+      {
+        "name": "quat_y",
+        "min": -0.8543807864189148,
+        "max": 0.0
+      },
+      {
+        "name": "quat_z",
+        "min": -0.0010277853580191731,
+        "max": 0.0013135547051206231
+      },
+      {
+        "name": "omega_x",
+        "min": -0.034845128655433655,
+        "max": 0.18716992437839508
+      },
+      {
+        "name": "omega_y",
+        "min": -0.4010586142539978,
+        "max": 0.07275710254907608
+      },
+      {
+        "name": "omega_z",
+        "min": -7.073171657857216e-20,
+        "max": 9.953047489370038e-20
+      },
+      {
+        "name": "mass_kg",
+        "min": 4.907989501953125,
+        "max": 11.356598854064941
+      },
+      {
+        "name": "wind_x",
+        "min": 3.8921265602111816,
+        "max": 80.38445281982422
+      },
+      {
+        "name": "wind_y",
+        "min": 1.6928341388702393,
+        "max": 37.56812286376953
+      },
+      {
+        "name": "wind_z",
+        "min": -0.1595110446214676,
+        "max": 0.12348037958145142
+      },
+      {
+        "name": "gust_start_s",
+        "min": 2.657564163208008,
+        "max": 18.596059799194336
+      },
+      {
+        "name": "gust_amplitude",
+        "min": 17.0,
+        "max": 20.0
+      },
+      {
+        "name": "shear_altitude_m",
+        "min": 50.0,
+        "max": 400.0
+      },
+      {
+        "name": "shear_delta",
+        "min": 7.199999809265137,
+        "max": 8.0
+      },
+      {
+        "name": "shear_thickness_m",
+        "min": 12.0,
+        "max": 12.0
+      },
+      {
+        "name": "g_theta_roll",
+        "min": -0.11999999731779099,
+        "max": 0.11999999731779099
+      },
+      {
+        "name": "g_theta_pitch",
+        "min": -0.11999999731779099,
+        "max": 0.11999999731779099
+      },
+      {
+        "name": "g_accel_y",
+        "min": 0.0,
+        "max": 10.0
+      },
+      {
+        "name": "g_accel_x",
+        "min": 0.0,
+        "max": 10.0
+      }
+    ]
+  },
+  "files": [
+    {
+      "name": "validation.bin",
+      "bytes": 2401600,
+      "sha256": "5848e222604b92d659f5778e467bfb359b98d5a2634bdc1b1c2a8257459685ed"
+    },
+    {
+      "name": "validation.trajectory",
+      "bytes": 3120224,
+      "sha256": "0be79f08183fcf56fd207cbea1757adb588b9bbd0d7bb7841bb0bd0bb128c9ee"
+    }
+  ]
+}

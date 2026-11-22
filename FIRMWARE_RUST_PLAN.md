@@ -1,15 +1,15 @@
-# Firmware plan: STM32H743, Rust and Embassy
+# План прошивки: STM32H743, Rust и Embassy
 
-The owner switched the STM32 firmware from C to Rust with Embassy. This file records the plan. No firmware code was written, and nothing was created under `firmware/`.
+Прошивка STM32 переведена с C на Rust с Embassy. План зафиксирован здесь; код прошивки в этом документе не описывается.
 
-## Target and build
+## Цель и сборка
 
 - MCU: STM32H743, Cortex-M7. Target `thumbv7em-none-eabihf`.
 - Embassy through `embassy-stm32`, with one hardware timer enabled as the time driver. `defmt` for logging over RTT, `probe-rs` for flash and debug.
 - `panic = "abort"` in the release profile. The panic handler logs and resets the MCU. No unwinding.
 - No allocator. If a dependency pulls in `alloc`, replace the dependency.
 
-## Shared protocol crate
+## Общий crate протокола
 
 - Both the Pi and the firmware use `protocol/potok-protocol`. The generated file `protocol/generated/protocol.rs` stays the single source of truth, with `uart.yaml` upstream.
 - The crate needs `#![no_std]` by default and a `std` feature for host tests and Pi tooling. Gate `impl std::error::Error for Error` at `potok-protocol/src/lib.rs:56` behind that feature. The generated file has no `std` references, so nothing else is expected to change.
@@ -37,9 +37,9 @@ The owner switched the STM32 firmware from C to Rust with Embassy. This file rec
 - Three consecutive rejected frames latch AI off. Only an explicit reset from the firmware clears the latch. A valid frame after the latch does not clear it. Export accepted, rejected and latch events through `defmt` and telemetry.
 - Feed the independent watchdog from the control task only after it has run a full cycle with a valid current phase. A dead or silent Pi makes guidance stale and forces zero output, then the deadman reset fires if the control loop stops. Do not feed the watchdog from the UART callback.
 
-## Hardware tests
+## Аппаратные тесты
 
-These need the real board and the real Pi. A simulator does not cover them.
+Эти проверки требуют реальной платы и Raspberry Pi; симулятор их не заменяет.
 
 - Logic analyzer at 2 Mbit/s: frame lengths 56 plus 14 and 42 plus 16, measured wire time against the 0.25 ms budget.
 - Back-to-back frames at full rate for at least an hour with no byte loss. Include idle-line gaps and Pi scheduling jitter.

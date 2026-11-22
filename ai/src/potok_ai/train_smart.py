@@ -208,6 +208,7 @@ def distil_student(
         if episode.conditioning is None or episode.targets is None:
             raise ValueError("smart distillation needs conditioning and reference targets")
         frames = np.asarray(episode.frames, dtype=np.float32)[:, :SMART_FEATURES]
+        command = episode.command_target()
         condition = torch.as_tensor(episode.conditioning, dtype=torch.float32, device=device)
         student.reset_state()
         for tick in range(len(frames)):
@@ -222,9 +223,7 @@ def distil_student(
             ).unsqueeze(0)
             with torch.no_grad():
                 expected = teacher(window, condition.unsqueeze(0))[0, :2]
-                reference = torch.as_tensor(
-                    episode.targets[tick, :2], dtype=torch.float32, device=device
-                )
+                reference = torch.as_tensor(command[tick], dtype=torch.float32, device=device)
                 target_conf = torch.as_tensor(0.95, dtype=torch.float32, device=device)
             loss = (
                 F.mse_loss(corrections, expected)

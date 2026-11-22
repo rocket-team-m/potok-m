@@ -9,7 +9,10 @@
 //!   marker (`aero::placeholder_uses()`) and prints one line to stderr.
 //! * `card` — a TOML file with one grid per coefficient; values are bilinearly
 //!   interpolated and **any** query outside a grid is a LOUD `AeroOutOfGrid`
-//!   error. Nothing is clamped and nothing falls back silently.
+//!   error. Nothing is clamped and nothing falls back silently. A grid node that
+//!   has no measurement is `nan` and any bilinear stencil touching it is also
+//!   LOUD. Channels absent from the file (`cna`, `pitch_damping`, `cm_delta`
+//!   in the OpenRocket-derived card) are LOUD on query, never zero-filled.
 
 use std::{
     path::Path,
@@ -44,6 +47,9 @@ pub enum AeroChannel {
     Cna,
     PitchDamping,
     CmDelta,
+    /// Raw pitching-moment coefficient from OpenRocket flight data. Not a
+    /// control derivative: `cm_delta` stays the fin authority channel.
+    CmPitch,
 }
 
 impl AeroChannel {
@@ -53,6 +59,7 @@ impl AeroChannel {
             AeroChannel::Cna => "cna",
             AeroChannel::PitchDamping => "pitch_damping",
             AeroChannel::CmDelta => "cm_delta",
+            AeroChannel::CmPitch => "cm_pitch",
         }
     }
 }
@@ -74,11 +81,13 @@ pub struct AeroCard {
     pub mach: Vec<f64>,
     /// Angle-of-attack axis in degrees, strictly increasing.
     pub alpha_deg: Vec<f64>,
-    /// `values[alpha][mach]` for each channel.
+    /// `values[alpha][mach]` for each channel. `None` means the source data
+    /// did not contain the channel; querying it is LOUD.
     cd0: Vec<Vec<f64>>,
-    cna: Vec<Vec<f64>>,
-    pitch_damping: Vec<Vec<f64>>,
-    cm_delta: Vec<Vec<f64>>,
+    cna: Option<Vec<Vec<f64>>>,
+    pitch_damping: Option<Vec<Vec<f64>>>,
+    cm_delta: Option<Vec<Vec<f64>>>,
+    cm_pitch: Option<Vec<Vec<f64>>>,
     /// Placeholder drag baseline. A per-episode `cd0` of this value means
     /// "use the card's drag values verbatim"; another value shifts the whole
     /// grid by the difference, matching the legacy `(cd0 - cd_base) + table`.
@@ -101,9 +110,14 @@ struct RawGrid {
 #[derive(Debug, Deserialize)]
 struct RawCoefficients {
     cd0: Vec<Vec<f64>>,
-    cna: Vec<Vec<f64>>,
-    pitch_damping: Vec<Vec<f64>>,
-    cm_delta: Vec<Vec<f64>>,
+    #[serde(default)]
+    cna: Option<Vec<Vec<f64>>>,
+    #[serde(default)]
+    pitch_damping: Option<Vec<Vec<f64>>>,
+    #[serde(default)]
+    cm_delta: Option<Vec<Vec<f64>>>,
+    #[serde(default)]
+    cm_pitch: Option<Vec<Vec<f64>>>,
 }
 
 impl AeroCard {
@@ -129,12 +143,14 @@ impl AeroCard {
         let rows = raw.grid.alpha_deg.len();
         let cols = raw.grid.mach.len();
         let channels = [
-            (AeroChannel::Cd0, &raw.coefficients.cd0),
-            (AeroChannel::Cna, &raw.coefficients.cna),
-            (AeroChannel::PitchDamping, &raw.coefficients.pitch_damping),
-            (AeroChannel::CmDelta, &raw.coefficients.cm_delta),
+            (AeroChannel::Cd0, Some(&raw.coefficients.cd0)),
+            (AeroChannel::Cna, raw.coefficients.cna.as_ref()),
+            (AeroChannel::PitchDamping, raw.coefficients.pitch_damping.as_ref()),
+            (AeroChannel::CmDelta, raw.coefficients.cm_delta.as_ref()),
+            (AeroChannel::CmPitch, raw.coefficients.cm_pitch.as_ref()),
         ];
         for (ch, grid) in channels {
+            let Some(grid) = grid else { continue };
             if grid.len() != rows {
                 return Err(SimError::AeroCard(format!(
                     "{} has {} alpha rows, expected {rows}",
@@ -150,9 +166,11 @@ impl AeroCard {
                         row.len()
                     )));
                 }
-                if row.iter().any(|v| !v.is_finite()) {
+                // `nan` is the explicit "no measurement here" marker used by
+                // the OpenRocket-derived card; infinities are always a defect.
+                if row.iter().any(|v| v.is_infinite()) {
                     return Err(SimError::AeroCard(format!(
-                        "{} row {i} has a non-finite value",
+                        "{} row {i} has an infinite value",
                         ch.name()
                     )));
                 }
@@ -165,6 +183,7 @@ impl AeroCard {
             cna: raw.coefficients.cna,
             pitch_damping: raw.coefficients.pitch_damping,
             cm_delta: raw.coefficients.cm_delta,
+            cm_pitch: raw.coefficients.cm_pitch,
             baseline_cd0: raw.baseline_cd0,
         })
     }
@@ -172,24 +191,39 @@ impl AeroCard {
     pub fn channel(&self, ch: AeroChannel) -> &[Vec<f64>] {
         match ch {
             AeroChannel::Cd0 => &self.cd0,
-            AeroChannel::Cna => &self.cna,
-            AeroChannel::PitchDamping => &self.pitch_damping,
-            AeroChannel::CmDelta => &self.cm_delta,
+            AeroChannel::Cna => self.cna.as_deref().unwrap_or(&[]),
+            AeroChannel::PitchDamping => self.pitch_damping.as_deref().unwrap_or(&[]),
+            AeroChannel::CmDelta => self.cm_delta.as_deref().unwrap_or(&[]),
+            AeroChannel::CmPitch => self.cm_pitch.as_deref().unwrap_or(&[]),
         }
     }
 
     /// Bilinear interpolation of one channel at `(mach, alpha_deg)`.
     ///
     /// A query outside either axis returns `SimError::AeroOutOfGrid`; there is
-    /// no clamp and no fallback. Grid nodes return the stored value exactly.
+    /// no clamp and no fallback. A `nan` node in the bilinear stencil means the
+    /// source data did not measure that corner and returns a LOUD card error.
+    /// Grid nodes with data return the stored value exactly.
     pub fn interpolate(&self, ch: AeroChannel, mach: f64, alpha_deg: f64) -> Result<f64> {
         let grid = self.channel(ch);
+        if grid.is_empty() {
+            return Err(SimError::AeroCard(format!(
+                "channel {} is absent from this card; no value was invented",
+                ch.name()
+            )));
+        }
         let (mi, mu) = interp_index("mach", &self.mach, mach)?;
         let (ai, au) = interp_index("alpha_deg", &self.alpha_deg, alpha_deg)?;
         let v00 = grid[ai][mi];
         let v10 = grid[ai][mi + 1];
         let v01 = grid[ai + 1][mi];
         let v11 = grid[ai + 1][mi + 1];
+        if !v00.is_finite() || !v10.is_finite() || !v01.is_finite() || !v11.is_finite() {
+            return Err(SimError::AeroCard(format!(
+                "channel {} has no measured data at mach={mach}, alpha_deg={alpha_deg}",
+                ch.name()
+            )));
+        }
         // Flat rows are the common case (a card generated from the constant
         // placeholder coefficients). Collapsing to one linear axis keeps the
         // result bit-identical to `lerp_table` at those nodes.

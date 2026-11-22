@@ -22,14 +22,17 @@ use potok_sim::{
 // observe it so parallel test threads cannot perturb the count.
 static COUNTER_LOCK: Mutex<()> = Mutex::new(());
 
+// The generated placeholder card is kept as a separate fixture: these tests
+// assert legacy parity, while config/aero_card.toml now holds the real
+// OpenRocket-derived card (covered by core/tests/aero_card_tests.rs).
 fn card_path() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../config/aero_card.toml")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../config/aero_card_placeholder.toml")
 }
 
 fn card_config() -> Config {
     let mut cfg = Config::default();
     cfg.aero.source = AeroSource::Card;
-    cfg.aero.card_path = Some(PathBuf::from("config/aero_card.toml"));
+    cfg.aero.card_path = Some(PathBuf::from("config/aero_card_placeholder.toml"));
     cfg
 }
 

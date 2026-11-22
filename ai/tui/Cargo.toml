@@ -2,7 +2,7 @@
 name = "potok-train-tui"
 version = "0.1.0"
 edition = "2021"
-license = "MIT"
+license = "GPL-3.0-or-later"
 description = "Training-run monitor and deterministic SVG report generator for Potok-M"
 
 [dependencies]

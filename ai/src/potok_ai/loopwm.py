@@ -11,11 +11,18 @@ frames ahead -- no raw sensor reconstruction anywhere.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
 import torch
 from torch import nn
 from torch.nn import functional as F
+
+# The latent targets are LayerNorm'd EMA-encoder outputs, so their batch std is
+# normally ~1. Divide the JEPA regression by that std (floored here so a
+# constant target batch cannot divide by zero): a constant predictor then scores
+# ~1, the same convention as train_smart.normalized_correction_loss.
+LATENT_SCALE_FLOOR = 1e-3
 
 
 @dataclass
@@ -40,8 +47,8 @@ class LoopWMConfig:
             raise ValueError("feature counts, width, heads and max_iters must be positive")
         if self.width % self.heads:
             raise ValueError("width must be divisible by the number of attention heads")
-        if self.exit_threshold < 0:
-            raise ValueError("exit_threshold must be non-negative")
+        if not math.isfinite(self.exit_threshold) or self.exit_threshold < 0:
+            raise ValueError("exit_threshold must be finite and non-negative")
         if not self.horizons or any(h < 1 for h in self.horizons):
             raise ValueError("latent horizons must be positive frame offsets")
 
@@ -123,9 +130,7 @@ class LoopWM(nn.Module):
         )
         self.block = LoopBlock(c)  # ONE module, reused on every iteration
         self.norm = nn.LayerNorm(c.width)
-        self.latent_heads = nn.ModuleDict(
-            {str(h): nn.Linear(c.width, c.width) for h in c.horizons}
-        )
+        self.latent_heads = nn.ModuleDict({str(h): nn.Linear(c.width, c.width) for h in c.horizons})
         self.head = nn.Linear(c.width, c.out_features)
 
     def refine(
@@ -144,8 +149,8 @@ class LoopWM(nn.Module):
         if cond.shape != (window.shape[0], self.cfg.cond_features):
             raise ValueError(f"conditioning must have shape (batch, {self.cfg.cond_features})")
         limit = self.cfg.exit_threshold if threshold is None else threshold
-        if limit < 0:
-            raise ValueError("threshold must be non-negative")
+        if not math.isfinite(limit) or limit < 0:
+            raise ValueError("threshold must be finite and non-negative")
 
         gamma, beta = self.film(cond).chunk(2, dim=-1)
         z = self.encoder(window) * gamma.unsqueeze(1) + beta.unsqueeze(1)
@@ -163,9 +168,7 @@ class LoopWM(nn.Module):
 
     def latent_predictions(self, latent: torch.Tensor) -> dict[int, torch.Tensor]:
         """Predicted encoder latents at each horizon, one (B, T-h, width) per h."""
-        return {
-            h: self.latent_heads[str(h)](latent[:, :-h]) for h in self.cfg.horizons
-        }
+        return {h: self.latent_heads[str(h)](latent[:, :-h]) for h in self.cfg.horizons}
 
     def latent_prediction_loss(
         self,
@@ -174,7 +177,14 @@ class LoopWM(nn.Module):
         target_encoder: nn.Module,
         latent: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """MSE of predicted future latents against the detached encoder target."""
+        """Normalised MSE of predicted future latents against the EMA target.
+
+        The scale is one scalar: the std of the detached target latents over the
+        whole batch (all horizons' time and width entries), floored at
+        ``LATENT_SCALE_FLOOR``. Dividing both prediction and target by it makes
+        the term independent of the encoder's latent magnitude; a constant
+        predictor scores ~1, as in the correction loss.
+        """
         time = window.shape[1]
         if any(h >= time for h in self.cfg.horizons):
             raise ValueError("the window must be longer than every latent horizon")
@@ -183,8 +193,12 @@ class LoopWM(nn.Module):
         predictions = self.latent_predictions(latent)
         with torch.no_grad():
             targets = target_encoder(window).detach()
+            scale = targets.std(unbiased=False).clamp_min(LATENT_SCALE_FLOOR)
         return torch.stack(
-            [F.mse_loss(predictions[h], targets[:, h:, :]) for h in self.cfg.horizons]
+            [
+                F.mse_loss(predictions[h] / scale, targets[:, h:, :] / scale)
+                for h in self.cfg.horizons
+            ]
         ).mean()
 
     def head_logits(self, latent: torch.Tensor) -> torch.Tensor:

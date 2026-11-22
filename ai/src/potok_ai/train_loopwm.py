@@ -53,8 +53,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--width", type=int, default=128)
     parser.add_argument("--heads", type=int, default=4)
     parser.add_argument("--max-iters", type=int, default=6)
-    parser.add_argument("--exit-threshold", type=float, default=1e-3)
-    parser.add_argument("--latent-weight", type=float, default=0.05)
+    parser.add_argument(
+        "--exit-threshold",
+        type=float,
+        default=1e-3,
+        help="mean update-norm threshold for adaptive exit; the untrained block's "
+        "updates are ~3.8, so values below ~4 still run every iteration",
+    )
+    parser.add_argument(
+        "--latent-weight",
+        type=float,
+        default=0.05,
+        help="weight on the std-normalised latent JEPA term",
+    )
     return parser
 
 

@@ -1,0 +1,73 @@
+# Placeholder aerodynamic coefficient card, generated from the placeholder
+# model in config/default.toml. Kept ONLY as the legacy-parity fixture used by
+# core/tests/ideal_loop_tests.rs; config/aero_card.toml is the real
+# OpenRocket-derived card. Selecting this file with
+#   [aero] source = "card"; card_path = "config/aero_card_placeholder.toml"
+# reproduces the placeholder behaviour: cd0 is the legacy cd_mach table
+# (clamped past Mach 1.5), cna and pitch_damping are the legacy constants, and
+# cm_delta is the documented placeholder tail-fin control derivative
+# (PLACEHOLDER_CM_DELTA = 5.0 /rad), now nonzero so the moment-balance fin
+# mapping has a known authority; it is NOT fitted to any controller.
+#
+# Grids are rectangular: one row per `grid.alpha_deg` knot, one value per
+# `grid.mach` knot in each row (`values[alpha][mach]`). Interpolation is
+# bilinear; a query outside either axis is a LOUD error, never a clamp. The
+# example spans the full atan2 alpha range (-180..180) and Mach 0..3 so a
+# normal flight stays on-grid.
+#
+# `baseline_cd0` is the placeholder baseline: an episode's sampled cd0 is
+# shifted by (cd0 - baseline_cd0) before the card's drag is used, matching the
+# legacy `cd = (cd0 - cd_base) + lerp_table(cd_mach, mach)`.
+
+baseline_cd0 = 0.30
+
+[grid]
+mach = [0.0, 0.2, 0.4, 0.5, 0.7, 0.9, 1.1, 1.5]
+alpha_deg = [-180.0, -90.0, -45.0, -15.0, 0.0, 15.0, 45.0, 90.0, 180.0]
+
+[coefficients]
+# Each row corresponds to alpha_deg in the order above.
+cd0 = [
+  [0.30, 0.30, 0.31, 0.33, 0.36, 0.39, 0.39, 0.39], # -180
+  [0.30, 0.30, 0.31, 0.33, 0.36, 0.39, 0.39, 0.39], # -90
+  [0.30, 0.30, 0.31, 0.33, 0.36, 0.39, 0.39, 0.39], # -45
+  [0.30, 0.30, 0.31, 0.33, 0.36, 0.39, 0.39, 0.39], # -15
+  [0.30, 0.30, 0.31, 0.33, 0.36, 0.39, 0.39, 0.39], #   0
+  [0.30, 0.30, 0.31, 0.33, 0.36, 0.39, 0.39, 0.39], #  15
+  [0.30, 0.30, 0.31, 0.33, 0.36, 0.39, 0.39, 0.39], #  45
+  [0.30, 0.30, 0.31, 0.33, 0.36, 0.39, 0.39, 0.39], #  90
+  [0.30, 0.30, 0.31, 0.33, 0.36, 0.39, 0.39, 0.39], # 180
+]
+cna = [
+  [1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8],
+  [1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8],
+  [1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8],
+  [1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8],
+  [1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8],
+  [1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8],
+  [1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8],
+  [1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8],
+  [1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8],
+]
+pitch_damping = [
+  [0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6],
+  [0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6],
+  [0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6],
+  [0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6],
+  [0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6],
+  [0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6],
+  [0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6],
+  [0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6],
+  [0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6],
+]
+cm_delta = [
+  [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0],
+  [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0],
+  [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0],
+  [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0],
+  [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0],
+  [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0],
+  [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0],
+  [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0],
+  [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0],
+]

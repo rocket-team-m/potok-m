@@ -342,7 +342,9 @@ def _smart_frames(episode) -> tuple[np.ndarray, np.ndarray | None]:
     frames = np.asarray(episode.frames[:, :SMART_FEATURES], dtype=np.float32)
     conditioning = np.asarray(episode.conditioning, dtype=np.float32)
     with_cond = np.concatenate([frames, np.tile(conditioning, (len(frames), 1))], axis=1)
-    targets = None if episode.targets is None else np.asarray(episode.targets, dtype=np.float32)
+    # Authoritative v3 fin command [g_accel_y, -g_accel_x]; legacy v1/v2
+    # episodes fall back to their diagnostic g_theta columns.
+    targets = None if episode.targets is None else episode.command_target()
     return with_cond, targets
 
 

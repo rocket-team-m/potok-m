@@ -2,9 +2,14 @@
 
 Canonical input: the simulator's ``validation.bin`` (``POTOKSIM`` magic), written
 by ``potok_sim::validation``. Version 1 is the legacy 8-feature / 9-metadata
-layout; version 2 adds conditioning, a wind/gust scenario id and a split flag.
-The older ``POTOK1\\0\\0`` layout and a bare float32 array are still accepted as
-fallbacks for local synthetic fixtures.
+layout; version 2 adds conditioning, a wind/gust scenario id and a split flag;
+version 3 keeps the v2 layout but writes six targets per frame, appending the
+authoritative fin command demand ``g_accel_y, g_accel_x`` (m/s^2) to the four
+legacy angle-domain columns. ``Episode.command_target()`` returns the fin
+command ``[g_accel_y, -g_accel_x]`` for v3; ``Episode.g_theta()`` keeps the
+legacy angle target as a diagnostic. The version and target count are checked
+together, so a v3 file is never silently read as v2. The older
+``POTOK1\\0\\0`` layout and a bare float32 array remain as fixture fallbacks.
 """
 
 from __future__ import annotations
@@ -23,18 +28,31 @@ VERSION = 1
 
 SIM_MAGIC = b"POTOKSIM"
 SIM_VERSION = 1
-SIM_TARGETS = 4  # g_roll, g_pitch, confidence, ai_healthy
+SIM_VERSION_SMART = 2
+SIM_VERSION_V3 = 3
+SIM_TARGETS = 4  # v1/v2: g_roll, g_pitch, confidence, ai_healthy
+SIM_TARGETS_V3 = 6  # v3: the four legacy columns + g_accel_y, g_accel_x (m/s^2)
+# Target column indices. Columns 0-1 are the diagnostic angle target g_theta;
+# columns 4-5 are the authoritative fin command demand written by v3.
+TARGET_G_ROLL = 0
+TARGET_G_PITCH = 1
+TARGET_CONFIDENCE = 2
+TARGET_AI_HEALTHY = 3
+TARGET_G_ACCEL_Y = 4
+TARGET_G_ACCEL_X = 5
 # magic, version, seed, count, frames, features, targets, rate, dt, duration, reserved
 SIM_HEADER = struct.Struct("<8sIQ4I3f32s")
 SIM_EPISODE = struct.Struct("<Q9f")  # index + 9 legacy metadata floats
 
-# SPEC_SMART.md v2, written by potok_sim::validation: the same 80-byte header
-# (with meta_count=17 in reserved bytes 48..52) and per episode 17 metadata
+# SPEC_SMART.md v2 / v3, written by potok_sim::validation: the same 80-byte
+# header (meta_count in reserved bytes 48..52) and per episode 17 metadata
 # floats: the legacy 9, then 6 conditioning numbers, scenario id and split.
-SIM_VERSION_SMART = 2
+# meta_count=39 appends a 22-float terminal truth record (v2/v3 truth files).
 SIM_META_V1 = 9
 SIM_META_V2 = 17
+SIM_META_V2_TRUTH = 39
 SIM_V2_EPISODE = struct.Struct("<Q17f")  # index + 17 metadata floats
+SIM_V2_TRUTH_EPISODE = struct.Struct("<Q39f")  # + 22 truth floats
 SMART_FEATURES = 14  # 8 raw telemetry + 6 physics features
 SMART_COND_FEATURES = 6  # mass, area, cd0, static margin, thrust, gyro noise
 SMART_SPLIT_TRAIN = 0
@@ -54,6 +72,28 @@ class Episode:
     conditioning: np.ndarray | None = None  # (6,) f32 vehicle numbers
     held_out: bool = False  # scenario reserved for the generalisation check
     source: str | None = None  # file stem, used as a scenario fallback for v1 files
+    g_accel: np.ndarray | None = None  # (T,2) [g_accel_y, g_accel_x] m/s^2, v3 only
+
+    def g_theta(self) -> np.ndarray:
+        """Legacy angle-domain diagnostic target ``(T,2)`` [roll, pitch] (rad)."""
+        if self.targets is None:
+            raise ValueError("episode has no reference targets")
+        return np.asarray(self.targets[:, TARGET_G_ROLL : TARGET_G_PITCH + 1], np.float32)
+
+    def command_target(self) -> np.ndarray:
+        """Authoritative fin command ``(T,2)`` in [roll, pitch] order.
+
+        A v3 file carries ``g_accel``; the fin actuator consumes
+        ``[g_accel_y, -g_accel_x]`` m/s^2 (sim ``fin_accel_command``). A legacy
+        v1/v2 file has no acceleration column, so its only reference is the
+        diagnostic ``g_theta`` - use that explicitly rather than inventing a
+        value, and never mistake it for the v3 command.
+        """
+        if self.g_accel is not None:
+            return np.stack(
+                (self.g_accel[:, 0], -self.g_accel[:, 1]), axis=1
+            ).astype(np.float32)
+        return self.g_theta()
 
 
 @dataclass
@@ -81,9 +121,12 @@ def read_validation(path: str | Path) -> ValidationData:
     The header fields and their offsets come from ``sim/README.md``; reading
     them sequentially yields 80 bytes (the README's "76 bytes" undercounts its
     own 32-byte reserved field). Version 1 carries 9 metadata floats and 8
-    features; version 2 (SPEC_SMART.md) carries a scenario name, 6 conditioning
-    numbers, a held-out flag and 14 physics features. Frames and targets are
-    row-major in both.
+    features; versions 2 and 3 (SPEC_SMART.md) carry a scenario name, 6
+    conditioning numbers, a held-out flag and 14 physics features. Version 3
+    writes six targets per frame (the four legacy columns plus the fin command
+    demand ``g_accel_y, g_accel_x``). The version and target count are checked
+    together: a v3 file is never silently reinterpreted as v2. Frames and
+    targets are row-major in all versions.
     """
     raw = Path(path).read_bytes()
     if len(raw) < SIM_HEADER.size:
@@ -93,18 +136,30 @@ def read_validation(path: str | Path) -> ValidationData:
     )
     if magic != SIM_MAGIC:
         raise ValueError("not a POTOKSIM validation file")
-    if version not in (SIM_VERSION, SIM_VERSION_SMART):
-        raise ValueError(f"unsupported validation version {version}, expected version 1 or 2")
-    if targets != SIM_TARGETS or frames < 1 or features < 1:
+    if version not in (SIM_VERSION, SIM_VERSION_SMART, SIM_VERSION_V3):
+        raise ValueError(
+            f"unsupported validation version {version}, expected version 1, 2 or 3"
+        )
+    expected_targets = SIM_TARGETS_V3 if version == SIM_VERSION_V3 else SIM_TARGETS
+    if targets != expected_targets:
+        raise ValueError(
+            f"validation version {version} needs {expected_targets} targets, "
+            f"header says {targets}; refusing to reinterpret the file as another version"
+        )
+    if frames < 1 or features < 1:
         raise ValueError("unsupported validation dimensions")
-    smart = version == SIM_VERSION_SMART
+    smart = version in (SIM_VERSION_SMART, SIM_VERSION_V3)
+    record = SIM_EPISODE
     if smart:
         if features < SMART_FEATURES:
             raise ValueError(f"smart validation needs at least {SMART_FEATURES} features")
         meta_count = struct.unpack_from("<I", reserved, 0)[0]
-        if meta_count != SIM_META_V2:
+        if meta_count == SIM_META_V2:
+            record = SIM_V2_EPISODE
+        elif meta_count == SIM_META_V2_TRUTH:
+            record = SIM_V2_TRUTH_EPISODE
+        else:
             raise ValueError(f"unsupported metadata count {meta_count}")
-    record = SIM_V2_EPISODE if smart else SIM_EPISODE
 
     header = ValidationHeader(
         seed, count, frames, features, targets, rate, dt, duration, version=version
@@ -120,7 +175,10 @@ def read_validation(path: str | Path) -> ValidationData:
         if smart:
             metadata = np.asarray(meta[:SIM_META_V1], np.float32)
             conditioning = np.asarray(meta[SIM_META_V1 : SIM_META_V1 + SMART_COND_FEATURES], np.float32)
-            scenario_value, split = meta[-2], meta[-1]
+            # Scenario/split are metadata slots 15/16; truth-extended v2/v3
+            # files append 22 more floats after them.
+            scenario_at = SIM_META_V1 + SMART_COND_FEATURES
+            scenario_value, split = meta[scenario_at], meta[scenario_at + 1]
             if not float(scenario_value).is_integer() or not 0 <= scenario_value <= 65535:
                 raise ValueError("bad scenario id")
             if split not in (SMART_SPLIT_TRAIN, SMART_SPLIT_HELD_OUT):
@@ -145,6 +203,13 @@ def read_validation(path: str | Path) -> ValidationData:
             raw, dtype="<f4", count=frames * targets, offset=offset
         ).reshape(frames, targets).copy()
         offset += target_bytes
+        g_accel = (
+            np.asarray(
+                target_data[:, TARGET_G_ACCEL_Y : TARGET_G_ACCEL_X + 1], np.float32
+            ).copy()
+            if version == SIM_VERSION_V3
+            else None
+        )
         episodes.append(
             Episode(
                 frame_data,
@@ -155,6 +220,7 @@ def read_validation(path: str | Path) -> ValidationData:
                 scenario_id=scenario_id,
                 conditioning=conditioning,
                 held_out=held_out,
+                g_accel=g_accel,
             )
         )
     if offset != len(raw):
@@ -349,10 +415,13 @@ class SmartWindowDataset(Dataset):
                 )
             if episode.conditioning is None:
                 raise ValueError("smart episodes need a conditioning vector")
+            # v3 targets are the fin command [g_accel_y, -g_accel_x]; legacy
+            # v1/v2 episodes fall back to their diagnostic g_theta columns.
+            command = episode.command_target() if episode.targets is not None else None
             for start in range(0, len(episode.frames) - window + 1, step):
                 target = (
-                    episode.targets[start + window - 1, :2]
-                    if episode.targets is not None
+                    command[start + window - 1]
+                    if command is not None
                     else np.zeros(2, np.float32)
                 )
                 self.samples.append(

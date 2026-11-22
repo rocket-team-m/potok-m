@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "config_hash": "1969edcc0829536c4b2ee1bff0ba7d663a22fa36dec588fac67c96107379fed6",
+  "seed": 1,
+  "checks": [
+    {
+      "name": "episode_count",
+      "ok": true,
+      "detail": "80 >= 4, header=80, sidecar=80"
+    },
+    {
+      "name": "frame_count",
+      "ok": true,
+      "detail": "80 x 1500 = 120000 frames, stride=26"
+    },
+    {
+      "name": "finite",
+      "ok": true,
+      "detail": "all exported values finite"
+    },
+    {
+      "name": "feature_bounds",
+      "ok": true,
+      "detail": "all features inside physical limits"
+    },
+    {
+      "name": "target_bounds",
+      "ok": true,
+      "detail": "g_theta within +/-0.12 rad, confidence and health in [0,1], g_accel within +/-10 m/s^2"
+    },
+    {
+      "name": "truth_bounds",
+      "ok": true,
+      "detail": "mass>0, unit quaternion, gust/shear, g_theta and g_accel in range"
+    },
+    {
+      "name": "episode_count",
+      "ok": true,
+      "detail": "20 >= 4, header=20, sidecar=20"
+    },
+    {
+      "name": "frame_count",
+      "ok": true,
+      "detail": "20 x 1500 = 30000 frames, stride=26"
+    },
+    {
+      "name": "finite",
+      "ok": true,
+      "detail": "all exported values finite"
+    },
+    {
+      "name": "feature_bounds",
+      "ok": true,
+      "detail": "all features inside physical limits"
+    },
+    {
+      "name": "target_bounds",
+      "ok": true,
+      "detail": "g_theta within +/-0.12 rad, confidence and health in [0,1], g_accel within +/-10 m/s^2"
+    },
+    {
+      "name": "truth_bounds",
+      "ok": true,
+      "detail": "mass>0, unit quaternion, gust/shear, g_theta and g_accel in range"
+    },
+    {
+      "name": "split_scenarios_disjoint",
+      "ok": true,
+      "detail": "train=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] held-out=[16, 17, 18, 19] overlap=[]"
+    },
+    {
+      "name": "deterministic_regeneration",
+      "ok": true,
+      "detail": "4 files compared, mismatches=[]"
+    }
+  ],
+  "all_passed": true
+}

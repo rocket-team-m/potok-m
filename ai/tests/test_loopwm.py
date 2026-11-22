@@ -2,10 +2,12 @@
 
 import inspect
 import struct
+from pathlib import Path
 
 import numpy as np
 import pytest
 import torch
+from torch import nn
 
 from potok_ai.data import (
     SIM_HEADER,
@@ -15,11 +17,12 @@ from potok_ai.data import (
     SIM_V2_EPISODE,
     SMART_FEATURES,
     group_by_scenario,
+    load_episodes,
     make_smart_episode,
 )
 from potok_ai.export import MODEL_KIND_STUDENT, SMART_STUDENT_FEATURES, load_student_export
 from potok_ai.jepa import EMATeacher
-from potok_ai.loopwm import LoopWM, LoopWMConfig
+from potok_ai.loopwm import LATENT_SCALE_FLOOR, LoopWM, LoopWMConfig
 from potok_ai.train_loopwm import build_parser, evaluate, run
 from potok_ai.train_smart import generalisation_ratio
 
@@ -203,3 +206,111 @@ def test_tiny_cpu_end_to_end(tmp_path):
     exported = load_student_export(result["export"])
     assert exported.model_kind == MODEL_KIND_STUDENT
     assert exported.in_features == SMART_STUDENT_FEATURES == 20
+
+
+class _FixedEncoder(nn.Module):
+    """Deterministic JEPA target network: broadcasts a fixed (B, T, width) batch."""
+
+    def __init__(self, target: torch.Tensor) -> None:
+        super().__init__()
+        self.target = target
+
+    def forward(self, window: torch.Tensor) -> torch.Tensor:
+        return self.target
+
+
+def test_exit_threshold_is_typed_config_and_cli():
+    args = build_parser().parse_args(
+        ["--data", "unused", "--exit-threshold", "0.25", "--latent-weight", "0.2"]
+    )
+    assert isinstance(args.exit_threshold, float) and args.exit_threshold == 0.25
+    assert isinstance(args.latent_weight, float) and args.latent_weight == 0.2
+    with pytest.raises(ValueError):
+        LoopWMConfig(exit_threshold=float("nan"))
+
+
+def test_exit_count_uses_config_threshold_and_trace():
+    torch.manual_seed(11)
+    window, cond = torch.randn(2, 12, 14), torch.randn(2, 6)
+    never = LoopWM(_config(exit_threshold=1e9))
+    _, trace = never.refine(window, cond)  # no override: config is authoritative
+    assert trace.iters == 1 and len(trace.updates) == 1
+    always = LoopWM(_config(exit_threshold=0.0))
+    _, trace = always.refine(window, cond)
+    assert trace.iters == always.cfg.max_iters == 6
+    assert len(trace.updates) == 6
+    capped = LoopWM(_config(max_iters=3, exit_threshold=0.0))
+    _, trace = capped.refine(window, cond)
+    assert trace.iters == 3 and len(trace.updates) == 3
+    with pytest.raises(ValueError):
+        always.refine(window, cond, threshold=-1.0)
+
+
+def test_latent_loss_normalized_by_batch_std():
+    torch.manual_seed(12)
+    width = _config().width
+    window, cond = torch.randn(2, 12, 14), torch.randn(2, 6)
+    model = LoopWM(_config())
+    for head in model.latent_heads.values():
+        with torch.no_grad():
+            head.weight.zero_()
+            head.bias.zero_()
+    latent, _ = model.refine(window, cond)
+    pattern = torch.linspace(-1.0, 1.0, width).view(1, 1, width).expand(2, 12, width).clone()
+    assert pattern.std(unbiased=False) > LATENT_SCALE_FLOOR
+
+    def loss_at(scale: float) -> torch.Tensor:
+        return model.latent_prediction_loss(
+            window, cond, _FixedEncoder(pattern * scale), latent=latent
+        )
+
+    expected = float(pattern.square().mean() / pattern.var(unbiased=False))
+    assert loss_at(1.0).item() == pytest.approx(expected, rel=1e-5)
+    assert loss_at(100.0).item() == pytest.approx(loss_at(1.0).item(), rel=1e-5)
+
+
+def test_latent_loss_floor_keeps_gradients_finite():
+    torch.manual_seed(13)
+    window, cond = torch.randn(2, 12, 14), torch.randn(2, 6)
+    model = LoopWM(_config())
+    constant = _FixedEncoder(torch.full((2, 12, model.cfg.width), 2.0))
+    loss = model.latent_prediction_loss(window, cond, constant)
+    assert torch.isfinite(loss) and loss.ndim == 0
+    loss.backward()
+    grads = [p.grad for p in model.parameters() if p.grad is not None]
+    assert grads and all(torch.isfinite(grad).all() for grad in grads)
+    assert LATENT_SCALE_FLOOR == 1e-3
+
+
+def test_training_finite_across_threshold_sweep():
+    from potok_ai.train_loopwm import train_teacher
+
+    data = Path(__file__).resolve().parents[1] / "out" / "run4" / "data"
+    if not data.is_dir():
+        pytest.skip("run4 held-out data is not available")
+    for threshold in (1e-3, 1e-2, 1e-1, 1.0):
+        args = build_parser().parse_args(
+            [
+                "--data",
+                str(data),
+                "--window",
+                "12",
+                "--batch",
+                "4",
+                "--limit",
+                "8",
+                "--epochs",
+                "1",
+                "--seed",
+                "1",
+                "--exit-threshold",
+                str(threshold),
+                "--latent-weight",
+                "0.1",
+            ]
+        )
+        episodes = [e for e in load_episodes(data) if not e.held_out]
+        model = train_teacher(episodes, args, torch.device("cpu"))
+        assert all(torch.isfinite(p).all() for p in model.parameters())
+        latent, info = model.refine(torch.randn(2, 12, 14), torch.randn(2, 6))
+        assert 1 <= info.iters <= 6 and torch.isfinite(latent).all()

@@ -1,71 +1,88 @@
-# Example aerodynamic coefficient card, generated from the CURRENT placeholder
-# model in config/default.toml. Selecting it with
-#   [aero] source = "card"; card_path = "config/aero_card.toml"
-# reproduces the placeholder behaviour: cd0 is the legacy cd_mach table
-# (clamped past Mach 1.5), cna and pitch_damping are the legacy constants, and
-# cm_delta is the documented placeholder tail-fin control derivative
-# (PLACEHOLDER_CM_DELTA = 5.0 /rad), now nonzero so the moment-balance fin
-# mapping has a known authority; it is NOT fitted to any controller.
-#
-# Grids are rectangular: one row per `grid.alpha_deg` knot, one value per
-# `grid.mach` knot in each row (`values[alpha][mach]`). Interpolation is
-# bilinear; a query outside either axis is a LOUD error, never a clamp. The
-# example spans the full atan2 alpha range (-180..180) and Mach 0..3 so a
-# normal flight stays on-grid.
-#
-# `baseline_cd0` is the placeholder baseline: an episode's sampled cd0 is
-# shifted by (cd0 - baseline_cd0) before the card's drag is used, matching the
-# legacy `cd = (cd0 - cd_base) + lerp_table(cd_mach, mach)`.
-
+# Aero card extracted from OpenRocket Simulation 9, read-only sample:
+#   /home/sehaxe/Downloads/Telegram Desktop/гугугага.ork (ZIP -> rocket.ork)
+#   <simulation status="uptodate"><name>Simulation 9</name>
+#   <databranch name="Маршевая ступень"> (956 OR datapoints, 57 columns)
+# Field mapping (OR `types` column indices): Mach 50, angle of attack 15 (radians,
+# converted to degrees here), axial Cd 35, pitch moment coefficient 37.
+# Extraction: 594 finite, non-degenerate rows (0 < M <= 0.9, 0 <= alpha <= 3 rad,
+# 0 <= cd_axial <= 2; rows with NaN alpha or post-deployment cd > 2 excluded).
+# Axes: 30 Mach knots at quantiles of the observed rows and 29 hand-listed alpha
+# knots graded for the small-angle ascent and the high-alpha launch/descent;
+# each node is the MEAN of the nearest observed rows within 2.0 local knot spacings
+# (Chebyshev distance in knot units). Every node value comes from OR measurements;
+# no CFD, no analytic formula, no tuning, no synthetic coefficients.
+# Nodes with no measurement in their neighbourhood are `nan`; a query whose
+# bilinear stencil touches `nan` is a LOUD error, never a clamp or a zero.
+# cna, pitch_damping and cm_delta are NOT in the flight data and are absent:
+# querying any of them is LOUD. C_m is available and stored as cm_pitch.
+# cd parity on all 594 rows: max |error| = 0.080478, mean = 0.013610.
+# cm parity on 547 rows with finite cm: max |error| = 1.193743, mean = 0.027055.
 baseline_cd0 = 0.30
 
 [grid]
-mach = [0.0, 0.2, 0.4, 0.5, 0.7, 0.9, 1.1, 1.5]
-alpha_deg = [-180.0, -90.0, -45.0, -15.0, 0.0, 15.0, 45.0, 90.0, 180.0]
+mach = [0.005, 0.021, 0.037, 0.056, 0.074, 0.093, 0.113, 0.136, 0.157, 0.18, 0.203, 0.228, 0.25, 0.277, 0.302, 0.329, 0.357, 0.385, 0.412, 0.438, 0.464, 0.483, 0.506, 0.541, 0.582, 0.631, 0.681, 0.738, 0.787, 0.817]
+alpha_deg = [0.0007, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.4, 0.7, 1, 2, 3, 5, 8, 12, 16, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 91]
 
 [coefficients]
-# Each row corresponds to alpha_deg in the order above.
 cd0 = [
-  [0.30, 0.30, 0.31, 0.33, 0.36, 0.39, 0.39, 0.39], # -180
-  [0.30, 0.30, 0.31, 0.33, 0.36, 0.39, 0.39, 0.39], # -90
-  [0.30, 0.30, 0.31, 0.33, 0.36, 0.39, 0.39, 0.39], # -45
-  [0.30, 0.30, 0.31, 0.33, 0.36, 0.39, 0.39, 0.39], # -15
-  [0.30, 0.30, 0.31, 0.33, 0.36, 0.39, 0.39, 0.39], #   0
-  [0.30, 0.30, 0.31, 0.33, 0.36, 0.39, 0.39, 0.39], #  15
-  [0.30, 0.30, 0.31, 0.33, 0.36, 0.39, 0.39, 0.39], #  45
-  [0.30, 0.30, 0.31, 0.33, 0.36, 0.39, 0.39, 0.39], #  90
-  [0.30, 0.30, 0.31, 0.33, 0.36, 0.39, 0.39, 0.39], # 180
+  [nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, 0.305, 0.305, 0.305, 0.305, nan, nan, nan, nan, nan, nan, 0.341, 0.341, 0.341, 0.368, 0.368, 0.404, 0.404, 0.419], # alpha=0.0007
+  [nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, 0.305, 0.305, 0.305, 0.31, 0.311, 0.311, 0.325, 0.325, 0.325, 0.403, 0.341, 0.341, 0.341, 0.368, 0.373, 0.404, 0.419, 0.431], # alpha=0.002
+  [nan, nan, nan, nan, nan, nan, nan, 0.297, 0.297, 0.299, 0.299, 0.299, 0.305, 0.305, 0.305, 0.311, 0.311, 0.311, 0.325, 0.325, 0.328, 0.402, 0.404, 0.35, 0.35, 0.363, 0.377, 0.385, 0.427, 0.43], # alpha=0.005
+  [nan, nan, nan, nan, nan, nan, nan, 0.297, 0.297, 0.297, 0.364, 0.299, 0.302, 0.306, 0.306, 0.311, 0.312, 0.313, 0.323, 0.325, 0.399, 0.4, 0.333, 0.35, 0.351, 0.361, 0.381, 0.391, 0.41, 0.428], # alpha=0.01
+  [nan, nan, nan, nan, nan, nan, 0.297, 0.297, 0.297, 0.297, 0.364, 0.301, 0.302, 0.371, 0.306, 0.312, 0.313, 0.315, 0.32, 0.323, 0.329, 0.331, 0.337, 0.345, 0.349, 0.362, 0.378, 0.399, 0.416, 0.429], # alpha=0.02
+  [nan, nan, nan, nan, 0.3055, 0.3055, 0.297, 0.297, 0.297, 0.298, 0.298, 0.3, 0.302, 0.305, 0.306, 0.31, 0.313, 0.317, 0.32, 0.391, 0.396, 0.4, 0.3355, 0.342, 0.350666667, 0.359, 0.382, 0.394, 0.423, 0.43], # alpha=0.05
+  [nan, nan, nan, nan, 0.306, 0.306, 0.305, 0.297, 0.297, 0.298, 0.299, 0.301, 0.301, 0.371, 0.307, 0.31, 0.335333333, 0.316, 0.3205, 0.3245, 0.328, 0.3315, 0.335, 0.343, 0.351222222, 0.355, 0.382, 0.396, 0.406, 0.425], # alpha=0.1
+  [nan, nan, nan, nan, 0.307, 0.3055, 0.301, 0.297, 0.297, 0.297, 0.299, 0.3, 0.302, 0.305, 0.372, 0.309, 0.38, 0.3505, 0.3875, 0.346666667, 0.329, 0.33075, 0.335, 0.344, 0.345, 0.353166667, 0.390666667, 0.396, 0.404, 0.425], # alpha=0.2
+  [nan, nan, nan, nan, 0.308, 0.307, 0.303, 0.298, 0.296, 0.363, 0.299, 0.301, 0.302, 0.304, 0.307, 0.376, 0.381, 0.319, 0.319, 0.327, 0.327, 0.329, 0.3316, 0.341, 0.344, 0.351875, 0.396, 0.396, 0.396, 0.425], # alpha=0.4
+  [nan, nan, nan, 0.31, 0.309, 0.308, 0.303, 0.3, 0.297, 0.362, 0.299, 0.367, 0.368, 0.369, 0.304, 0.362, 0.376, 0.319, 0.319, 0.319, 0.327, 0.327, 0.327, 0.329, 0.341, 0.344, 0.396, 0.396, 0.396, nan], # alpha=0.7
+  [nan, nan, 0.323, 0.318, 0.312, 0.31, 0.3015, 0.362, 0.362, 0.362, 0.299, 0.367, 0.368, 0.369, 0.305, 0.362, 0.3765, 0.319, 0.319, 0.327, 0.327, 0.328, 0.329, 0.341, 0.344, 0.351222222, 0.396, 0.396, 0.396, 0.425], # alpha=1
+  [nan, 0.344, 0.332, 0.327, 0.32, 0.313, 0.365, 0.362, 0.362, 0.362, 0.367, 0.368, 0.368, 0.368, 0.369, 0.362, 0.3644, 0.319, 0.319, 0.319, 0.327, 0.327, 0.327, 0.334375, 0.341, 0.344, 0.396, 0.396, 0.396, 0.406], # alpha=2
+  [nan, 0.355, 0.344, 0.336, 0.326, 0.377, 0.37, 0.363, 0.362, 0.362, 0.362, 0.368, 0.368, 0.368, 0.369, 0.362, 0.3644, 0.319, 0.319, 0.319, 0.327, 0.327, 0.327, 0.329, 0.341, 0.344, 0.396, 0.396, 0.396, 0.406], # alpha=3
+  [0.49, 0.468, 0.366, 0.42, 0.399, 0.385, 0.377, 0.367, 0.362, 0.362, 0.362, 0.368, 0.368, 0.368, 0.369, 0.362, 0.354833333, 0.319, 0.319, 0.319, 0.327, 0.327, 0.327, 0.329, 0.341, 0.344, 0.396, 0.396, 0.396, 0.404], # alpha=5
+  [0.541, 0.507, 0.468, 0.437, 0.413, 0.394, 0.385, 0.37, 0.363, 0.362, 0.362, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan], # alpha=8
+  [0.583, 0.541, 0.428, 0.391, 0.437, 0.413, 0.399, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan], # alpha=12
+  [0.597, 0.59, 0.453, 0.428, 0.399, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan], # alpha=16
+  [0.593, 0.597, 0.463, 0.453, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan], # alpha=20
+  [0.574, 0.453, 0.46, 0.462, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan], # alpha=25
+  [0.526, 0.401, 0.436, 0.46, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan], # alpha=30
+  [0.493, 0.371, 0.401, 0.436, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan], # alpha=35
+  [0.419, 0.303, 0.34, 0.401, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan], # alpha=40
+  [0.346, 0.263, 0.283, 0.34, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan], # alpha=45
+  [0.275, 0.171, 0.263, 0.34, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan], # alpha=50
+  [0.141, 0.087, 0.0944, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan], # alpha=60
+  [0.049, 0.033, 0.007, 9.028e-07, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan], # alpha=70
+  [0.006, 0.007, 9.028e-07, 9.028e-07, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan], # alpha=80
+  [0, 9.028e-07, 9.028e-07, 9.028e-07, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan], # alpha=90
+  [0, 0, 9.028e-07, 9.028e-07, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan], # alpha=91
 ]
-cna = [
-  [1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8],
-  [1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8],
-  [1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8],
-  [1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8],
-  [1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8],
-  [1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8],
-  [1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8],
-  [1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8],
-  [1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8, 1.8],
-]
-pitch_damping = [
-  [0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6],
-  [0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6],
-  [0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6],
-  [0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6],
-  [0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6],
-  [0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6],
-  [0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6],
-  [0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6],
-  [0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6],
-]
-cm_delta = [
-  [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0],
-  [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0],
-  [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0],
-  [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0],
-  [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0],
-  [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0],
-  [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0],
-  [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0],
-  [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0],
+cm_pitch = [
+  [nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, 0.0005114, 0.0005114, 0.0005114, 0.0005114, nan, nan, nan, nan, nan, nan, 0.0001847, 0.0001847, 0.0001847, 0.0003997, 0.0003997, -0.0002182, -0.0002182, 0.0001353], # alpha=0.0007
+  [nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, 0.0001632, 0.0005114, 0.0005114, 0.0003884, 0.0003168, 0.0005208, 0.0007439, 0.0007439, 0.0007439, 0.002, 0.0001847, 0.0001847, 0.0001847, 0.0003997, -9.573e-05, -0.0002182, 0.0001353, 0.0004781], # alpha=0.002
+  [nan, nan, nan, nan, nan, nan, nan, 0.001, 0.001, 0.0006476, 0.0006476, 0.0006476, 0.0001632, 0.0001632, 0.0005114, 0.0003168, 0.0005208, 0.0005208, 0.0007439, 0.0007439, 9.887e-05, 0.002, 0.002, 0.0001876, 0.0001876, 0.0002038, 0.0008309, 0.0002843, 0.0003461, 0.0001601], # alpha=0.005
+  [nan, nan, nan, nan, nan, nan, nan, 0.001, 0.001, 0.001, 0.002, 0.0006476, 0.001, 0.0003298, 0.0003298, 0.0005208, 0.001, 0.0009199, 0.002, 0.0007439, 0.003, 0.003, 0.0004862, 0.0001876, 0.0006073, 0.001, 0.0005369, 0.001, 0.0006486, 0.001], # alpha=0.01
+  [nan, nan, nan, nan, nan, nan, 0.002, 0.002, 0.001, 0.001, 0.002, 0.003, 0.001, 0.002, 0.0007429, 0.002, 0.0009199, 0.001, 0.002, 0.002, -0.0002386, 0.002, 0.002, 0.001, 0.002, 0.002, 0.002, 0.0007551, 0.002, 0.003], # alpha=0.02
+  [nan, nan, nan, nan, 0.0095, 0.0095, 0.002, 0.002, 0.002, 0.003, 0.007, 0.004, 0.003, 0.004, 0.004, 0.005, 0.005, 0.007, 0.007, 0.019, 0.014, 0.015, 0.006, 0.002, 0.005, 0.003, 0.004, 0.003, 0.004, 0.005], # alpha=0.05
+  [nan, nan, nan, nan, 0.01, 0.01, 0.009, 0.008, 0.008, 0.01, 0.011, 0.012, 0.009, 0.02, 0.009, 0.01, 0.015, 0.012, 0.0105, 0.0115, 0.007, 0.0095, 0.008, 0.009, 0.00455555556, 0.003, 0.004, 0.01, 0.007, 0.004], # alpha=0.1
+  [nan, nan, nan, nan, 0.033, 0.0095, 0.02, 0.015, 0.02, 0.014, 0.015, 0.015, 0.014, 0.016, 0.028, 0.015, 0.031, 0.0245, 0.0405, 0.0243333333, 0.016, 0.0095, 0.008, 0.006, 0.003, 0.00516666667, 0.007, 0.01, 0.007, 0.004], # alpha=0.2
+  [nan, nan, nan, nan, 0.049, 0.033, 0.034, 0.0285, 0.029, 0.046, 0.032, 0.028, 0.026, 0.034, 0.021, 0.0516666667, 0.048, 0.024, 0.024, 0.018, 0.018, 0.016, 0.0092, 0.00666666667, 0.006, 0.004375, 0.01, 0.01, 0.01, 0.004], # alpha=0.4
+  [nan, nan, nan, 0.087, 0.06, 0.055, 0.045, 0.055, 0.0595, 0.065, 0.0405, 0.085, 0.096, 0.09, 0.034, 0.0464, 0.0516666667, 0.024, 0.024, 0.024, 0.018, 0.018, 0.018, 0.016, 0.00666666667, 0.006, 0.01, 0.01, 0.01, nan], # alpha=0.7
+  [nan, nan, 0.153, 0.1405, 0.12, 0.087, 0.046, 0.118, 0.102, 0.074, 0.0405, 0.089, 0.096, 0.09, 0.03, 0.0464, 0.0505, 0.024, 0.024, 0.018, 0.018, 0.016, 0.016, 0.00666666667, 0.006, 0.00455555556, 0.01, 0.01, 0.01, 0.004], # alpha=1
+  [nan, 0.226, 0.197, 0.158, 0.144, 0.138, 0.132, 0.123, 0.118, 0.102, 0.085, 0.096, 0.096, 0.096, 0.09, 0.0464, 0.047, 0.024, 0.024, 0.024, 0.018, 0.018, 0.018, 0.00875, 0.00666666667, 0.006, 0.01, 0.01, 0.01, 0.007], # alpha=2
+  [nan, 0.284, 0.226, 0.21, 0.175, 0.153, 0.147, 0.133, 0.123, 0.109, 0.074, 0.096, 0.096, 0.096, 0.09, 0.0464, 0.047, 0.024, 0.024, 0.024, 0.018, 0.018, 0.018, 0.016, 0.00666666667, 0.006, 0.01, 0.01, 0.01, 0.007], # alpha=3
+  [-0.336, -0.18, 0.335, 0.062, 0.122, 0.147, 0.153, 0.136, 0.123, 0.118, 0.074, 0.096, 0.096, 0.096, 0.0895, 0.0464, 0.0426666667, 0.024, 0.024, 0.024, 0.018, 0.018, 0.018, 0.016, 0.00666666667, 0.006, 0.01, 0.01, 0.01, 0.007], # alpha=5
+  [-0.841, -0.464, -0.18, -0.007, 0.084, 0.134, 0.147, 0.147, 0.133, 0.123, 0.102, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan], # alpha=8
+  [-1.42, -0.841, 0.464, 0.397, -0.007, 0.084, 0.122, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan], # alpha=12
+  [-1.953, -1.665, 0.481, 0.464, 0.413, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan], # alpha=16
+  [-1.953, 0.344, 0.447, 0.481, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan], # alpha=20
+  [-2.065, -0.635, -0.082, 0.466, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan], # alpha=25
+  [-3.57, -2.694, -1.394, -0.082, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan], # alpha=30
+  [-4.385, -3.57, -2.694, -1.394, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan], # alpha=35
+  [-5.7815, -5.303, -4.385, -2.694, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan], # alpha=40
+  [-3.562, -6.26, -5.7815, -4.385, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan], # alpha=45
+  [-3.8215, -4.081, -6.26, -4.385, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan], # alpha=50
+  [-4.82025, -5.082, -5.0244, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan], # alpha=60
+  [-5.81766667, -5.841, -6.349, -6.764, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan], # alpha=70
+  [-6.118, -6.349, -6.764, -6.764, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan], # alpha=80
+  [-6.665, -6.764, -6.764, -6.764, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan], # alpha=90
+  [-6.764, -6.764, -6.764, -6.764, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan], # alpha=91
 ]
