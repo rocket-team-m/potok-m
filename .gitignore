@@ -50,3 +50,7 @@ scripts/ab_work/
 # Generated analysis plots
 scripts/analysis_out/
 scripts/analysis_out_light/
+
+# Regenerated datasets
+/ai/out/v3_data/*/validation.bin
+/ai/out/v3_data/*/validation.trajectory
