@@ -4,7 +4,7 @@
 //! The frame layout is a separate trait (`FrameLayout`) so the local protocol
 //! copy can be swapped for the generated `potok-protocol` crate in one place.
 
-use crate::frame::{FrameError, FrameLayout, ReplyFrame, RequestFrame, REPLY_LEN, REQUEST_LEN};
+use crate::frame::{FrameError, FrameLayout, ReplyFrame, RequestFrame, REQUEST_LEN};
 use crate::runtime::Runtime;
 use crate::speculative::SpeculativeRuntime;
 use serialport::SerialPort;
@@ -56,7 +56,7 @@ pub fn handle_request<L: FrameLayout>(
     layout: &L,
     runtime: &mut Runtime,
     bytes: &[u8],
-    reply_buf: &mut [u8; REPLY_LEN],
+    reply_buf: &mut [u8],
 ) -> Result<(), ()> {
     let req: RequestFrame = match layout.decode_request(bytes) {
         Ok(r) => r,
@@ -79,7 +79,7 @@ pub fn handle_spec_request<L: FrameLayout>(
     layout: &L,
     runtime: &mut SpeculativeRuntime,
     bytes: &[u8],
-    reply_buf: &mut [u8; REPLY_LEN],
+    reply_buf: &mut [u8],
 ) -> Result<(), ()> {
     let reply = match layout.decode_request(bytes) {
         Ok(req) => runtime.on_request(&req),
@@ -103,7 +103,9 @@ pub fn run_loop<L: FrameLayout, T: Transport>(
     mut runtime: Runtime,
 ) -> Result<(), String> {
     let mut read_buf = [0u8; REQUEST_LEN * 4];
-    let mut reply_buf = [0u8; REPLY_LEN];
+    let mut reply_buf = [0u8; 32];
+    let request_len = layout.request_len();
+    let reply_len = layout.reply_len();
     let mut pending: Vec<u8> = Vec::with_capacity(read_buf.len());
     let mut was_disabled = false;
     eprintln!("potok-edge: inference loop started (50 Hz, 8 ms read timeout)");
@@ -122,11 +124,15 @@ pub fn run_loop<L: FrameLayout, T: Transport>(
             // Desynchronized stream: keep the most recent bytes only.
             pending.drain(..pending.len() - read_buf.len());
         }
-        while pending.len() >= REQUEST_LEN {
-            let frame: Vec<u8> = pending.drain(..REQUEST_LEN).collect();
-            match handle_request(&layout, &mut runtime, &frame, &mut reply_buf) {
+        while pending.len() >= request_len {
+            let frame: Vec<u8> = pending.drain(..request_len).collect();
+            let started = Instant::now();
+            let handled =
+                handle_request(&layout, &mut runtime, &frame, &mut reply_buf[..reply_len]);
+            layout.note_compute(started.elapsed());
+            match handled {
                 Ok(()) => {
-                    if transport.write_all(&reply_buf).is_err() {
+                    if transport.write_all(&reply_buf[..reply_len]).is_err() {
                         runtime.on_invalid_frame();
                     }
                 }
@@ -146,6 +152,15 @@ pub fn run_loop<L: FrameLayout, T: Transport>(
 
 /// Convenience entry point used by the `infer` binary.
 pub fn serve(runtime: Runtime, device: &str, baud: u32) -> Result<(), String> {
+    serve_with_layout(crate::frame::PotokUartV1, runtime, device, baud)
+}
+
+pub fn serve_with_layout<L: FrameLayout>(
+    layout: L,
+    runtime: Runtime,
+    device: &str,
+    baud: u32,
+) -> Result<(), String> {
     let mut transport = SerialTransport::open(device, baud)?;
-    run_loop(crate::frame::PotokUartV1, &mut transport, runtime)
+    run_loop(layout, &mut transport, runtime)
 }

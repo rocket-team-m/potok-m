@@ -298,3 +298,51 @@ Changes inside `edge/`:
 - `cargo fmt`, `cargo check --all-targets`: clean. `cargo test`: **38/38 pass**,
   including the BURN phase gate, CRC/seq bypass, one-teacher-per-cycle and
   worst-case-cycle tests. Dispatch, phase gate and CRC behaviour unchanged.
+
+## 2026-11-22 — lowlat profile
+
+Added `potok-protocol` as a path dependency (`../protocol/potok-protocol`,
+read-only) and `src/lowlat.rs`: a `FrameLayout` adapter whose encode/decode go
+through `potok_protocol::encode_lowlat_request` / `decode_lowlat_request` /
+`encode_lowlat_reply`. Magic, CRC, phase and version are checked by the
+generated codec; protocol errors map onto `FrameError` (a new `BadPhase` variant
+carries the rejected byte). The 14 int16 features are dequantized with
+`LOWLAT_REQUEST_FEATURES_SCALES`; reply corrections are quantized with the
+generated reply scales. Pressure/temperature/battery_mv (indices 10/12/13) are
+decoded but not fed to the model, whose input uses the 8 sensors + height +
+pitot. `compute_us` is written in 100 us units, saturating at 255 (25.5 ms),
+from the dispatch-only duration recorded through the new
+`FrameLayout::note_compute` hook (a no-op for compat). No heap allocation in
+either adapter method.
+
+`FrameLayout` gained `request_len` / `reply_len` (with a default `wire_bytes`),
+so `run_loop` no longer hardcodes 56/14-byte buffers and measures dispatch time
+for the reply field. `uart::serve_with_layout` lets the `infer` binary pick a
+layout; `serve` stays compat. `infer` now accepts `--profile compat|lowlat`
+(default compat) and defaults the baud to **921600** for compat and
+**2000000** for lowlat; `--baud` overrides either. The config profile is a CLI
+choice only — no runtime auto-detection, since the magics differ and firmware
+owns the selection.
+
+`bench-spec` accepts `--profile compat|lowlat|both` (default both) and
+`--baud N`, and prints bytes per cycle, wire time at the chosen baud and
+p50/p99 of the full cycle (encode request -> decode -> dispatch -> encode
+reply, CRC and quantize included).
+
+### Verification
+
+- `cargo check --all-targets`: clean, no warnings. `cargo fmt` applied.
+- `cargo test`: **44/44 pass**. New `tests/lowlat_test.rs` (6 tests): round trip
+  and dequantization, bad CRC/magic/version/phase, int16 saturation at
+  `i16::MIN/MAX`, the generated golden request/reply bytes re-encoded
+  byte-identically, BURN phase gate plus three-miss disable, and dispatch with
+  both profiles against both the 10-input and 20-input student.
+- No `protocol/`, `ai/`, `sim/` or `docs/` files were written; the dependency is
+  a read-only path reference.
+- Release bench, 2000 synthetic frames, default bauds, 2026-11-22:
+  - compat: **70 B/cycle**, wire **607.6 us @ 921600**, full cycle p50/p99
+    **167.3 / 273.3 us** (p99 + wire 880.9 us).
+  - lowlat: **58 B/cycle**, wire **232.0 us @ 2000000**, full cycle p50/p99
+    **168.9 / 260.0 us** (p99 + wire 492.0 us).
+  Both stay under the 10 ms dispatch budget; lowlat saves ~17% wire bytes and
+  ~2.6x wire time, with essentially the same CPU cost.

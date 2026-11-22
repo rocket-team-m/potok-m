@@ -7,6 +7,7 @@
 //! line in `bin/infer.rs`; nothing else in this crate depends on the bytes.
 
 use std::fmt;
+use std::time::Duration;
 
 pub const REQUEST_LEN: usize = 56;
 pub const REPLY_LEN: usize = 14;
@@ -39,6 +40,7 @@ pub enum FrameError {
     BadMagic(u16),
     VersionMismatch(u8),
     CrcMismatch { got: u16, want: u16 },
+    BadPhase(u8),
 }
 
 impl fmt::Display for FrameError {
@@ -50,6 +52,7 @@ impl fmt::Display for FrameError {
             Self::CrcMismatch { got, want } => {
                 write!(f, "CRC16 mismatch: got 0x{got:04X}, want 0x{want:04X}")
             }
+            Self::BadPhase(p) => write!(f, "unknown phase {p}"),
         }
     }
 }
@@ -131,6 +134,15 @@ impl ReplyFrame {
 pub trait FrameLayout {
     fn decode_request(&self, bytes: &[u8]) -> Result<RequestFrame, FrameError>;
     fn encode_reply(&self, reply: &ReplyFrame, out: &mut [u8]) -> Result<(), FrameError>;
+    /// Record the dispatch time for profiles carrying a `compute_us` field.
+    /// Compat frames have nowhere to put it, so the default is a no-op.
+    fn note_compute(&self, _elapsed: Duration) {}
+    /// Frame sizes for the loop buffers. Their sum is one wire cycle.
+    fn request_len(&self) -> usize;
+    fn reply_len(&self) -> usize;
+    fn wire_bytes(&self) -> usize {
+        self.request_len() + self.reply_len()
+    }
 }
 
 /// Canonical `potok-uart` v1 layout from `protocol/uart.yaml`.
@@ -138,6 +150,13 @@ pub trait FrameLayout {
 pub struct PotokUartV1;
 
 impl FrameLayout for PotokUartV1 {
+    fn request_len(&self) -> usize {
+        REQUEST_LEN
+    }
+    fn reply_len(&self) -> usize {
+        REPLY_LEN
+    }
+
     fn decode_request(&self, bytes: &[u8]) -> Result<RequestFrame, FrameError> {
         if bytes.len() < REQUEST_LEN {
             return Err(FrameError::TooShort {

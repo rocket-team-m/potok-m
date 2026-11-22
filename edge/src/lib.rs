@@ -9,6 +9,7 @@ pub mod baseline;
 pub mod fixture;
 pub mod format_v2;
 pub mod frame;
+pub mod lowlat;
 pub mod model;
 pub mod runtime;
 pub mod simd;
@@ -18,6 +19,7 @@ pub mod uart;
 
 pub use format_v2::{ModelV2, V2Error};
 pub use frame::{FrameError, FrameLayout, ReplyFrame, RequestFrame};
+pub use lowlat::LowlatLayout;
 pub use model::{Model, ModelError};
 pub use runtime::{Counters, PhasePolicy, Runtime};
 pub use speculative::{DispatchSource, DivergenceEvent, SpecCounters, SpeculativeRuntime};
