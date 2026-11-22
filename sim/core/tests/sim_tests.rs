@@ -153,7 +153,7 @@ fn atmosphere_and_aerodynamics_are_sane() {
     let v_drag = Vehicle::from_config(&no_lift, 130.0, 1.0, [0.0, 0.0]);
     let mut moving = s;
     moving.vel[0] = 50.0;
-    let dm = derivative(4.0, &moving, [0.0; 3], &atm, &v_drag);
+    let dm = derivative(10.0, &moving, [0.0; 3], &atm, &v_drag);
     assert!(dm.vel[0] < 0.0, "drag should decelerate, got {}", dm.vel[0]);
     assert!(cfg
         .aero
@@ -258,6 +258,55 @@ fn parallel_episodes_match_serial() {
         .map(|e| e.unwrap().features)
         .collect();
     assert_eq!(serial, parallel);
+}
+
+#[test]
+fn defaults_match_real_vehicle_ttx() {
+    let cfg = Config::default();
+    assert!((cfg.initial.mass_kg.0 - 12.5).abs() < 1e-9);
+    assert!((cfg.initial.mass_kg.1 - 13.5).abs() < 1e-9);
+    assert!((cfg.aero.area_m2 - 0.00817).abs() < 1e-9);
+    assert!((cfg.aero.static_margin_m - 0.0976).abs() < 1e-9);
+    assert!((cfg.sensor.accel_noise - 0.011).abs() < 1e-9);
+    assert!((cfg.sensor.gyro_noise - 0.0015).abs() < 1e-9);
+
+    let v = Vehicle::from_config(&cfg, 13.0, 1.0, [0.0, 0.0]);
+    assert!(
+        (v.propellant_mass() - 2.881).abs() < 0.05,
+        "propellant {}",
+        v.propellant_mass()
+    );
+    assert!(
+        v.burn_end() >= 8.5 && v.burn_end() <= 9.0,
+        "burn_end {}",
+        v.burn_end()
+    );
+    // Upper passport impulses (2.4 / 1.2 kNs) over the 5.5 / 3.2 s burns.
+    let stage1 = v.thrust_at(3.0);
+    let stage2 = v.thrust_at(7.0);
+    assert!((stage1 - 436.0).abs() < 1e-6, "stage 1 {stage1}");
+    assert!((stage2 - 375.0).abs() < 1e-6, "stage 2 {stage2}");
+    assert!(stage1 < 550.0 && stage2 < 600.0, "below passport peaks");
+    assert!(v.thrust_at(9.0).abs() < 1e-9);
+}
+
+#[test]
+fn nominal_trajectory_is_plausible() {
+    let e = sim().run_episode(0).unwrap();
+    eprintln!(
+        "nominal: apogee={:.1} m, vmax={:.1} m/s",
+        e.apogee_m, e.max_speed_mps
+    );
+    assert!(
+        (2_000.0..=4_000.0).contains(&e.apogee_m),
+        "apogee {} m outside 2-4 km",
+        e.apogee_m
+    );
+    assert!(
+        (180.0..=260.0).contains(&e.max_speed_mps),
+        "max speed {} m/s outside 180-260",
+        e.max_speed_mps
+    );
 }
 
 #[test]

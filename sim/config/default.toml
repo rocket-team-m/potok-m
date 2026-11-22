@@ -1,5 +1,6 @@
 # Deterministic Potok-M simulation defaults. Every randomized quantity is
 # derived from `run.seed` and the episode index; there is no global RNG.
+# See sim/README.md "Source of default numbers" for the provenance table.
 
 [run]
 seed = 1337
@@ -17,20 +18,23 @@ altitude_grid_m = 10.0
 sensors = true
 
 [wind]
-v_10 = 8.0
+# Launch-day winds are TTX assumptions, not passport values. Reduced from the
+# earlier 8/6 m/s so the wind does not turn the vehicle far off vertical.
+v_10 = 3.0
 shear_exponent = 0.22
-shear_delta = 6.0          # m/s jump across the layer
+shear_delta = 2.0          # m/s jump across the layer
 shear_thickness = 12.0     # m
 shear_altitude = 150.0     # m
 direction_deg = 25.0
-gust_probability = 0.35
+gust_probability = 0.2
 gust_amplitude = 9.0       # m/s
 gust_duration = 2.0        # s
-turbulence_sigma = 1.2     # m/s per axis
+turbulence_sigma = 0.6     # m/s per axis
 turbulence_scale = 60.0    # m, integral scale
 
 [initial]
-mass_kg = [120.0, 140.0]
+# User-stated TTX: ~13 kg lift-off mass.
+mass_kg = [12.5, 13.5]
 cg_offset_m = [-0.02, 0.02]
 thrust_scale = [0.94, 1.06]
 pitch_deg = [-2.0, 2.0]
@@ -38,9 +42,10 @@ yaw_deg = [-2.0, 2.0]
 gimbal_deg = [-0.8, 0.8]
 
 [sensor]
-gyro_noise = 0.0015
+# DELTA report: 1064 ug = 0.0104 m/s^2 -> 0.011 m/s^2.
+gyro_noise = 0.0015        # rad/s, kept at the previously validated value
 gyro_bias = [0.002, -0.001, 0.0005]
-accel_noise = 0.08
+accel_noise = 0.011        # m/s^2, DELTA report 1064 ug
 accel_bias = [0.02, -0.015, 0.01]
 mag_noise = 0.02
 mag_bias = [0.01, -0.01, 0.005]
@@ -56,18 +61,39 @@ accel_sat = 250.0
 pitot_sat = 30000.0
 
 [aero]
-area_m2 = 0.0707
+# User-stated TTX: diameter 0.102 m -> A = pi*(0.102/2)^2 = 0.00817 m^2.
+area_m2 = 0.00817
+# PLACEHOLDER aero coefficients (NOT from the real Potok-M aero model):
+# cd0, cna, pitch_damping, roll_damping and the cd_mach table are estimates.
+# Their uncertainty is unquantified; a real OpenRocket/Ansys card would replace
+# them. Only area and static margin below are user-stated physical values.
 cd0 = 0.35
 cna = 1.8
-static_margin_m = 0.12
+# User-stated TTX: 0.957 cal * 0.102 m = 0.0976 m.
+static_margin_m = 0.0976
 pitch_damping = 0.6
 roll_damping = 0.25
 cd_mach = [[0.0, 0.35], [0.4, 0.35], [0.7, 0.39], [0.9, 0.48], [1.1, 0.52], [1.5, 0.40]]
+# Motor passports (chat PDFs):
+#   stage 1 RDK-2000: 2.2-2.4 kNs, avg 390-400 N, peak 500-550 N,
+#     burn 5-6 s, propellant 1.88 kg.
+#   stage 2 RDK-1000: 1.0-1.2 kNs, avg 260-270 N, peak 550-600 N,
+#     burn 3-3.5 s, propellant 1.0 kg.
+# Mass flows 0.342 / 0.3125 kg/s are the passport propellant masses divided
+# by the 5.5 s / 3.2 s burns. The quoted AVERAGE thrusts correspond to the
+# LOWER passport impulses (2.2 / 1.0 kNs); with this mass and Cd=0.35 they
+# only reach ~160 m/s and ~1.4 km, well short of the TTX targets (240 m/s,
+# ~3 km). We therefore take the UPPER passport impulses (2.4 / 1.2 kNs):
+# 436 N for 5.5 s and 375 N for 3.2 s, both below the passport peak thrust.
+# This gives ~203 m/s and ~2.4 km with the placeholder Cd=0.35. Peaks and
+# thrust ripple are NOT modelled; only average thrust and mass flow are.
 thrust_profile = [
   [0.0, 0.0, 0.0],
-  [0.08, 12000.0, 5.0],
-  [2.40, 12500.0, 5.2],
-  [2.90, 0.0, 0.0],
+  [0.08, 436.0, 0.342],
+  [5.5, 436.0, 0.342],
+  [5.5, 375.0, 0.3125],
+  [8.7, 375.0, 0.3125],
+  [8.7, 0.0, 0.0],
   [30.0, 0.0, 0.0],
 ]
 

@@ -44,6 +44,9 @@ pub struct Episode {
     pub phase_counts: [usize; 6],
     pub invalid_frames: usize,
     pub nan_frames: usize,
+    /// Truth telemetry from the integrated state (not the noisy baro frame).
+    pub apogee_m: f64,
+    pub max_speed_mps: f64,
 }
 
 impl Episode {
@@ -113,6 +116,8 @@ impl Simulator {
         let mut phase_counts = [0usize; 6];
         let mut invalid_frames = 0;
         let mut nan_frames = 0;
+        let mut apogee_m: f64 = 0.0;
+        let mut max_speed_mps: f64 = 0.0;
         let gust_info = wind.gust_info();
 
         for step in 0..steps {
@@ -160,6 +165,8 @@ impl Simulator {
             }
 
             state = rk4(t, &state, cfg.run.dt, w, &self.atm, &vehicle);
+            apogee_m = apogee_m.max(state.pos[2]);
+            max_speed_mps = max_speed_mps.max(crate::math::norm(state.vel));
             if !state.is_finite() {
                 return Err(SimError::NonFinite {
                     step,
@@ -191,6 +198,8 @@ impl Simulator {
             phase_counts,
             invalid_frames,
             nan_frames,
+            apogee_m,
+            max_speed_mps,
         })
     }
 

@@ -117,3 +117,35 @@ ai/.venv/bin/python - <<... import ai/src/potok_ai/data.py; read_validation(...)
 ```
 `data.py` already declares `struct.Struct("<8sIQ4I3f32s")`, i.e. 80 bytes; no
 change outside `sim/` was needed.
+
+## Real vehicle TTX defaults
+
+`config/default.toml` now uses the user-stated Potok-M values: mass
+12.5–13.5 kg, area 0.00817 m² (D=0.102 m), static margin 0.0976 m (0.957 cal),
+accel noise 0.011 m/s² (DELTA 1064 µg), gyro noise 0.0015 rad/s. Source table
+and uncertainty notes are in `sim/README.md`.
+
+Two-stage thrust uses the **upper end** of the motor passports' impulse ranges:
+2.4 kNs / 5.5 s / 1.88 kg → 436 N at 0.342 kg/s (RDK-2000) and 1.2 kNs /
+3.2 s / 1.0 kg → 375 N at 0.3125 kg/s (RDK-1000), both below the passport peak
+thrusts. The quoted *average* thrusts (400 / 265 N, lower impulses) were also
+measured: with this mass and Cd=0.35 they give only ~161 m/s and ~1.4 km, so
+they cannot meet the user's 240 m/s / ~3 km TTX. This discrepancy is documented
+in the config and README rather than hidden. Aerodynamic coefficients remain
+explicitly marked placeholders.
+
+Also derived from the data rather than hardcoded: `Vehicle::dry_mass` is now
+lift-off mass minus the table's propellant (~2.88 kg), and angular damping was
+recalibrated (capped placeholder) so the vehicle does not weathercock ~60° off
+vertical in the first seconds.
+
+```
+cargo check --workspace --offline -> clean
+cargo test  --workspace --offline -> 17 passed, 0 failed
+  new: defaults_match_real_vehicle_ttx, nominal_trajectory_is_plausible
+nominal seed 1337: apogee 2359.9 m, max speed 202.7 m/s
+cargo bench -p potok-sim --bench throughput --offline:
+  sensors=true  fast_field=true  episodes/s=  115.18 frames/s=  172766
+  sensors=false fast_field=true  episodes/s=  146.68 frames/s=  220019
+  sensors=true  fast_field=false episodes/s=  102.19 frames/s=  153278
+```

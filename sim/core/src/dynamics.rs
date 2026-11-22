@@ -85,14 +85,27 @@ impl Vehicle {
         } else {
             scale(raw, 1.0 / n)
         };
+        // Dry mass follows from the propellant implied by the thrust table,
+        // not from an arbitrary fraction of lift-off mass.
+        let propellant = propellant_mass(&cfg.aero.thrust_profile) * thrust_scale;
+        let dry_mass = (mass - propellant).max(mass * 0.5);
         Self {
-            dry_mass: mass * 0.65,
+            dry_mass,
             thrust_scale,
             thrust_dir,
             aero: cfg.aero.clone(),
             cd_table: cfg.aero.cd_mach.clone(),
             thrust_table: cfg.aero.thrust_profile.clone(),
         }
+    }
+
+    /// Propellant implied by the (time, thrust, mass-flow) table, kg.
+    pub fn propellant_mass(&self) -> f64 {
+        let mut total = 0.0;
+        for w in self.thrust_table.windows(2) {
+            total += w[0].2 * (w[1].0 - w[0].0);
+        }
+        total * self.thrust_scale
     }
 
     pub fn burn_end(&self) -> f64 {
@@ -142,6 +155,15 @@ impl Vehicle {
         }
         mdot * self.thrust_scale
     }
+}
+
+/// Integrate the mass-flow column of a thrust table over time.
+fn propellant_mass(table: &[(f64, f64, f64)]) -> f64 {
+    let mut total = 0.0;
+    for w in table.windows(2) {
+        total += w[0].2 * (w[1].0 - w[0].0);
+    }
+    total.max(0.0)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -246,21 +268,27 @@ pub fn derivative(t: f64, s: &State, wind: Vec3, atm: &Atmosphere, v: &Vehicle) 
     let w = s.omega;
     let moment_aero = cross([0.0, 0.0, v.aero.static_margin_m], normal);
     let r_body = 0.15_f64;
-    let damp_scale = qdyn * v.aero.area_m2 * r_body * 0.01;
+    let mass = s.mass[0].max(v.dry_mass);
+    let i_xx = 0.1 * mass * r_body * r_body;
+    let i_zz = 0.02 * mass * r_body * r_body;
+    // PLACEHOLDER pitch/roll damping (not from the real aero model). Scaled
+    // with dynamic pressure and capped so the explicit RK4 step stays stable
+    // at dt <= 0.01 s (angular decay rate <= 100 1/s).
+    let damp_raw = qdyn * v.aero.area_m2 * v.aero.static_margin_m;
+    let damp_cap = 100.0 * i_xx;
+    let pitch_damp = (10.0 * v.aero.pitch_damping * damp_raw).min(damp_cap);
+    let roll_damp = (10.0 * v.aero.roll_damping * damp_raw).min(0.5 * damp_cap);
     let moment = [
-        moment_aero[0] - v.aero.pitch_damping * damp_scale * w[0],
-        moment_aero[1] - v.aero.pitch_damping * damp_scale * w[1],
-        -v.aero.roll_damping * damp_scale * w[2],
+        moment_aero[0] - pitch_damp * w[0],
+        moment_aero[1] - pitch_damp * w[1],
+        -roll_damp * w[2],
     ];
 
-    let mass = s.mass[0].max(v.dry_mass);
     // Launch-rail constraint: before liftoff the rail carries the weight, so
     // the inertial acceleration is exactly zero and the accelerometer reads 1 g.
     let thrust_world_z = mat_vec(r, thrust)[2];
     let on_pad =
         s.pos[2] <= 1e-9 && s.vel[2] <= 0.0 && t < v.burn_end() && thrust_world_z < mass * 9.80665;
-    let i_xx = 0.1 * mass * r_body * r_body;
-    let i_zz = 0.02 * mass * r_body * r_body;
     let iw = [i_xx * w[0], i_xx * w[1], i_zz * w[2]];
     let gyro_term = cross(w, iw);
     let wdot = [
