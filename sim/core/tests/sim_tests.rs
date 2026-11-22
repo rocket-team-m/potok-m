@@ -278,31 +278,31 @@ fn parallel_episodes_match_serial() {
 #[test]
 fn defaults_match_real_vehicle_ttx() {
     let cfg = Config::default();
-    assert!((cfg.initial.mass_kg.0 - 14.0).abs() < 1e-9);
-    assert!((cfg.initial.mass_kg.1 - 15.0).abs() < 1e-9);
-    assert!((cfg.aero.area_m2 - 0.00817).abs() < 1e-9);
+    assert!((cfg.initial.mass_kg.0 - 10.4).abs() < 1e-9);
+    assert!((cfg.initial.mass_kg.1 - 11.4).abs() < 1e-9);
+    assert!((cfg.aero.area_m2 - 0.011).abs() < 1e-9);
     assert!((cfg.aero.static_margin_m - 0.0765).abs() < 1e-9);
     assert!((cfg.sensor.accel_noise - 0.011).abs() < 1e-9);
     assert!((cfg.sensor.gyro_noise - 0.0015).abs() < 1e-9);
 
-    let v = Vehicle::from_config(&cfg, 14.5, 1.0, [0.0, 0.0]);
+    let v = Vehicle::from_config(&cfg, 10.9, 1.0, [0.0, 0.0]);
     assert!(
-        (v.propellant_mass() - 2.881).abs() < 0.05,
+        (v.propellant_mass() - 2.98).abs() < 0.1,
         "propellant {}",
         v.propellant_mass()
     );
     assert!(
-        v.burn_end() >= 8.5 && v.burn_end() <= 9.0,
+        v.burn_end() >= 9.7 && v.burn_end() <= 9.8,
         "burn_end {}",
         v.burn_end()
     );
-    // Motor passports minimum 3.2 kNs: 2.2 / 1.0 kNs over the 5.5 / 3.2 s burns.
+    // OR Simulation 9 thrust curve sampled from flight data.
     let stage1 = v.thrust_at(3.0);
     let stage2 = v.thrust_at(7.0);
-    assert!((stage1 - 400.0).abs() < 1e-6, "stage 1 {stage1}");
-    assert!((stage2 - 312.5).abs() < 1e-6, "stage 2 {stage2}");
-    assert!(stage1 < 550.0 && stage2 < 600.0, "below passport peaks");
-    assert!(v.thrust_at(9.0).abs() < 1e-9);
+    assert!((stage1 - 516.67).abs() < 1e-6, "stage 1 {stage1}");
+    assert!((stage2 - 420.0).abs() < 1e-6, "stage 2 {stage2}");
+    assert!(stage1 < 600.0 && stage2 < 600.0, "within OR thrust range");
+    assert!(v.thrust_at(10.0).abs() < 1e-9);
 }
 
 #[test]
@@ -313,13 +313,13 @@ fn nominal_trajectory_is_plausible() {
         e.apogee_m, e.max_speed_mps
     );
     assert!(
-        (1_500.0..=1_800.0).contains(&e.apogee_m),
-        "apogee {} m outside 1.5-1.8 km",
+        (2_900.0..=3_300.0).contains(&e.apogee_m),
+        "apogee {} m outside 2.9-3.3 km",
         e.apogee_m
     );
     assert!(
-        (140.0..=160.0).contains(&e.max_speed_mps),
-        "max speed {} m/s outside 140-160",
+        (260.0..=290.0).contains(&e.max_speed_mps),
+        "max speed {} m/s outside 260-290",
         e.max_speed_mps
     );
 }
@@ -394,8 +394,15 @@ fn config_validation_rejects_bad_frame_rate() {
 #[test]
 fn first_stage_separation_drops_dry_mass() {
     let cfg = Config::default();
-    let v = Vehicle::from_config(&cfg, 14.5, 1.0, [0.0, 0.0]);
-    let atm = Atmosphere::load(Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../config/boundary_profile.csv")), 50.0).unwrap();
+    let v = Vehicle::from_config(&cfg, 10.9, 1.0, [0.0, 0.0]);
+    let atm = Atmosphere::load(
+        Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../config/boundary_profile.csv"
+        )),
+        50.0,
+    )
+    .unwrap();
     let mut s = State::zeros();
     s.mass[0] = v.dry_mass + 0.1;
     s.pos[2] = 1.0;
@@ -403,6 +410,6 @@ fn first_stage_separation_drops_dry_mass() {
     let before = rk4(5.48, &s, 0.01, [0.0, 0.0, 0.0], &atm, &v);
     assert!(before.mass[0] > v.dry_mass - v.stage_sep_mass / 2.0);
 
-    let after = rk4(5.49, &s, 0.02, [0.0, 0.0, 0.0], &atm, &v);
+    let after = rk4(5.99, &s, 0.02, [0.0, 0.0, 0.0], &atm, &v);
     assert!(after.mass[0] <= v.dry_mass - v.stage_sep_mass / 2.0);
 }

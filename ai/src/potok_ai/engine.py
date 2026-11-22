@@ -29,9 +29,12 @@ from .calibration import (
     DEFAULT_MAX_LOOPS,
     DEFAULT_TARGET_ECE,
     DEFAULT_TOL,
+    confidence_spread_loss,
+    confidence_target,
     conformal_calibrate,
     correctness,
     expected_calibration_error,
+    sigmoid,
 )
 from .curriculum import STAGES as CURRICULUM_STAGES
 from .curriculum import Curriculum
@@ -205,18 +208,18 @@ def _split_metrics(model: str, rmse: dict, held_out: set[str], params: int, mac:
 
 def build_metrics(model: str, cfg: TrainConfig, rmse: dict, held_out: set[str],
                   params: int, mac: int, size: int,
-                  confidence: np.ndarray, error: np.ndarray) -> Metrics:
-    """Fold held-out predictions into the report, calibrating on request."""
-    conf = np.asarray(confidence, dtype=np.float64).ravel()
+                  logits: np.ndarray, error: np.ndarray) -> Metrics:
+    """Fold held-out confidence logits and command errors into the report."""
+    z = np.asarray(logits, dtype=np.float64).ravel()
     err = np.asarray(error, dtype=np.float64).ravel()
-    if conf.size == 0 or err.size != conf.size:
+    if z.size == 0 or err.size != z.size:
         raise ValueError("held-out predictions must be non-empty and paired")
 
-    raw_ece = expected_calibration_error(conf, correctness(err, cfg.calib_tol))
+    raw_ece = expected_calibration_error(sigmoid(z), correctness(err, cfg.calib_tol))
     calibrated_ece = raw_ece
     if cfg.calibrate:
         result = conformal_calibrate(
-            conf, err, tol=cfg.calib_tol, target_ece=cfg.ece_target,
+            z, err, tol=cfg.calib_tol, target_ece=cfg.ece_target,
             max_loops=DEFAULT_MAX_LOOPS,
         )
         calibrated_ece = result.ece
@@ -268,7 +271,7 @@ class ModelAdapter(ABC):
     @abstractmethod
     def held_out_predictions(self, model: nn.Module, groups: dict, cfg: TrainConfig,
                              device: torch.device) -> tuple[np.ndarray, np.ndarray]:
-        """Return (confidence, command error) arrays over held-out episodes."""
+        """Return (pre-sigmoid confidence logits, command errors) on held-out data."""
 
     def count_params(self, model: nn.Module) -> int:
         return sum(parameter.numel() for parameter in model.parameters())
@@ -319,10 +322,10 @@ class ModelAdapter(ABC):
 
     def _report(self, model: nn.Module, cfg: TrainConfig, groups: dict, held_out: set[str],
                 rmse: dict, path: Path, device: torch.device) -> Metrics:
-        confidence, error = self.held_out_predictions(model, groups, cfg, device)
+        logits, error = self.held_out_predictions(model, groups, cfg, device)
         return build_metrics(
             self.name, cfg, rmse, held_out, self.count_params(model), self.mac(cfg),
-            path.stat().st_size, confidence, error,
+            path.stat().st_size, logits, error,
         )
 
 
@@ -343,10 +346,11 @@ def _smart_frames(episode) -> tuple[np.ndarray, np.ndarray | None]:
 
 
 def _window_held_out_predictions(model: nn.Module, groups: dict, cfg: TrainConfig,
-                                 device: torch.device) -> tuple[np.ndarray, np.ndarray]:
-    """Confidence and command error for the window families (lite and LoopWM)."""
+                                 device: torch.device,
+                                 pooled: bool = False) -> tuple[np.ndarray, np.ndarray]:
+    """Confidence logits and command errors for lite / LoopWM window families."""
     model.eval()
-    confidences, errors = [], []
+    logits, errors = [], []
     with torch.no_grad():
         for name, episodes in groups.items():
             if not any(episode.held_out for episode in episodes):
@@ -355,12 +359,15 @@ def _window_held_out_predictions(model: nn.Module, groups: dict, cfg: TrainConfi
             if not dataset.samples:
                 raise ValueError(f"scenario {name} has no evaluation windows")
             for windows, conditions, targets in _batches(dataset, cfg.batch):
-                output = model(windows, conditions)
+                latent, _ = model.refine(windows, conditions)
+                summary = latent.mean(dim=1) if pooled else latent
+                raw = model.head_logits(summary)
+                output = model.head_output(raw)
                 baseline = physics_baseline(windows[:, -1, :])
                 command = final_command(output[:, :2], baseline, cfg.residual)
                 errors.extend((command - targets).abs().max(dim=1).values.tolist())
-                confidences.extend(output[:, 2].tolist())
-    return np.asarray(confidences), np.asarray(errors)
+                logits.extend(raw[:, 2].tolist())
+    return np.asarray(logits), np.asarray(errors)
 
 
 class LRSAdapter(ModelAdapter):
@@ -384,22 +391,32 @@ class LRSAdapter(ModelAdapter):
             raise ValueError("lrs training needs reference corrections")
         device = next(model.parameters()).device
         model.reset_state()
-        total, steps = 0.0, 0
+        command_losses, conf_losses, confidences, errors = [], [], [], []
         for tick, frame in enumerate(frames):
             corrections, confidence = model.step(frame)
             if tick + 1 < cfg.window:
                 continue
             reference = torch.as_tensor(targets[tick, :2], dtype=torch.float32, device=device)
-            wanted = torch.as_tensor(0.95, dtype=torch.float32, device=device)
-            loss = F.mse_loss(corrections, reference) + 0.1 * F.mse_loss(confidence, wanted)
-            optimizer.zero_grad(set_to_none=False)
-            loss.backward()
-            optimizer.step()
-            total += float(loss.detach())
-            steps += 1
-        if steps == 0:
+            features = torch.as_tensor(frame[:SMART_FEATURES], dtype=torch.float32, device=device)
+            command = final_command(corrections, physics_baseline(features), cfg.residual)
+            error = (command - reference).abs().max().detach()
+            command_losses.append(F.mse_loss(command, reference))
+            conf_losses.append(F.mse_loss(confidence, confidence_target(error, cfg.calib_tol)))
+            confidences.append(confidence)
+            errors.append(error)
+        if not command_losses:
             raise ValueError("no student updates: episodes must be longer than the window")
-        return total / steps
+        loss = (
+            torch.stack(command_losses).mean()
+            + 0.1 * torch.stack(conf_losses).mean()
+            + confidence_spread_loss(
+                torch.stack(confidences), torch.stack(errors), cfg.calib_tol
+            )
+        )
+        optimizer.zero_grad(set_to_none=False)
+        loss.backward()
+        optimizer.step()
+        return float(loss.detach())
 
     def evaluate(self, model: StatefulTCN, groups: dict, cfg: TrainConfig,
                  device: torch.device) -> dict[str, float]:
@@ -432,7 +449,7 @@ class LRSAdapter(ModelAdapter):
     def held_out_predictions(self, model: StatefulTCN, groups: dict, cfg: TrainConfig,
                              device: torch.device) -> tuple[np.ndarray, np.ndarray]:
         model.eval()
-        confidences, errors = [], []
+        logits, errors = [], []
         with torch.no_grad():
             for name, episodes in groups.items():
                 if not any(episode.held_out for episode in episodes):
@@ -443,7 +460,7 @@ class LRSAdapter(ModelAdapter):
                         raise ValueError(f"scenario {name} has no reference corrections")
                     model.reset_state()
                     for tick, frame in enumerate(frames):
-                        corrections, confidence = model.step(frame)
+                        corrections, _ = model.step(frame)
                         if tick + 1 < cfg.window:
                             continue
                         reference = torch.as_tensor(
@@ -456,8 +473,8 @@ class LRSAdapter(ModelAdapter):
                             corrections, physics_baseline(features), cfg.residual
                         )
                         errors.append(float((command - reference).abs().max()))
-                        confidences.append(float(confidence))
-        return np.asarray(confidences), np.asarray(errors)
+                        logits.append(float(model.confidence_logit()))
+        return np.asarray(logits), np.asarray(errors)
 
     def export_path(self, cfg: TrainConfig) -> Path:
         return cfg.out / "lrs.bin"
@@ -532,9 +549,12 @@ class LiteAdapter(ModelAdapter):
         latent_loss = torch.stack(
             [F.mse_loss(predictions[h], teacher_targets[h]) for h in predictions]
         ).mean()
-        wanted = torch.full_like(prediction[:, 2:3], 0.95)
-        confidence = F.mse_loss(prediction[:, 2:3], wanted)
-        loss = correction + cfg.latent_weight * latent_loss + 0.1 * confidence
+        error = (command - targets).abs().max(dim=1).values.detach()
+        confidence = F.mse_loss(prediction[:, 2], confidence_target(error, cfg.calib_tol))
+        loss = (
+            correction + cfg.latent_weight * latent_loss + 0.1 * confidence
+            + confidence_spread_loss(prediction[:, 2], error, cfg.calib_tol)
+        )
         optimizer.zero_grad(set_to_none=False)
         loss.backward()
         optimizer.step()
@@ -546,7 +566,7 @@ class LiteAdapter(ModelAdapter):
 
     def held_out_predictions(self, model: LiteModel, groups: dict, cfg: TrainConfig,
                              device: torch.device) -> tuple[np.ndarray, np.ndarray]:
-        return _window_held_out_predictions(model, groups, cfg, device)
+        return _window_held_out_predictions(model, groups, cfg, device, pooled=True)
 
     def export_path(self, cfg: TrainConfig) -> Path:
         return cfg.out / "lite.pt"
@@ -632,13 +652,19 @@ class LoopWMAdapter(ModelAdapter):
             self._target_encoder = EMATeacher(model.encoder, model.cfg.ema_momentum)
         windows, conditions, targets = batch
         latent, _ = model.refine(windows, conditions)
-        output = model.head_from_latent(latent)
+        raw = model.head_logits(latent)
+        output = model.head_output(raw)
         command = final_command(output[:, :2], physics_baseline(windows[:, -1, :]), cfg.residual)
         main = normalized_correction_loss(command, targets)
         latent_loss = model.latent_prediction_loss(
             windows, conditions, self._target_encoder, latent=latent
         )
-        loss = main + cfg.latent_weight * latent_loss
+        error = (command - targets).abs().max(dim=1).values.detach()
+        confidence = F.mse_loss(raw[:, 2], confidence_target(error, cfg.calib_tol))
+        loss = (
+            main + cfg.latent_weight * latent_loss + 0.1 * confidence
+            + confidence_spread_loss(raw[:, 2], error, cfg.calib_tol)
+        )
         optimizer.zero_grad(set_to_none=False)
         loss.backward()
         optimizer.step()
@@ -651,7 +677,7 @@ class LoopWMAdapter(ModelAdapter):
 
     def held_out_predictions(self, model: LoopWM, groups: dict, cfg: TrainConfig,
                              device: torch.device) -> tuple[np.ndarray, np.ndarray]:
-        return _window_held_out_predictions(model, groups, cfg, device)
+        return _window_held_out_predictions(model, groups, cfg, device, pooled=False)
 
     def export_path(self, cfg: TrainConfig) -> Path:
         return cfg.out / "loopwm.pt"
@@ -684,13 +710,13 @@ class LoopWMAdapter(ModelAdapter):
         device = torch.device(cfg.device)
         model = self.load(cfg, device)  # the trained teacher the legacy path saved
         groups = group_by_scenario(load_episodes(cfg.data))
-        confidence, error = self.held_out_predictions(model, groups, cfg, device)
+        logits, error = self.held_out_predictions(model, groups, cfg, device)
         student_bin = self.export_path(cfg).with_name("loopwm_student.bin")
         return build_metrics(
             self.name, cfg, result["rmse"], set(result["held_out"]),
             self.count_params(model), self.mac(cfg),
             student_bin.stat().st_size if student_bin.exists() else 0,
-            confidence, error,
+            logits, error,
         )
 
 

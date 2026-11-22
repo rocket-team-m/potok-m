@@ -109,6 +109,7 @@ class StatefulTCN(nn.Module):
         self.g_max = nn.Parameter(torch.empty(1))
         # Non-persistent: the exported initial state is always zeros.
         self.register_buffer("h", torch.zeros(c.n_blocks, c.width), persistent=False)
+        self.last_conf_logit: torch.Tensor | None = None
         self._init_parameters()
 
     def _init_parameters(self) -> None:
@@ -173,8 +174,20 @@ class StatefulTCN(nn.Module):
         self.last_z = z
         bound = torch.tanh(self.g_max.abs())
         corrections = torch.tanh(self.head_corr(z)) * bound
-        confidence = torch.sigmoid(self.head_conf(z)).squeeze(-1)
-        return corrections, confidence
+        logit = self.head_conf(z).squeeze(-1)
+        self.last_conf_logit = logit
+        return corrections, torch.sigmoid(logit)
+
+    def confidence_logit(self) -> torch.Tensor:
+        """Pre-sigmoid confidence logit of the last tick, for calibration.
+
+        The export already stores ``head_conf.weight`` / ``head_conf.bias`` as
+        fp32 layer records, so the same scalar is reproducible from a binary
+        export without any format change.
+        """
+        if self.last_conf_logit is None:
+            raise ValueError("call step() before asking for a confidence logit")
+        return self.last_conf_logit
 
     def warmup(self, window) -> None:
         """Initialise the state by replaying a window without building a graph."""

@@ -9,6 +9,11 @@ The v2 kind-2 student header's ``in_features`` is the full per-frame width:
 10 for the legacy frame (8 sensors + phase + flags), 20 for the smart frame
 (14 physics features + 6 vehicle-conditioning values, see SPEC_SMART.md).
 The binary layout is unchanged; the count is read straight from the header.
+
+The confidence head is exported as the fp32 records ``head_conf.weight`` and
+``head_conf.bias``. The raw logit is ``dot(weight, z) + bias``; the runtime's
+``sigmoid`` is the final display step, so exposing logits to calibration needs
+no format or checksum change and old readers keep working unchanged.
 """
 
 from __future__ import annotations
@@ -329,6 +334,15 @@ class ExportedStudent:
                 state[name].copy_(torch.from_numpy(layer.tensor.copy()))
         model.load_state_dict(state)
         return model.eval()
+
+    def confidence_logit(self, z: np.ndarray) -> float:
+        """Pre-sigmoid confidence logit for a final latent ``z`` from this file."""
+        weight = self.layers["head_conf.weight"].tensor
+        bias = self.layers["head_conf.bias"].tensor
+        if weight is None or bias is None:
+            raise ValueError("export is missing the confidence head weights")
+        return float(np.asarray(weight).reshape(-1) @ np.asarray(z).reshape(-1)
+                     + np.asarray(bias).reshape(-1)[0])
 
 
 def export_student(model: StatefulTCN, path: str | Path) -> Path:

@@ -7,8 +7,8 @@ Date: 2026-11-22. CPU-only work; no GPU jobs, no pushes.
 | command | result |
 |---|---|
 | `uv sync` | Resolved 20 packages; installed `torch==2.15.0+cpu` from `download.pytorch.org/whl/cpu`. No CUDA wheels. |
-| `uv run pytest -q` | `26 passed in 2.96s` initially; `37 passed in 4.89s` after the student work; `44 passed in 5.45s` after the smart work; `51 passed in 6.24s` after the LoopWM work; `61 passed in 10.32s` after the engine work; `78 passed in 11.86s` after the ideal-loop work |
-| `uv run ruff check src tests` | `All checks passed!` (after the smart, LoopWM, engine and ideal-loop work) |
+| `uv run pytest -q` | `26 passed in 2.96s` initially; `37 passed in 4.89s` after the student work; `44 passed in 5.45s` after the smart work; `51 passed in 6.24s` after the LoopWM work; `61 passed in 10.32s` after the engine work; `78 passed in 11.86s` after the ideal-loop work; `85 passed in 10.18s` after the logit-calibration work |
+| `uv run ruff check src tests` | `All checks passed!` (after the smart, LoopWM, engine, ideal-loop and logit-calibration work) |
 | `PYTHONPATH=src uv run python -m potok_ai.train_smart --data <v2 file> --out /tmp/opencode/smart.pt --epochs 1 --window 12 --batch 2 --limit 4 --eval-limit 4 --width 16 --rank 8` | prints three scenario RMSE rows, `ratio=0.7034 limit=1.25 generalises=yes`, teacher + export paths; CPU only |
 | `uv run python benchmark.py --stage train --steps 10` | `params=87875 ms_per_step=68.02 frames_per_s=5881` (width 128, rank 64, batch 8, seq 50) |
 | `uv run python benchmark.py --stage forward --steps 10` | `params=87875 ms_per_step=31.80 frames_per_s=12579` |
@@ -301,6 +301,67 @@ rejection, and one tiny CPU step in each stage.
   (ECE, toy target, hard loop cap, input validation), two engine wiring tests
   plus the extended schema/calibration end-to-end test. `sim/`, `edge/` and
   `docs/` were not touched.
+
+## Confidence root cause: logits + isotonic (follow-up)
+
+- The confidence head's **pre-sigmoid logit** is now the calibration input.
+  `StatefulTCN.step()` stores it and `confidence_logit()` exposes it;
+  `LoopWM.head_logits`/`head_output` and `LiteModel.head_logits`/`head_output`
+  split the raw 3-logit head from the bounded display outputs. The binary
+  export is unchanged: `head_conf.weight` / `head_conf.bias` were already fp32
+  layer records, and `ExportedStudent.confidence_logit(z)` computes the same
+  scalar as `dot(weight, z) + bias`. All old readers keep working; sigmoid is
+  still the final runtime step.
+- **Required Rust reader change (NOT made; `edge/` untouched).**
+  `edge/src/student_runtime.rs:615-616` already computes the logit as
+  `let conf = dot(&head_conf_w[..w], &z) + head_conf_b[0];` and immediately
+  sigmoid`es it into `out[2]`. To use calibration, keep `conf` in a field (or
+  return it from `infer`), read `calibration.json`, apply `sigmoid(conf /
+  temperature)` when `method == "temperature"` or the isotonic bin map when
+  `method == "isotonic"`, and compare the result against `threshold` for
+  adaptive compute instead of the fixed `0.7` in `speculative.rs`. **No binary
+  format or checksum change is needed.** The `edge/` reader currently emits the
+  uncalibrated sigmoid, so its confidence does not yet match Python's calibrated
+  value.
+- `calibration.py` now fits temperature first (3-pass cap) and falls back to
+  pool-adjacent-violators isotonic when a saturated head makes temperature
+  ineffective; `method`, `raw_ece`, `temperature_ece`, `ece`, `threshold`,
+  `coverage` and `n` are all written to `calibration.json`. On the toy constant
+  logit case raw ECE 0.30 (all-correct fraction 0.8 vs confidence 0.5) drops to
+  0.00 via isotonic. ECE is measured **in-sample on the held-out set**, so `n`
+  is part of the report; with `n = 4` that number is not independent evidence.
+- Root cause on the training side: the head no longer regresses toward a
+  constant 0.95. `confidence_target(error) = exp(-error/tol)` supervises it
+  toward empirical correctness, and `confidence_spread_loss` adds a reward for
+  spread on uncertain cells with a hard cap of **0.05** (0.1 weight on the MSE
+  target is unchanged). Wired into all three families and the legacy LoopWM
+  teacher. LRS now takes one optimizer step per episode so its spread reward
+  has a real tick batch.
+- **Smoke result (honest): ECE = 0.000000 for all three models** in 1 epoch
+  (`python3 scripts/smoke_engine.py --out /tmp/opencode/ideal-smoke-report`,
+  seed 1, 20 sim episodes, `--calibrate`; report outside the repo). The gate is
+  met, but this pass is **degenerate**: inspecting `calibration.json` gives
+  `coverage = 0.0`, i.e. every held-out command error exceeds `tol = 0.1`
+  (MAE 0.74-1.32), so isotonic maps every sample to confidence ~0 and ECE is
+  trivially zero. The previous constant-0.95 reading was 0.28-0.53.
+- Evidence for a *non-degenerate* pass on the synthetic CPU fixture
+  (`loopwm-lite`, width 32, seed 1, 16 train windows): 1 epoch / `n=4` →
+  coverage 0.00, raw ECE 0.575, ECE 0.000 (isotonic); 5 epochs / `n=20` →
+  coverage 0.00, raw 0.236, ECE 0.009 (temperature); 15 epochs / `n=20` →
+  coverage 0.00, raw 0.142, ECE 0.001; **40 epochs / `n=20` → coverage 0.25,
+  raw 0.075, ECE 0.013**. So a non-degenerate ECE <= 0.05 with a confident
+  subset first appears around **40 epochs and >=20 held-out windows** on that
+  fixture; the 1-epoch smoke's zero is a calibration of an always-wrong model,
+  not a quality claim. The gate numbers were not changed.
+- Pre-existing, not fixed here: reloading a **student** export is not bit-exact
+  (`blocks.0.proj.U` is stored as effective codes; a fresh student's forward
+  differs by ~0.007 in the corrections). The export accessor for the raw
+  confidence weights is exact (they are plain fp32), and the eval stage
+  calibrates the exported model's own logits; a fidelity fix belongs in the
+  export owner's lane.
+- New tests: `tests/test_confidence_logits.py` (step/export/window logit access)
+  and the logit/isotonic/spread cases in `tests/test_calibration.py`. No files
+  outside `ai/` were modified.
 
 ## Skipped
 

@@ -1,0 +1,53 @@
+{
+  "seed": 1,
+  "episodes": 20,
+  "gates": {
+    "ratio_max": 1.25,
+    "ece_max": 0.05
+  },
+  "results": [
+    {
+      "model": "lrs",
+      "rmse_train": 0.9386977701340866,
+      "rmse_held_out": 0.983550238797088,
+      "ratio": 1.0477815864594997,
+      "ece": 0.5334310892321188,
+      "params": 22439,
+      "mac": 58816,
+      "bytes": 78171,
+      "pass": false,
+      "fail_reasons": [
+        "ece 0.533431 > 0.05"
+      ]
+    },
+    {
+      "model": "loopwm-lite",
+      "rmse_train": 0.8543295313207067,
+      "rmse_held_out": 1.006396256639039,
+      "ratio": 1.177995398430454,
+      "ece": 0.5050582334933515,
+      "params": 11043,
+      "mac": 82528,
+      "bytes": 54991,
+      "pass": false,
+      "fail_reasons": [
+        "ece 0.505058 > 0.05"
+      ]
+    },
+    {
+      "model": "loopwm",
+      "rmse_train": 1.0754632765745995,
+      "rmse_held_out": 1.069556902681855,
+      "ratio": 0.994508065480807,
+      "ece": 0.27766535044434976,
+      "params": 83075,
+      "mac": 6231744,
+      "bytes": 78171,
+      "pass": false,
+      "fail_reasons": [
+        "ece 0.277665 > 0.05"
+      ]
+    }
+  ],
+  "pass": false
+}

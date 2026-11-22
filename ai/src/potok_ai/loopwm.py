@@ -187,12 +187,19 @@ class LoopWM(nn.Module):
             [F.mse_loss(predictions[h], targets[:, h:, :]) for h in self.cfg.horizons]
         ).mean()
 
-    def head_from_latent(self, latent: torch.Tensor) -> torch.Tensor:
-        """Bounded corrections plus confidence from a refined latent."""
-        raw = self.head(latent[:, -1])
+    def head_logits(self, latent: torch.Tensor) -> torch.Tensor:
+        """Raw [roll, pitch, confidence] logits of the final latent frame."""
+        return self.head(latent[:, -1])
+
+    def head_output(self, raw: torch.Tensor) -> torch.Tensor:
+        """Bounded corrections plus confidence from the raw head logits."""
         corrections = torch.tanh(raw[:, :2]) * self.cfg.g_max
         confidence = torch.sigmoid(raw[:, 2:3])
         return torch.cat([corrections, confidence], dim=-1)
+
+    def head_from_latent(self, latent: torch.Tensor) -> torch.Tensor:
+        """Bounded corrections plus confidence from a refined latent."""
+        return self.head_output(self.head_logits(latent))
 
     def forward(self, window: torch.Tensor, cond: torch.Tensor | None = None) -> torch.Tensor:
         """Map the onboard window and conditioning to (g_roll, g_pitch, confidence)."""

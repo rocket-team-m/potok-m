@@ -34,7 +34,7 @@ turbulence_scale = 60.0    # m, integral scale
 
 [initial]
 # User-stated TTX: ~13 kg lift-off mass.
-mass_kg = [14.0, 15.0]
+mass_kg = [10.4, 11.4]
 cg_offset_m = [-0.02, 0.02]
 thrust_scale = [0.94, 1.06]
 pitch_deg = [-2.0, 2.0]
@@ -84,7 +84,7 @@ spike_amplitude = 0.0
 [aero]
 # Inner diameter is 102 mm. Outer diameter (and area) depends on wall
 # thickness, still unspecified; 0.102 m / 0.00817 m^2 is a placeholder.
-area_m2 = 0.00817
+area_m2 = 0.011
 # "placeholder" (default) uses the analytic coefficients below and prints a
 # COUNTED marker. "card" loads the 2-D (Mach, alpha) grid named by card_path;
 # out-of-grid queries are a LOUD error. config/aero_card.toml is generated
@@ -95,13 +95,13 @@ source = "placeholder"
 # cd0, cna, pitch_damping, roll_damping and the cd_mach table are estimates.
 # Their uncertainty is unquantified; a real OpenRocket/Ansys card would replace
 # them. Only area and static margin below are user-stated physical values.
-cd0 = 0.35
+cd0 = 0.40
 cna = 1.8
 # TTX: 0.75 cal * 0.102 m = 0.0765 m.
 static_margin_m = 0.0765
 pitch_damping = 0.6
 roll_damping = 0.25
-cd_mach = [[0.0, 0.35], [0.4, 0.35], [0.7, 0.39], [0.9, 0.48], [1.1, 0.52], [1.5, 0.40]]
+cd_mach = [[0.0, 0.30], [0.4, 0.32], [0.7, 0.39], [0.9, 0.40], [1.1, 0.40], [1.5, 0.40]]
 # Motor passports (chat PDFs):
 #   stage 1 RDK-2000: 2.2-2.4 kNs, avg 390-400 N, peak 500-550 N,
 #     burn 5-6 s, propellant 1.88 kg.
@@ -110,19 +110,53 @@ cd_mach = [[0.0, 0.35], [0.4, 0.35], [0.7, 0.39], [0.9, 0.48], [1.1, 0.52], [1.5
 # Motor passports: 2.2 + 1.0 kNs minimum (400 N for 5.5 s and 312.5 N for
 # 3.2 s), both below the passport peak thrusts.
 # First stage is jettisoned at 5.5 s; its RDK-2000 casing is 2.8 - 1.88 = 0.92 kg.
-stage_sep_time_s = 5.5
-stage_sep_mass_kg = 0.92
+stage_sep_time_s = 6.0
+stage_sep_mass_kg = 2.55
 # Mass flows 0.342 / 0.3125 kg/s are the passport propellant masses divided
 # by the burn times. Peaks and thrust ripple are NOT modelled; only average
 # thrust and mass flow are.
 thrust_profile = [
-  [0.0, 0.0, 0.0],
-  [0.08, 400.0, 0.342],
-  [5.5, 400.0, 0.342],
-  [5.5, 312.5, 0.3125],
-  [8.7, 312.5, 0.3125],
-  [8.7, 0.0, 0.0],
-  [30.0, 0.0, 0.0],
+  [0.00, 0.00, 0.0000],
+  [0.25, 295.00, 0.2000],
+  [0.50, 260.00, 0.2667],
+  [0.75, 380.00, 0.3600],
+  [0.99, 473.28, 0.3810],
+  [1.25, 510.00, 0.4091],
+  [1.51, 488.66, 0.3800],
+  [1.75, 547.50, 0.4200],
+  [2.00, 520.00, 0.4400],
+  [2.25, 513.33, 0.4000],
+  [2.50, 530.00, 0.4200],
+  [2.75, 505.00, 0.4200],
+  [3.00, 516.67, 0.4000],
+  [3.25, 512.50, 0.4000],
+  [3.50, 493.33, 0.4000],
+  [3.75, 473.33, 0.3800],
+  [4.00, 440.00, 0.3600],
+  [4.25, 415.00, 0.3400],
+  [4.50, 403.33, 0.3200],
+  [4.75, 410.00, 0.3200],
+  [5.00, 370.00, 0.3200],
+  [5.25, 140.00, 0.1000],
+  [5.50, 35.00, 0.0600],
+  [5.75, 13.33, 0.0000],
+  [6.00, 0.00, 0.6000],
+  [6.25, 140.00, 0.1000],
+  [6.50, 335.00, 0.2000],
+  [6.75, 380.00, 0.3200],
+  [7.00, 420.00, 0.3400],
+  [7.25, 490.00, 0.4000],
+  [7.50, 590.00, 0.4600],
+  [7.75, 543.33, 0.4200],
+  [8.00, 500.00, 0.4000],
+  [8.25, 496.67, 0.3800],
+  [8.50, 370.00, 0.3400],
+  [8.75, 320.00, 0.2400],
+  [9.00, 250.00, 0.2200],
+  [9.25, 95.00, 0.0800],
+  [9.50, 18.00, 0.0200],
+  [9.75, 12.75, 0.0200],
+  [10.00, 0.00, 0.0000],
 ]
 
 [output]

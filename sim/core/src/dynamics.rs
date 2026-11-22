@@ -441,11 +441,7 @@ pub fn derivative(t: f64, s: &State, wind: Vec3, atm: &Atmosphere, v: &Vehicle) 
     d.vel = scale(force_world, 1.0 / mass);
     d.quat = quat_rate(q, w);
     d.omega = wdot;
-    d.mass[0] = if mass <= v.dry_mass {
-        0.0
-    } else {
-        -v.mdot_at(t)
-    };
+    d.mass[0] = if mass <= mass_min { 0.0 } else { -v.mdot_at(t) };
     if on_pad {
         d.pos = [0.0; 3];
         d.vel = [0.0; 3];

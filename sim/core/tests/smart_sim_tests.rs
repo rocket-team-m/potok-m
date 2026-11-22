@@ -60,7 +60,7 @@ fn physics_features_are_finite_and_bounded() {
             for (i, f) in e.frames.iter().enumerate() {
                 let at_liftoff = c.cd0 * f.physics[2] * 1000.0 * c.area_m2 / c.mass_kg;
                 assert!(f.physics[4] >= at_liftoff * 0.99 - 1e-6);
-                assert!(f.physics[4] <= at_liftoff * 1.4 + 1e-6);
+                assert!(f.physics[4] <= at_liftoff * 2.0 + 1e-6);
                 let off = i * 14;
                 assert_eq!(f.physics[0], e.features[off + 8]);
                 assert_eq!(f.physics[5], e.features[off + 13]);
@@ -78,13 +78,13 @@ fn domain_randomization_stays_within_tolerances() {
     for i in 0..40u64 {
         let e = s.run_episode(i).unwrap();
         let c = e.meta.conditioning;
-        assert!((14.0..=15.0).contains(&(c.mass_kg as f64)));
+        assert!((10.4..=11.4).contains(&(c.mass_kg as f64)));
         assert!((0.94..=1.06).contains(&e.meta.thrust_scale));
         assert!((0.30..=0.40).contains(&(c.cd0 as f64)));
         assert!((0.85..=1.10).contains(&(c.static_margin_cal as f64)));
         assert!((0.0010..=0.0020).contains(&(c.gyro_noise as f64)));
-        assert!((c.area_m2 - 0.00817).abs() < 1e-9);
-        assert!((c.thrust_peak_n - 400.0).abs() < 1e-6);
+        assert!((c.area_m2 - 0.011).abs() < 1e-9);
+        assert!((c.thrust_peak_n - 590.0).abs() < 1e-6);
         assert!((0.0..=15.0).contains(&e.meta.v_10));
         assert!((0.0..=8.0).contains(&e.meta.shear_delta));
         if e.meta.gust_amplitude > 0.0 {
@@ -217,11 +217,11 @@ fn validation_v2_roundtrip_carries_conditioning_and_split() {
         v1.episodes[0].conditioning,
         Conditioning {
             mass_kg: episodes[0].meta.conditioning.mass_kg,
-            area_m2: 0.00817,
-            cd0: 0.35,
-            static_margin_cal: (0.0765 / (2.0 * (0.00817_f64 / std::f64::consts::PI).sqrt()))
+            area_m2: 0.011,
+            cd0: 0.4,
+            static_margin_cal: (0.0765 / (2.0 * (0.011_f64 / std::f64::consts::PI).sqrt()))
                 as f32,
-            thrust_peak_n: 400.0,
+            thrust_peak_n: 590.0,
             gyro_noise: 0.0015,
         }
     );

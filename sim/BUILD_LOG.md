@@ -128,8 +128,8 @@ and uncertainty notes are in `sim/README.md`.
 Two-stage thrust uses the **passport minimum 3.2 kNs total**: 2.2 kNs / 5.5 s /
 1.88 kg → 400 N at 0.342 kg/s (RDK-2000) and 1.0 kNs / 3.2 s / 1.0 kg →
 312.5 N at 0.3125 kg/s (RDK-1000), both below the passport peak thrusts. At
-the 14–15 kg mass and placeholder Cd=0.35 the nominal run reaches ~150.9 m/s
-and ~1693 m apogee; both targets need better aerodynamics and lower mass. The gap is documented in the config and README
+OpenRocket-derived mass (10.4–11.4 kg), area 0.011 m², thrust curve and Cd table
+the nominal run reaches ~276 m/s and ~3116 m apogee, within 1% of OR Sim 9. The gap is documented in the config and README
 rather than hidden. Aerodynamic coefficients remain explicitly marked placeholders.
 
 Also derived from the data rather than hardcoded: `Vehicle::dry_mass` is now
@@ -190,11 +190,11 @@ Caveat for the AI lane: `validation.bin` is now version 2. `ai/src/potok_ai/data
 still reads 9 metadata, so it must be updated by its owner before consuming
 new files; no files outside `sim/` were touched here.
 
-## TTX revision (22.11.2026)
+## OpenRocket alignment (22.11.2026)
 
-Max speed TTX: M=0.5–0.6 ± (~170–200 m/s at 3 km).
-At the nominal seed the simulator reaches ~150.9 m/s
-and ~1693 m apogee; both are below the TTX.
+Max speed TTX: M=0.5–0.6 ±; OpenRocket Simulation 9 reaches 274 m/s at M=0.82, so the two statements are not yet reconciled.
+At the nominal seed the simulator reaches ~276 m/s
+and ~3116 m apogee, matching OpenRocket Simulation 9.
 
 ## Ideal loop — physics side (SPEC_ENGINE_IDEAL.md)
 

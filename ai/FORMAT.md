@@ -168,7 +168,7 @@ the domain-randomization work). The header is still 80 bytes, with `version = 2`
 and bytes 48..52 (the first four reserved bytes) holding `meta_count = 17` as a
 u32; bytes 52..80 stay zero. `feature_count` must be at least 14 and the first
 14 features are used. Every episode is one randomized Potok-M flight inside
-the real tolerances (mass 14-15 kg, thrust 0.94-1.06 of nominal, CG
+the real tolerances (mass 10.4-11.4 kg, thrust 0.94-1.06 of nominal, CG
 +/-0.02 m, Cd0 0.30-0.40, static margin 0.85-1.10 cal, sensor noise, wind
 0-15 m/s, gusts 5-20 m/s and shear layers). There are no other vehicle types.
 Per episode the layout is `u64 index` followed by **17 f32 metadata**:
