@@ -676,3 +676,65 @@ students.
 - Verification: `uv run pytest -q` → `88 passed`; `uv run ruff check src tests` →
   clean. Only `ai/src/potok_ai/calibration.py`, `ai/tests/test_calibration.py` and
   this file changed; `scripts/`, `sim/`, `edge/` and `protocol/` were not touched.
+
+## Honest epoch sweep on the full run-4 data (2026-11-22)
+
+Replaces the single-seed 40-epoch choice. Driver `ai/out/sweep/driver.py` calls the
+**unchanged** `potok_ai.engine` CLI with run 4's exact flags (residual + curriculum
+on explicitly, `--calibrate` on), varying only `--epochs`, `--seed` and a private
+`--out` per run so no teacher checkpoint leaks between runs. Data is the full
+`out/run4/data` (80 train / 20 held-out episodes × 1500 frames). Deterministic
+seeding comes from `engine.seed_everything(seed)`. Raw results:
+`ai/out/sweep/results.csv` (27 rows) and `ai/out/sweep/SUMMARY.md`.
+
+Epoch 80 was **dropped**: one 40-epoch `lrs` run measured 16m46s on one CPU core,
+so 36 runs were infeasible. Reduced to epochs **40 / 60 / 100** with **all three
+seeds (1, 2, 3)** — 27 runs, all successful, all passing both gates on every seed.
+No gate, loss, architecture or data was changed; no seed was cherry-picked.
+
+### Sweep table (mean ± sample std over seeds 1/2/3; std ddof=1)
+
+| model | epoch | rmse_train | rmse_held_out | ratio | ece (calibrated) | coverage | gates |
+|---|---:|---|---|---|---|---|---|
+| lrs | 40 | 0.349103 ± 0.188628 | 0.260717 ± 0.126583 | 0.760074 ± 0.054431 | 0.000000 | 0.410648 ± 0.136179 | 3/3 |
+| lrs | 60 | 0.236883 ± 0.016132 | 0.188338 ± 0.017665 | 0.794274 ± 0.024530 | 0.000000 | 0.454250 ± 0.093549 | 3/3 |
+| lrs | 100 | 0.231863 ± 0.007983 | **0.179815 ± 0.002597** | 0.776100 ± 0.027669 | 0.000000 | 0.476752 ± 0.160272 | 3/3 |
+| loopwm-lite | 40 | 0.264858 ± 0.038014 | 0.217044 ± 0.013488 | 0.827835 ± 0.100178 | 0.012152 ± 0.021048 | 0.194923 ± 0.105766 | 3/3 |
+| loopwm-lite | 60 | 0.387730 ± 0.207990 | 0.367602 ± 0.236186 | 0.909937 ± 0.137453 | 0.011413 ± 0.019768 | 0.339019 ± 0.144044 | 3/3 |
+| loopwm-lite | 100 | 0.187592 ± 0.022343 | **0.181085 ± 0.009249** | 0.970636 ± 0.067228 | 0.000000 | 0.390133 ± 0.163494 | 3/3 |
+| loopwm | 40 | 0.215173 ± 0.042272 | 0.190597 ± 0.016707 | 0.899548 ± 0.105148 | 0.002691 ± 0.004660 | 0.316334 ± 0.239024 | 3/3 |
+| loopwm | 60 | 0.288084 ± 0.075672 | 0.257438 ± 0.113667 | 0.868745 ± 0.148188 | 0.021449 ± 0.025354 | 0.469446 ± 0.038854 | 3/3 |
+| loopwm | 100 | 0.213800 ± 0.023004 | **0.188893 ± 0.010472** | 0.886778 ± 0.045713 | 0.000000 | 0.422525 ± 0.200506 | 3/3 |
+
+### Selection and rationale
+
+Rule fixed before reading results: an epoch is admissible only when **every**
+seed has `ratio <= 1.25` and `ece <= 0.05`; among admissible epochs pick the
+lowest **mean** held-out RMSE across seeds; break ties by highest mean coverage.
+All 27 (model, epoch, seed) runs are admissible, so selection is by mean
+held-out RMSE: **epoch 100 for all three families** — lrs 0.179815 ± 0.002597,
+loopwm-lite 0.181085 ± 0.009249, loopwm 0.188893 ± 0.010472. There were no ties
+requiring the coverage rule. This supersedes run 4's seed-1/40-epoch choice.
+
+### Does more than 40 epochs help? (held-out RMSE vs epoch)
+
+- **lrs**: 0.2607 → 0.1883 → 0.1798 (−31.0% at 100). Clear improvement, but most
+  of it is seed-2's 40-epoch outlier (0.406082); at 100 the seed spread collapses
+  to ±0.0026. The single-seed run 4 number (0.174805) was not a stable estimate.
+- **loopwm-lite**: 0.2170 → 0.3676 → 0.1811 (−16.6% at 100). Improves at 100, but
+  the 60-epoch spike is a seed-3 instability (0.630336), not overfitting.
+- **loopwm**: 0.1906 → 0.2574 → 0.1889 (−0.9% at 100). Essentially flat; the
+  difference is inside the seed spread, so treat 40 vs 100 as a tie for loopwm.
+
+Honest limits: selecting on held-out RMSE spends the held-out set, so the 100-epoch
+numbers are optimistic as unbiased estimates. Calibrated ECE is in-sample and
+several winners report `ece = 0` only because isotonic maps the held-out set to
+itself (raw ECE remains large, e.g. loopwm seed 1 = 0.582649). Epoch count also
+changes the curriculum (`epochs_per_stage = epochs // 4` → 10/15/25), so the curve
+is epoch count *plus* schedule. The conditioning vectors of the two splits have
+matching means/ranges, but with only four held-out scenarios and no re-split
+control, `ratio < 1` still does **not** prove generalisation over an easier split.
+
+Verification after the sweep: `uv run pytest -q` → `88 passed`;
+`uv run ruff check src tests` → clean. Only files under `ai/out/sweep/` and this
+log changed; `scripts/`, `sim/`, `edge/` and `protocol/` were not touched.
