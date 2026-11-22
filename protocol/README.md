@@ -5,11 +5,15 @@ Single source of truth: [`uart.yaml`](uart.yaml). Everything else in
 
 ## Wire format
 
-Both frames are little-endian, fixed size, CRC-16/CCITT-FALSE
-(poly `0x1021`, init `0xFFFF`, no reflection, no final XOR) over every byte
-before the trailing 2-byte CRC field.
+Two profiles share the same CRC, phase enum and flag bits. All frames are
+little-endian and fixed size. CRC is CRC-16/CCITT-FALSE (poly `0x1021`,
+init `0xFFFF`, no reflection, no final XOR) over every byte before the
+trailing 2-byte CRC field. `compat` is the default and is unchanged by the
+addition of `lowlat`.
 
-### Request (AI → STM32), 56 bytes, magic `0x504D`
+### compat profile
+
+#### Request (AI → STM32), 56 bytes, magic `0x504D`
 
 | offset | field | type | note |
 |---:|---|---|---|
@@ -34,7 +38,7 @@ The numeric codes are the wire contract and are unchanged by the rename;
 Flags (bit index): `0` GPS_FIX, `1` IMU_OK, `2` BARO_OK, `3` PITOT_OK,
 `4` AI_READY, `5` CALIBRATED, `6` MOTOR_ARMED, `7` FAULT.
 
-### Reply (STM32 → AI), 14 bytes, magic `0x5250`
+#### Reply (STM32 → AI), 14 bytes, magic `0x5250`
 
 | offset | field | type | note |
 |---:|---|---|---|
@@ -46,6 +50,48 @@ Flags (bit index): `0` GPS_FIX, `1` IMU_OK, `2` BARO_OK, `3` PITOT_OK,
 | 9 | ai_healthy | u8 | 0 / 1 |
 | 10 | version | u16 | expected `1` |
 | 12 | crc16 | u16 | over bytes `0..12` |
+
+### lowlat profile (SPEC_PROTOCOL_LOWLAT.md)
+
+#### Request, 42 bytes, magic `0x4C54`
+
+| offset | field | type | note |
+|---:|---|---|---|
+| 0 | magic | u16 | `0x4C54` |
+| 2 | seq | u16 | wraps at `u16::MAX` |
+| 4 | time_us | u32 | monotonic microseconds |
+| 8 | phase | u8 | same Phase enum as compat |
+| 9 | version | u8 | expected `1` |
+| 10 | flags | u8 | same flag bits as compat |
+| 11 | reserved | u8 | `0` |
+| 12 | features | i16[14] | scales below |
+| 40 | crc16 | u16 | over bytes `0..40` |
+
+Feature scales, in wire order (`LOWLAT_REQUEST_FEATURES_SCALES` /
+`LOWLAT_REQUEST_FEATURES_NAMES`), are physical units per LSB:
+`gyro_x/y/z` 1e-3 rad/s, `accel_x/y/z` 1e-3 m/s², `mag_x/y/z` 1e-4 T,
+`height` 1e-2 m, `pressure` 1 Pa, `pitot_dp` 1 Pa, `temperature` 0.1 °C,
+`battery_mv` 1 mV. `quantize_i16(value, scale)` saturates at `i16::MIN/MAX`.
+
+#### Reply, 16 bytes, magic `0x4C52`
+
+| offset | field | type | note |
+|---:|---|---|---|
+| 0 | magic | u16 | `0x4C52` |
+| 2 | seq | u16 | echoes request seq |
+| 4 | g_pitch | i16 | × 0.001 rad |
+| 6 | g_yaw | i16 | × 0.001 rad |
+| 8 | confidence | u8 | 0..255 |
+| 9 | ai_healthy | u8 | 0 / 1 |
+| 10 | version | u8 | expected `1` |
+| 11 | compute_us | u8 | units of 100 µs |
+| 12 | reserved | u8[2] | `0`, see note |
+| 14 | crc16 | u16 | over bytes `0..14` |
+
+The spec states a 16-byte reply but its field list sums to 14 bytes; the two
+`reserved` bytes make the stated size exact. The reply magic `0x4C52` is an
+implementation choice — the spec only fixes the request magic. Both are
+declared explicitly in `uart.yaml` and validated.
 
 ## Regenerate
 
@@ -127,6 +173,21 @@ original bitwise implementation (pinned by `crc_table_matches_bitwise_reference`
 Angle helpers: `reply_g_pitch_rad(raw)`, `reply_g_pitch_from_rad(rad)` and the
 `_g_yaw_` equivalents clamp to `i16`.
 
+lowlat uses the same shapes with generated `LOWLAT_*` constants:
+
+```rust
+let low = LowlatRequestFrame {
+    seq: 42, time_us: 1_700_000_123, phase: Phase::APOGEE,
+    version: LOWLAT_REQUEST_VERSION, flags: flags::IMU_OK, reserved: 0,
+    features: [0; 14],
+};
+let mut buf = [0u8; LOWLAT_REQUEST_SIZE];
+encode_lowlat_request(&low, &mut buf)?;
+let low_view = LowlatRequestView::new(&buf)?;  // zero-copy
+let gyro_x = dequantize_i16(low_view.features()[0], LOWLAT_REQUEST_FEATURES_SCALES[0]);
+let raw = quantize_i16(1.0, LOWLAT_REQUEST_FEATURES_SCALES[0]); // 1000, saturating
+```
+
 ## Use from C
 
 Include `generated/protocol.h` (C11, stdlib only). It is header-only with
@@ -155,6 +216,12 @@ Flags: `potok_flag_has`, `potok_flag_set`, `potok_flag_clear` with
 `POTOK_FLAG_*` masks. Scaled angles: `potok_reply_g_pitch_scaled`,
 `potok_reply_g_pitch_from_scaled` (and `_g_yaw_`).
 
+lowlat: `PotokLowlatRequest` / `PotokLowlatReply` with
+`potok_lowlat_request_encode` / `_decode`, `potok_lowlat_reply_encode` /
+`_decode`, constants `POTOK_LOWLAT_REQUEST_SIZE` (42),
+`POTOK_LOWLAT_REPLY_SIZE` (16) and the scale arrays
+`POTOK_LOWLAT_REQUEST_FEATURES_SCALES` / `_NAMES`.
+
 ## Use from Python
 
 Add `generated/` to `sys.path` (or copy `protocol.py` next to your code), then:
@@ -179,6 +246,11 @@ pitch_rad = proto.reply_g_pitch_scaled(rep.g_pitch)
 Decode raises `Truncated`, `BadMagic`, `BadCrc`, `BadPhase` or
 `VersionMismatch` (all subclasses of `ProtocolError`).
 
+lowlat: `proto.LowlatRequest(seq=..., time_us=..., phase=proto.Phase.APOGEE,
+version=proto.LOWLAT_REQUEST_VERSION, flags=..., reserved=0, features=[0]*14)`
+with `proto.encode_lowlat_request` / `proto.decode_lowlat_request`; reply uses
+`proto.LowlatReply` with `compute_us` and a 2-byte `reserved` list.
+
 ## Benchmark
 
 ```sh
@@ -187,8 +259,8 @@ cargo run --release -p potok-protocol --example hotpath
 
 Optional first argument sets iterations (default 1 000 000). Prints ns/frame
 and MB/s of wire bytes for CRC (bitwise reference and slicing-by-4), encode,
-decode and encode+decode+CRC for both frames. `black_box` prevents elision;
-five repetitions per case report the minimum duration.
+decode and encode+decode+CRC for both frames of both profiles. `black_box`
+prevents elision; five repetitions per case report the minimum duration.
 
 ## Verify
 
@@ -197,5 +269,7 @@ cargo check
 cargo test
 ```
 
-25 tests: the original 22 plus CRC table vs bitwise reference, zero-copy view
-equivalence and committed golden fixtures re-encoding byte-identically.
+36 tests: the original 22 plus CRC table vs bitwise reference, zero-copy view
+equivalence, committed golden fixtures re-encoding byte-identically, and the
+lowlat profile suite (round trips, truncation, magic/CRC/phase/version errors,
+flags, int16 saturation, golden bytes and profile independence).

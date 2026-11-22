@@ -3,10 +3,6 @@ protocol:
   version: 1
   endianness: little
 
-  versions:
-    request: 1
-    reply: 1
-
   crc:
     algorithm: crc16
     polynomial: 0x1021
@@ -39,34 +35,82 @@ protocol:
       - { name: MOTOR_ARMED, bit: 6 }
       - { name: FAULT, bit: 7 }
 
-  frames:
-    - name: request
-      size: 56
-      magic: 0x504D
-      fields:
-        - { name: magic, type: u16, value: 0x504D }
-        - { name: seq, type: u16 }
-        - { name: time_us, type: u32 }
-        - { name: phase, type: u8, enum: Phase }
-        - { name: version, type: u8 }
-        - { name: flags, type: u8, flags: true }
-        - { name: reserved, type: u8 }
-        - { name: gyro, type: f32, count: 3 }
-        - { name: accel, type: f32, count: 3 }
-        - { name: mag, type: f32, count: 3 }
-        - { name: height, type: f32 }
-        - { name: pitot_dp, type: i16 }
-        - { name: crc16, type: u16, crc: true }
+  profiles:
+    compat:
+      versions:
+        request: 1
+        reply: 1
+      frames:
+        - name: request
+          size: 56
+          magic: 0x504D
+          fields:
+            - { name: magic, type: u16, value: 0x504D }
+            - { name: seq, type: u16 }
+            - { name: time_us, type: u32 }
+            - { name: phase, type: u8, enum: Phase }
+            - { name: version, type: u8 }
+            - { name: flags, type: u8, flags: true }
+            - { name: reserved, type: u8 }
+            - { name: gyro, type: f32, count: 3 }
+            - { name: accel, type: f32, count: 3 }
+            - { name: mag, type: f32, count: 3 }
+            - { name: height, type: f32 }
+            - { name: pitot_dp, type: i16 }
+            - { name: crc16, type: u16, crc: true }
 
-    - name: reply
-      size: 14
-      magic: 0x5250
-      fields:
-        - { name: magic, type: u16, value: 0x5250 }
-        - { name: seq, type: u16 }
-        - { name: g_pitch, type: i16, scale: 0.001 }
-        - { name: g_yaw, type: i16, scale: 0.001 }
-        - { name: confidence, type: u8 }
-        - { name: ai_healthy, type: u8 }
-        - { name: version, type: u16 }
-        - { name: crc16, type: u16, crc: true }
+        - name: reply
+          size: 14
+          magic: 0x5250
+          fields:
+            - { name: magic, type: u16, value: 0x5250 }
+            - { name: seq, type: u16 }
+            - { name: g_pitch, type: i16, scale: 0.001 }
+            - { name: g_yaw, type: i16, scale: 0.001 }
+            - { name: confidence, type: u8 }
+            - { name: ai_healthy, type: u8 }
+            - { name: version, type: u16 }
+            - { name: crc16, type: u16, crc: true }
+
+    lowlat:
+      versions:
+        request: 1
+        reply: 1
+      frames:
+        - name: lowlat_request
+          size: 42
+          magic: 0x4C54
+          fields:
+            - { name: magic, type: u16, value: 0x4C54 }
+            - { name: seq, type: u16 }
+            - { name: time_us, type: u32 }
+            - { name: phase, type: u8, enum: Phase }
+            - { name: version, type: u8 }
+            - { name: flags, type: u8, flags: true }
+            - { name: reserved, type: u8 }
+            - name: features
+              type: i16
+              count: 14
+              feature_names:
+                [gyro_x, gyro_y, gyro_z, accel_x, accel_y, accel_z,
+                 mag_x, mag_y, mag_z, height, pressure, pitot_dp,
+                 temperature, battery_mv]
+              scales:
+                [0.001, 0.001, 0.001, 0.001, 0.001, 0.001,
+                 0.0001, 0.0001, 0.0001, 0.01, 1.0, 1.0, 0.1, 1.0]
+            - { name: crc16, type: u16, crc: true }
+
+        - name: lowlat_reply
+          size: 16
+          magic: 0x4C52
+          fields:
+            - { name: magic, type: u16, value: 0x4C52 }
+            - { name: seq, type: u16 }
+            - { name: g_pitch, type: i16, scale: 0.001 }
+            - { name: g_yaw, type: i16, scale: 0.001 }
+            - { name: confidence, type: u8 }
+            - { name: ai_healthy, type: u8 }
+            - { name: version, type: u8 }
+            - { name: compute_us, type: u8 }
+            - { name: reserved, type: u8, count: 2 }
+            - { name: crc16, type: u16, crc: true }

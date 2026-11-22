@@ -17,6 +17,8 @@ pub use generated::*;
 const _: () = assert!(!CRC_REFLECT_IN && !CRC_REFLECT_OUT);
 const _: () = assert!(REQUEST_CRC_OFF + REQUEST_CRC_LEN == REQUEST_SIZE);
 const _: () = assert!(REPLY_CRC_OFF + REPLY_CRC_LEN == REPLY_SIZE);
+const _: () = assert!(LOWLAT_REQUEST_CRC_OFF + LOWLAT_REQUEST_CRC_LEN == LOWLAT_REQUEST_SIZE);
+const _: () = assert!(LOWLAT_REPLY_CRC_OFF + LOWLAT_REPLY_CRC_LEN == LOWLAT_REPLY_SIZE);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
@@ -430,6 +432,197 @@ pub fn decode_reply(buf: &[u8]) -> Result<ReplyFrame, Error> {
         ai_healthy: codec::get_u8(buf, REPLY_OFF_AI_HEALTHY),
         version,
     })
+}
+
+// ---------------------------------------------------------------------------
+// lowlat profile (SPEC_PROTOCOL_LOWLAT.md). Additive: compat frames are intact.
+// ---------------------------------------------------------------------------
+
+#[inline]
+pub fn encode_lowlat_request(frame: &LowlatRequestFrame, out: &mut [u8]) -> Result<(), Error> {
+    if out.len() < LOWLAT_REQUEST_SIZE {
+        return Err(Error::BufferTooSmall { need: LOWLAT_REQUEST_SIZE, got: out.len() });
+    }
+    codec::put_u16(out, LOWLAT_REQUEST_OFF_MAGIC, LOWLAT_REQUEST_MAGIC);
+    codec::put_u16(out, LOWLAT_REQUEST_OFF_SEQ, frame.seq);
+    codec::put_u32(out, LOWLAT_REQUEST_OFF_TIME_US, frame.time_us);
+    codec::put_u8(out, LOWLAT_REQUEST_OFF_PHASE, u8::from(frame.phase));
+    codec::put_u8(out, LOWLAT_REQUEST_OFF_VERSION, frame.version);
+    codec::put_u8(out, LOWLAT_REQUEST_OFF_FLAGS, frame.flags);
+    codec::put_u8(out, LOWLAT_REQUEST_OFF_RESERVED, frame.reserved);
+    for (i, &feature) in frame.features.iter().enumerate() {
+        codec::put_i16(out, LOWLAT_REQUEST_OFF_FEATURES + 2 * i, feature);
+    }
+    codec::put_u16(out, LOWLAT_REQUEST_CRC_OFF, crc16(&out[..LOWLAT_REQUEST_CRC_OFF]));
+    Ok(())
+}
+
+/// Borrowed, validated view over a lowlat request frame.
+#[derive(Clone, Copy, Debug)]
+pub struct LowlatRequestView<'a> {
+    buf: &'a [u8],
+    phase: Phase,
+}
+
+impl<'a> LowlatRequestView<'a> {
+    #[inline]
+    pub fn new(buf: &'a [u8]) -> Result<Self, Error> {
+        if buf.len() < LOWLAT_REQUEST_SIZE {
+            return Err(Error::TooShort { need: LOWLAT_REQUEST_SIZE, got: buf.len() });
+        }
+        check_magic_crc(buf, LOWLAT_REQUEST_MAGIC, LOWLAT_REQUEST_CRC_OFF)?;
+        let phase_raw = codec::get_u8(buf, LOWLAT_REQUEST_OFF_PHASE);
+        let phase = Phase::try_from(phase_raw).map_err(|_| Error::BadPhase(phase_raw))?;
+        let version = codec::get_u8(buf, LOWLAT_REQUEST_OFF_VERSION);
+        if version != LOWLAT_REQUEST_VERSION {
+            return Err(Error::VersionMismatch {
+                expected: u16::from(LOWLAT_REQUEST_VERSION),
+                got: u16::from(version),
+            });
+        }
+        Ok(Self { buf, phase })
+    }
+
+    #[inline(always)]
+    pub fn as_bytes(&self) -> &'a [u8] { self.buf }
+    #[inline(always)]
+    pub fn seq(&self) -> u16 { codec::get_u16(self.buf, LOWLAT_REQUEST_OFF_SEQ) }
+    #[inline(always)]
+    pub fn time_us(&self) -> u32 { codec::get_u32(self.buf, LOWLAT_REQUEST_OFF_TIME_US) }
+    #[inline(always)]
+    pub fn phase(&self) -> Phase { self.phase }
+    #[inline(always)]
+    pub fn version(&self) -> u8 { codec::get_u8(self.buf, LOWLAT_REQUEST_OFF_VERSION) }
+    #[inline(always)]
+    pub fn flags(&self) -> u8 { codec::get_u8(self.buf, LOWLAT_REQUEST_OFF_FLAGS) }
+    #[inline(always)]
+    pub fn reserved(&self) -> u8 { codec::get_u8(self.buf, LOWLAT_REQUEST_OFF_RESERVED) }
+    #[inline]
+    pub fn features(&self) -> [i16; 14] {
+        let mut out = [0i16; 14];
+        for (i, item) in out.iter_mut().enumerate() {
+            *item = codec::get_i16(self.buf, LOWLAT_REQUEST_OFF_FEATURES + 2 * i);
+        }
+        out
+    }
+
+    #[inline]
+    pub fn to_owned(&self) -> LowlatRequestFrame {
+        LowlatRequestFrame {
+            seq: self.seq(),
+            time_us: self.time_us(),
+            phase: self.phase,
+            version: self.version(),
+            flags: self.flags(),
+            reserved: self.reserved(),
+            features: self.features(),
+        }
+    }
+}
+
+#[inline]
+pub fn decode_lowlat_request(buf: &[u8]) -> Result<LowlatRequestFrame, Error> {
+    LowlatRequestView::new(buf).map(|v| v.to_owned())
+}
+
+#[inline]
+pub fn encode_lowlat_reply(frame: &LowlatReplyFrame, out: &mut [u8]) -> Result<(), Error> {
+    if out.len() < LOWLAT_REPLY_SIZE {
+        return Err(Error::BufferTooSmall { need: LOWLAT_REPLY_SIZE, got: out.len() });
+    }
+    codec::put_u16(out, LOWLAT_REPLY_OFF_MAGIC, LOWLAT_REPLY_MAGIC);
+    codec::put_u16(out, LOWLAT_REPLY_OFF_SEQ, frame.seq);
+    codec::put_i16(out, LOWLAT_REPLY_OFF_G_PITCH, frame.g_pitch);
+    codec::put_i16(out, LOWLAT_REPLY_OFF_G_YAW, frame.g_yaw);
+    codec::put_u8(out, LOWLAT_REPLY_OFF_CONFIDENCE, frame.confidence);
+    codec::put_u8(out, LOWLAT_REPLY_OFF_AI_HEALTHY, frame.ai_healthy);
+    codec::put_u8(out, LOWLAT_REPLY_OFF_VERSION, frame.version);
+    codec::put_u8(out, LOWLAT_REPLY_OFF_COMPUTE_US, frame.compute_us);
+    codec::put_u8(out, LOWLAT_REPLY_OFF_RESERVED, frame.reserved[0]);
+    codec::put_u8(out, LOWLAT_REPLY_OFF_RESERVED + 1, frame.reserved[1]);
+    codec::put_u16(out, LOWLAT_REPLY_CRC_OFF, crc16(&out[..LOWLAT_REPLY_CRC_OFF]));
+    Ok(())
+}
+
+/// Borrowed, validated view over a lowlat reply frame.
+#[derive(Clone, Copy, Debug)]
+pub struct LowlatReplyView<'a> {
+    buf: &'a [u8],
+}
+
+impl<'a> LowlatReplyView<'a> {
+    #[inline]
+    pub fn new(buf: &'a [u8]) -> Result<Self, Error> {
+        if buf.len() < LOWLAT_REPLY_SIZE {
+            return Err(Error::TooShort { need: LOWLAT_REPLY_SIZE, got: buf.len() });
+        }
+        check_magic_crc(buf, LOWLAT_REPLY_MAGIC, LOWLAT_REPLY_CRC_OFF)?;
+        let version = codec::get_u8(buf, LOWLAT_REPLY_OFF_VERSION);
+        if version != LOWLAT_REPLY_VERSION {
+            return Err(Error::VersionMismatch {
+                expected: u16::from(LOWLAT_REPLY_VERSION),
+                got: u16::from(version),
+            });
+        }
+        Ok(Self { buf })
+    }
+
+    #[inline(always)]
+    pub fn as_bytes(&self) -> &'a [u8] { self.buf }
+    #[inline(always)]
+    pub fn seq(&self) -> u16 { codec::get_u16(self.buf, LOWLAT_REPLY_OFF_SEQ) }
+    #[inline(always)]
+    pub fn g_pitch(&self) -> i16 { codec::get_i16(self.buf, LOWLAT_REPLY_OFF_G_PITCH) }
+    #[inline(always)]
+    pub fn g_yaw(&self) -> i16 { codec::get_i16(self.buf, LOWLAT_REPLY_OFF_G_YAW) }
+    #[inline(always)]
+    pub fn confidence(&self) -> u8 { codec::get_u8(self.buf, LOWLAT_REPLY_OFF_CONFIDENCE) }
+    #[inline(always)]
+    pub fn ai_healthy(&self) -> u8 { codec::get_u8(self.buf, LOWLAT_REPLY_OFF_AI_HEALTHY) }
+    #[inline(always)]
+    pub fn version(&self) -> u8 { codec::get_u8(self.buf, LOWLAT_REPLY_OFF_VERSION) }
+    #[inline(always)]
+    pub fn compute_us(&self) -> u8 { codec::get_u8(self.buf, LOWLAT_REPLY_OFF_COMPUTE_US) }
+    #[inline]
+    pub fn reserved(&self) -> [u8; 2] {
+        [
+            codec::get_u8(self.buf, LOWLAT_REPLY_OFF_RESERVED),
+            codec::get_u8(self.buf, LOWLAT_REPLY_OFF_RESERVED + 1),
+        ]
+    }
+
+    #[inline]
+    pub fn to_owned(&self) -> LowlatReplyFrame {
+        LowlatReplyFrame {
+            seq: self.seq(),
+            g_pitch: self.g_pitch(),
+            g_yaw: self.g_yaw(),
+            confidence: self.confidence(),
+            ai_healthy: self.ai_healthy(),
+            version: self.version(),
+            compute_us: self.compute_us(),
+            reserved: self.reserved(),
+        }
+    }
+}
+
+#[inline]
+pub fn decode_lowlat_reply(buf: &[u8]) -> Result<LowlatReplyFrame, Error> {
+    LowlatReplyView::new(buf).map(|v| v.to_owned())
+}
+
+/// Quantize a physical value to a scaled int16, saturating at the type limits.
+#[inline]
+pub fn quantize_i16(value: f64, scale: f64) -> i16 {
+    assert!(scale.is_finite() && scale > 0.0, "scale must be finite and positive");
+    let v = value / scale;
+    let r = if v >= 0.0 { v + 0.5 } else { v - 0.5 };
+    if r >= 32767.0 { 32767 } else if r <= -32768.0 { -32768 } else { r as i16 }
+}
+
+#[inline]
+pub fn dequantize_i16(raw: i16, scale: f64) -> f64 {
+    f64::from(raw) * scale
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

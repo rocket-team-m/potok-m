@@ -61,10 +61,16 @@ pub struct Protocol {
     pub name: String,
     pub version: u32,
     pub endianness: String,
-    pub versions: Versions,
     pub crc: Crc,
     pub enums: Vec<EnumDef>,
     pub flags: Flags,
+    pub profiles: std::collections::BTreeMap<String, Profile>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Profile {
+    pub versions: Versions,
     pub frames: Vec<Frame>,
 }
 
@@ -149,6 +155,10 @@ pub struct Field {
     pub flags: bool,
     #[serde(default)]
     pub scale: Option<f64>,
+    #[serde(default)]
+    pub scales: Vec<f64>,
+    #[serde(default)]
+    pub feature_names: Vec<String>,
     #[serde(default)]
     pub crc: bool,
 }
@@ -298,12 +308,33 @@ pub fn validate(spec: &Spec) -> Result<(), String> {
         )?;
     }
 
-    ensure(!p.frames.is_empty(), "frames must not be empty")?;
-    let mut frame_names = std::collections::HashSet::new();
-    for frame in &p.frames {
+    ensure(!p.profiles.is_empty(), "profiles must not be empty")?;
+    for required in ["compat", "lowlat"] {
+        ensure(
+            p.profiles.contains_key(required),
+            format!("missing profile {required}"),
+        )?;
+    }
+
+    let mut generated_prefixes = std::collections::HashSet::new();
+    for (profile_name, profile) in &p.profiles {
+        let required_frames: &[&str] = if profile_name == "compat" {
+            &["request", "reply"]
+        } else {
+            &["lowlat_request", "lowlat_reply"]
+        };
+        ensure(
+            !profile.frames.is_empty(),
+            format!("profile {profile_name}: frames must not be empty"),
+        )?;
+
+    for frame in &profile.frames {
         let f = frame.name.as_str();
         ensure(!f.is_empty(), "frame name must not be empty")?;
-        ensure(frame_names.insert(f), format!("duplicate frame name {f}"))?;
+        ensure(
+            generated_prefixes.insert(f.to_string()),
+            format!("duplicate generated frame prefix {f} across profiles"),
+        )?;
         ensure(!frame.fields.is_empty(), format!("frame {f} has no fields"))?;
         ensure(frame.size > 0, format!("frame {f} size must be > 0"))?;
 
@@ -406,23 +437,15 @@ pub fn validate(spec: &Spec) -> Result<(), String> {
             .iter()
             .find(|x| x.name == "version")
             .ok_or_else(|| format!("frame {f}: missing version field"))?;
-        let expected_ty = if f == "request" {
-            "u8"
-        } else if f == "reply" {
-            "u16"
+        ensure(
+            ver.ty == "u8" || ver.ty == "u16",
+            format!("frame {f}: version field must be u8 or u16"),
+        )?;
+        let is_request = f == "request" || f.ends_with("_request");
+        let expected_ver = if is_request {
+            profile.versions.request
         } else {
-            ""
-        };
-        if !expected_ty.is_empty() {
-            ensure(
-                ver.ty == expected_ty,
-                format!("frame {f}: version field must be {expected_ty}"),
-            )?;
-        }
-        let expected_ver = if f == "request" {
-            p.versions.request
-        } else {
-            p.versions.reply
+            profile.versions.reply
         };
         let max_for_ty = if ver.ty == "u8" {
             u64::from(u8::MAX)
@@ -433,14 +456,66 @@ pub fn validate(spec: &Spec) -> Result<(), String> {
             u64::from(expected_ver) <= max_for_ty,
             format!("frame {f}: expected version out of range"),
         )?;
+
+        for field in &frame.fields {
+            if field.scales.is_empty() && field.feature_names.is_empty() {
+                continue;
+            }
+            ensure(
+                field.ty == "i16" && field.count() > 1,
+                format!("frame {f} field {}: feature scales require an i16 array", field.name),
+            )?;
+            ensure(
+                field.scales.len() == field.count(),
+                format!("frame {f} field {}: {} scales for {} features", field.name, field.scales.len(), field.count()),
+            )?;
+            ensure(
+                field.feature_names.len() == field.count(),
+                format!("frame {f} field {}: {} names for {} features", field.name, field.feature_names.len(), field.count()),
+            )?;
+            ensure(
+                field.scale.is_none(),
+                format!("frame {f} field {}: use scales[], not scale", field.name),
+            )?;
+            ensure(
+                field.scales.iter().all(|s| s.is_finite() && *s > 0.0),
+                format!("frame {f} field {}: scales must be finite and positive", field.name),
+            )?;
+            let mut seen = std::collections::HashSet::new();
+            for name in &field.feature_names {
+                ensure(
+                    name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'),
+                    format!("frame {f} field {}: bad feature name {name:?}", field.name),
+                )?;
+                ensure(
+                    seen.insert(name.as_str()),
+                    format!("frame {f} field {}: duplicate feature name {name}", field.name),
+                )?;
+            }
+        }
     }
 
-    for required in ["request", "reply"] {
-        ensure(
-            p.frames.iter().any(|f| f.name == required),
-            format!("missing frame {required}"),
-        )?;
+        for required in required_frames {
+            ensure(
+                profile.frames.iter().any(|f| f.name == *required),
+                format!("profile {profile_name}: missing frame {required}"),
+            )?;
+        }
     }
+
+    let lowlat = &p.profiles["lowlat"];
+    let request = lowlat.frames.iter().find(|f| f.name == "lowlat_request").unwrap();
+    let features = request.fields.iter().find(|f| f.name == "features").unwrap();
+    ensure(
+        features.count() == 14 && features.scales.len() == 14,
+        "lowlat_request must carry exactly 14 scaled int16 features",
+    )?;
+    let reply = lowlat.frames.iter().find(|f| f.name == "lowlat_reply").unwrap();
+    ensure(reply.size == 16, "lowlat_reply must be 16 bytes")?;
+    ensure(
+        reply.fields.iter().any(|f| f.name == "compute_us" && f.ty == "u8"),
+        "lowlat_reply must carry compute_us as u8",
+    )?;
     Ok(())
 }
 
@@ -464,7 +539,7 @@ mod tests {
 
     #[test]
     fn unknown_frame_key_is_rejected() {
-        let text = GOOD.replacen("  size: 56", "  sizee: 56", 1);
+        let text = GOOD.replacen("      size: 56", "      sizee: 56", 1);
         assert!(parse(&text).is_err());
     }
 
@@ -480,7 +555,7 @@ mod tests {
 
     #[test]
     fn bad_frame_size_is_rejected() {
-        let text = GOOD.replacen("  size: 56", "  size: 55", 1);
+        let text = GOOD.replacen("      size: 56", "      size: 55", 1);
         let spec = parse(&text).unwrap();
         assert!(validate(&spec).unwrap_err().contains("fields occupy"));
     }
@@ -520,6 +595,26 @@ mod tests {
     fn hex_values_are_accepted() {
         let spec = parse(GOOD).unwrap();
         assert_eq!(spec.protocol.crc.polynomial, 0x1021);
-        assert_eq!(spec.protocol.frames[0].magic, 0x504D);
+        assert_eq!(spec.protocol.profiles["compat"].frames[0].magic, 0x504D);
+        assert_eq!(spec.protocol.profiles["lowlat"].frames[0].magic, 0x4C54);
+    }
+
+    #[test]
+    fn lowlat_profile_is_validated() {
+        let spec = parse(GOOD).unwrap();
+        validate(&spec).unwrap();
+        let lowlat = &spec.protocol.profiles["lowlat"];
+        assert_eq!(lowlat.frames[0].fields[7].scales.len(), 14);
+        assert_eq!(lowlat.frames[1].size, 16);
+
+        let text = GOOD
+            .replacen("      size: 16", "      size: 14", 1)
+            .replacen("            - { name: reserved, type: u8, count: 2 }\n", "", 1);
+        let bad = parse(&text).unwrap();
+        assert!(validate(&bad).unwrap_err().contains("lowlat_reply must be 16 bytes"));
+
+        let text = GOOD.replacen("0.0001, 0.0001, 0.0001", "0.0, 0.0, 0.0", 1);
+        let bad = parse(&text).unwrap();
+        assert!(validate(&bad).unwrap_err().contains("scales must be finite and positive"));
     }
 }

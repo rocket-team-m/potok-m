@@ -73,6 +73,41 @@ enum PotokFlags {
 #define POTOK_REPLY_CRC_OFF 12u
 #define POTOK_REPLY_CRC_LEN 2u
 
+#define POTOK_LOWLAT_REQUEST_SIZE 42u
+#define POTOK_LOWLAT_REQUEST_MAGIC 0x4C54u
+#define POTOK_LOWLAT_REQUEST_VERSION ((uint8_t)1)
+#define POTOK_LOWLAT_REQUEST_OFF_MAGIC 0u
+#define POTOK_LOWLAT_REQUEST_OFF_SEQ 2u
+#define POTOK_LOWLAT_REQUEST_OFF_TIME_US 4u
+#define POTOK_LOWLAT_REQUEST_OFF_PHASE 8u
+#define POTOK_LOWLAT_REQUEST_OFF_VERSION 9u
+#define POTOK_LOWLAT_REQUEST_OFF_FLAGS 10u
+#define POTOK_LOWLAT_REQUEST_OFF_RESERVED 11u
+#define POTOK_LOWLAT_REQUEST_OFF_FEATURES 12u
+static const double POTOK_LOWLAT_REQUEST_FEATURES_SCALES[14] = {0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.0001, 0.0001, 0.0001, 0.01, 1.0, 1.0, 0.1, 1.0};
+static const char *const POTOK_LOWLAT_REQUEST_FEATURES_NAMES[14] = {"gyro_x", "gyro_y", "gyro_z", "accel_x", "accel_y", "accel_z", "mag_x", "mag_y", "mag_z", "height", "pressure", "pitot_dp", "temperature", "battery_mv"};
+#define POTOK_LOWLAT_REQUEST_OFF_CRC16 40u
+#define POTOK_LOWLAT_REQUEST_CRC_OFF 40u
+#define POTOK_LOWLAT_REQUEST_CRC_LEN 2u
+
+#define POTOK_LOWLAT_REPLY_SIZE 16u
+#define POTOK_LOWLAT_REPLY_MAGIC 0x4C52u
+#define POTOK_LOWLAT_REPLY_VERSION ((uint8_t)1)
+#define POTOK_LOWLAT_REPLY_OFF_MAGIC 0u
+#define POTOK_LOWLAT_REPLY_OFF_SEQ 2u
+#define POTOK_LOWLAT_REPLY_OFF_G_PITCH 4u
+#define POTOK_LOWLAT_REPLY_G_PITCH_SCALE (0.001f)
+#define POTOK_LOWLAT_REPLY_OFF_G_YAW 6u
+#define POTOK_LOWLAT_REPLY_G_YAW_SCALE (0.001f)
+#define POTOK_LOWLAT_REPLY_OFF_CONFIDENCE 8u
+#define POTOK_LOWLAT_REPLY_OFF_AI_HEALTHY 9u
+#define POTOK_LOWLAT_REPLY_OFF_VERSION 10u
+#define POTOK_LOWLAT_REPLY_OFF_COMPUTE_US 11u
+#define POTOK_LOWLAT_REPLY_OFF_RESERVED 12u
+#define POTOK_LOWLAT_REPLY_OFF_CRC16 14u
+#define POTOK_LOWLAT_REPLY_CRC_OFF 14u
+#define POTOK_LOWLAT_REPLY_CRC_LEN 2u
+
 typedef struct {
     uint16_t seq;
     uint32_t time_us;
@@ -95,6 +130,27 @@ typedef struct {
     uint8_t ai_healthy;
     uint16_t version;
 } PotokReply;
+
+typedef struct {
+    uint16_t seq;
+    uint32_t time_us;
+    enum PotokPhase phase;
+    uint8_t version;
+    uint8_t flags;
+    uint8_t reserved;
+    int16_t features[14];
+} PotokLowlatRequest;
+
+typedef struct {
+    uint16_t seq;
+    int16_t g_pitch;
+    int16_t g_yaw;
+    uint8_t confidence;
+    uint8_t ai_healthy;
+    uint8_t version;
+    uint8_t compute_us;
+    uint8_t reserved[2];
+} PotokLowlatReply;
 
 static inline void potok_put_u16(uint8_t *b, size_t o, uint16_t v) {
     for (size_t i = 0; i < sizeof(uint16_t); ++i) b[o + i] = (uint8_t)(v >> (8u * i));
@@ -228,17 +284,107 @@ static inline int potok_reply_decode(const uint8_t *buf, size_t len, PotokReply 
     return POTOK_OK;
 }
 
+static inline int potok_lowlat_request_encode(const PotokLowlatRequest *fr, uint8_t *buf, size_t len) {
+    if (!fr || !buf || len < POTOK_LOWLAT_REQUEST_SIZE) return POTOK_ERR_BUFFER;
+    potok_put_u16(buf, POTOK_LOWLAT_REQUEST_OFF_MAGIC, (uint16_t)POTOK_LOWLAT_REQUEST_MAGIC);
+    potok_put_u16(buf, 2, (uint16_t)fr->seq);
+    potok_put_u32(buf, 4, (uint32_t)fr->time_us);
+    potok_put_u8(buf, 8, (uint8_t)fr->phase);
+    potok_put_u8(buf, 9, (uint8_t)fr->version);
+    potok_put_u8(buf, 10, (uint8_t)fr->flags);
+    potok_put_u8(buf, 11, (uint8_t)fr->reserved);
+    for (size_t i = 0; i < 14u; ++i) {
+        potok_put_i16(buf, 12 + 2u * i, (int16_t)fr->features[i]);
+    }
+    potok_put_u16(buf, POTOK_LOWLAT_REQUEST_CRC_OFF, potok_crc16(buf, POTOK_LOWLAT_REQUEST_CRC_OFF));
+    return POTOK_OK;
+}
+static inline int potok_lowlat_request_decode(const uint8_t *buf, size_t len, PotokLowlatRequest *fr) {
+    if (!buf || !fr || len < POTOK_LOWLAT_REQUEST_SIZE) return POTOK_ERR_BUFFER;
+    if (potok_get_u16(buf, 0) != (uint16_t)POTOK_LOWLAT_REQUEST_MAGIC) return POTOK_ERR_MAGIC;
+    if (potok_get_u16(buf, POTOK_LOWLAT_REQUEST_CRC_OFF) != potok_crc16(buf, POTOK_LOWLAT_REQUEST_CRC_OFF)) return POTOK_ERR_CRC;
+    fr->seq = (uint16_t)potok_get_u16(buf, 2);
+    fr->time_us = (uint32_t)potok_get_u32(buf, 4);
+    {
+        uint8_t raw = potok_get_u8(buf, 8);
+        if (raw > 4u) return POTOK_ERR_PHASE;
+        fr->phase = (enum PotokPhase)raw;
+    }
+    fr->version = (uint8_t)potok_get_u8(buf, 9);
+    fr->flags = (uint8_t)potok_get_u8(buf, 10);
+    fr->reserved = (uint8_t)potok_get_u8(buf, 11);
+    for (size_t i = 0; i < 14u; ++i) {
+        fr->features[i] = (int16_t)potok_get_i16(buf, 12 + 2u * i);
+    }
+    if (fr->version != POTOK_LOWLAT_REQUEST_VERSION) return POTOK_ERR_VERSION;
+    return POTOK_OK;
+}
+
+static inline int potok_lowlat_reply_encode(const PotokLowlatReply *fr, uint8_t *buf, size_t len) {
+    if (!fr || !buf || len < POTOK_LOWLAT_REPLY_SIZE) return POTOK_ERR_BUFFER;
+    potok_put_u16(buf, POTOK_LOWLAT_REPLY_OFF_MAGIC, (uint16_t)POTOK_LOWLAT_REPLY_MAGIC);
+    potok_put_u16(buf, 2, (uint16_t)fr->seq);
+    potok_put_i16(buf, 4, (int16_t)fr->g_pitch);
+    potok_put_i16(buf, 6, (int16_t)fr->g_yaw);
+    potok_put_u8(buf, 8, (uint8_t)fr->confidence);
+    potok_put_u8(buf, 9, (uint8_t)fr->ai_healthy);
+    potok_put_u8(buf, 10, (uint8_t)fr->version);
+    potok_put_u8(buf, 11, (uint8_t)fr->compute_us);
+    for (size_t i = 0; i < 2u; ++i) {
+        potok_put_u8(buf, 12 + 1u * i, (uint8_t)fr->reserved[i]);
+    }
+    potok_put_u16(buf, POTOK_LOWLAT_REPLY_CRC_OFF, potok_crc16(buf, POTOK_LOWLAT_REPLY_CRC_OFF));
+    return POTOK_OK;
+}
+static inline int potok_lowlat_reply_decode(const uint8_t *buf, size_t len, PotokLowlatReply *fr) {
+    if (!buf || !fr || len < POTOK_LOWLAT_REPLY_SIZE) return POTOK_ERR_BUFFER;
+    if (potok_get_u16(buf, 0) != (uint16_t)POTOK_LOWLAT_REPLY_MAGIC) return POTOK_ERR_MAGIC;
+    if (potok_get_u16(buf, POTOK_LOWLAT_REPLY_CRC_OFF) != potok_crc16(buf, POTOK_LOWLAT_REPLY_CRC_OFF)) return POTOK_ERR_CRC;
+    fr->seq = (uint16_t)potok_get_u16(buf, 2);
+    fr->g_pitch = (int16_t)potok_get_i16(buf, 4);
+    fr->g_yaw = (int16_t)potok_get_i16(buf, 6);
+    fr->confidence = (uint8_t)potok_get_u8(buf, 8);
+    fr->ai_healthy = (uint8_t)potok_get_u8(buf, 9);
+    fr->version = (uint8_t)potok_get_u8(buf, 10);
+    fr->compute_us = (uint8_t)potok_get_u8(buf, 11);
+    for (size_t i = 0; i < 2u; ++i) {
+        fr->reserved[i] = (uint8_t)potok_get_u8(buf, 12 + 1u * i);
+    }
+    if (fr->version != POTOK_LOWLAT_REPLY_VERSION) return POTOK_ERR_VERSION;
+    return POTOK_OK;
+}
+
 static inline double potok_reply_g_pitch_scaled(int16_t raw) { return (double)raw * POTOK_REPLY_G_PITCH_SCALE; }
 static inline int16_t potok_reply_g_pitch_from_scaled(double value) {
     double v = value / POTOK_REPLY_G_PITCH_SCALE;
-    if (v >= 0.0) { return (int16_t)((v + 0.5) < 2147483647.0 ? (v + 0.5) : 2147483647.0); }
-    return (int16_t)((v - 0.5) > -2147483648.0 ? (v - 0.5) : -2147483648.0);
+    double r = (v >= 0.0) ? v + 0.5 : v - 0.5;
+    if (r > 32767.0) return (int16_t)32767;
+    if (r < -32768.0) return (int16_t)-32768;
+    return (int16_t)r;
 }
 static inline double potok_reply_g_yaw_scaled(int16_t raw) { return (double)raw * POTOK_REPLY_G_YAW_SCALE; }
 static inline int16_t potok_reply_g_yaw_from_scaled(double value) {
     double v = value / POTOK_REPLY_G_YAW_SCALE;
-    if (v >= 0.0) { return (int16_t)((v + 0.5) < 2147483647.0 ? (v + 0.5) : 2147483647.0); }
-    return (int16_t)((v - 0.5) > -2147483648.0 ? (v - 0.5) : -2147483648.0);
+    double r = (v >= 0.0) ? v + 0.5 : v - 0.5;
+    if (r > 32767.0) return (int16_t)32767;
+    if (r < -32768.0) return (int16_t)-32768;
+    return (int16_t)r;
+}
+static inline double potok_lowlat_reply_g_pitch_scaled(int16_t raw) { return (double)raw * POTOK_LOWLAT_REPLY_G_PITCH_SCALE; }
+static inline int16_t potok_lowlat_reply_g_pitch_from_scaled(double value) {
+    double v = value / POTOK_LOWLAT_REPLY_G_PITCH_SCALE;
+    double r = (v >= 0.0) ? v + 0.5 : v - 0.5;
+    if (r > 32767.0) return (int16_t)32767;
+    if (r < -32768.0) return (int16_t)-32768;
+    return (int16_t)r;
+}
+static inline double potok_lowlat_reply_g_yaw_scaled(int16_t raw) { return (double)raw * POTOK_LOWLAT_REPLY_G_YAW_SCALE; }
+static inline int16_t potok_lowlat_reply_g_yaw_from_scaled(double value) {
+    double v = value / POTOK_LOWLAT_REPLY_G_YAW_SCALE;
+    double r = (v >= 0.0) ? v + 0.5 : v - 0.5;
+    if (r > 32767.0) return (int16_t)32767;
+    if (r < -32768.0) return (int16_t)-32768;
+    return (int16_t)r;
 }
 
 #ifdef __cplusplus

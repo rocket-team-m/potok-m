@@ -1,37 +1,58 @@
 //! Deterministic emitters for Rust, C and Python from the validated spec.
 
-use crate::model::{type_size, Field, Frame, Spec};
+use crate::model::{type_size, Field, Frame, Profile, Spec};
 use std::fmt::Write as _;
 
 fn up(s: &str) -> String {
     s.to_ascii_uppercase()
 }
 
+fn pascal(s: &str) -> String {
+    s.split('_')
+        .filter(|p| !p.is_empty())
+        .map(|p| {
+            let mut c = p.chars();
+            match c.next() {
+                Some(f) => format!("{}{}", f.to_ascii_uppercase(), c.as_str()),
+                None => String::new(),
+            }
+        })
+        .collect()
+}
+
 fn frame_ty(frame: &Frame) -> String {
-    let mut c = frame.name.chars();
-    match c.next() {
-        Some(f) => format!("{}{}Frame", f.to_ascii_uppercase(), c.as_str()),
-        None => "Frame".to_string(),
-    }
+    format!("{}Frame", pascal(&frame.name))
 }
 
 fn le(spec: &Spec) -> bool {
     spec.protocol.endianness == "little"
 }
 
-fn version_expr(spec: &Spec, frame: &Frame) -> (String, String) {
-    let v = if frame.name == "request" {
-        spec.protocol.versions.request
-    } else {
-        spec.protocol.versions.reply
-    };
-    let ty = if frame.name == "request" { "u8" } else { "u16" };
-    (ty.to_string(), format!("{v}{ty}"))
+fn all_frames(spec: &Spec) -> Vec<(&Profile, &Frame)> {
+    spec.protocol
+        .profiles
+        .values()
+        .flat_map(|profile| profile.frames.iter().map(move |frame| (profile, frame)))
+        .collect()
+}
+
+fn is_request(frame: &Frame) -> bool {
+    frame.name == "request" || frame.name.ends_with("_request")
+}
+
+fn version_expr(profile: &Profile, frame: &Frame) -> (String, String) {
+    let v = if is_request(frame) { profile.versions.request } else { profile.versions.reply };
+    let ty = frame.fields.iter().find(|f| f.name == "version").unwrap().ty.clone();
+    (ty.clone(), format!("{v}{ty}"))
+}
+
+fn version_value(profile: &Profile, frame: &Frame) -> u16 {
+    if is_request(frame) { profile.versions.request } else { profile.versions.reply }
 }
 
 fn used_types(spec: &Spec) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
-    for frame in &spec.protocol.frames {
+    for (_profile, frame) in all_frames(spec) {
         for f in &frame.fields {
             if !out.contains(&f.ty) {
                 out.push(f.ty.clone());
@@ -120,9 +141,9 @@ pub fn gen_rust(spec: &Spec) -> String {
     let _ = writeln!(s, "}}");
     let _ = writeln!(s);
 
-    for frame in &p.frames {
+    for (profile, frame) in all_frames(spec) {
         let f = up(&frame.name);
-        let (vty, vexpr) = version_expr(spec, frame);
+        let (vty, vexpr) = version_expr(profile, frame);
         let _ = writeln!(s, "pub const {f}_SIZE: usize = {};", frame.size);
         let _ = writeln!(s, "pub const {f}_MAGIC: u16 = {:#06x};", frame.magic);
         let _ = writeln!(s, "pub const {f}_VERSION: {vty} = {vexpr};");
@@ -142,12 +163,19 @@ pub fn gen_rust(spec: &Spec) -> String {
                     scale
                 );
             }
+            if !field.scales.is_empty() {
+                let scales = field.scales.iter().map(|v| format!("{v:?}")).collect::<Vec<_>>().join(", ");
+                let names = field.feature_names.iter().map(|n| format!("{n:?}")).collect::<Vec<_>>().join(", ");
+                let n = up(&field.name);
+                let _ = writeln!(s, "pub const {f}_{n}_SCALES: [f64; {}] = [{scales}];", field.scales.len());
+                let _ = writeln!(s, "pub const {f}_{n}_NAMES: [&str; {}] = [{names}];", field.feature_names.len());
+            }
             off += sz;
         }
         let _ = writeln!(s);
     }
 
-    for frame in &p.frames {
+    for (_profile, frame) in all_frames(spec) {
         let ty = frame_ty(frame);
         let _ = writeln!(s, "#[derive(Clone, Copy, Debug, PartialEq)]");
         let _ = writeln!(s, "pub struct {ty} {{");
@@ -314,20 +342,16 @@ pub fn gen_c(spec: &Spec) -> String {
     let _ = writeln!(s, "}};");
     let _ = writeln!(s);
 
-    for frame in &p.frames {
+    for (profile, frame) in all_frames(spec) {
         let f = up(&frame.name);
-        let (vty, _) = version_expr(spec, frame);
+        let (vty, _) = version_expr(profile, frame);
         let cver = c_type(&vty);
         let _ = writeln!(s, "#define POTOK_{f}_SIZE {}u", frame.size);
         let _ = writeln!(s, "#define POTOK_{f}_MAGIC 0x{:04X}u", frame.magic);
         let _ = writeln!(
             s,
             "#define POTOK_{f}_VERSION (({cver}){})",
-            if frame.name == "request" {
-                p.versions.request
-            } else {
-                p.versions.reply
-            }
+            version_value(profile, frame)
         );
         let mut off = 0usize;
         for field in &frame.fields {
@@ -345,17 +369,20 @@ pub fn gen_c(spec: &Spec) -> String {
                     scale
                 );
             }
+            if !field.scales.is_empty() {
+                let n = up(&field.name);
+                let vals = field.scales.iter().map(|v| format!("{v:?}")).collect::<Vec<_>>().join(", ");
+                let names = field.feature_names.iter().map(|x| format!("{x:?}")).collect::<Vec<_>>().join(", ");
+                let _ = writeln!(s, "static const double POTOK_{f}_{n}_SCALES[{}] = {{{vals}}};", field.scales.len());
+                let _ = writeln!(s, "static const char *const POTOK_{f}_{n}_NAMES[{}] = {{{names}}};", field.feature_names.len());
+            }
             off += sz;
         }
         let _ = writeln!(s);
     }
 
-    for frame in &p.frames {
-        let ty = if frame.name == "request" {
-            "PotokRequest"
-        } else {
-            "PotokReply"
-        };
+    for (_profile, frame) in all_frames(spec) {
+        let ty = format!("Potok{}", pascal(&frame.name));
         let _ = writeln!(s, "typedef struct {{");
         for field in &frame.fields {
             if field.value.is_some() || field.crc {
@@ -450,13 +477,9 @@ pub fn gen_c(spec: &Spec) -> String {
     let _ = writeln!(s, "static inline void potok_flag_clear(uint8_t *f, uint8_t mask) {{ *f = (uint8_t)(*f & (uint8_t)~mask); }}");
     let _ = writeln!(s);
 
-    for frame in &p.frames {
+    for (_profile, frame) in all_frames(spec) {
         let f = up(&frame.name);
-        let ty = if frame.name == "request" {
-            "PotokRequest"
-        } else {
-            "PotokReply"
-        };
+        let ty = format!("Potok{}", pascal(&frame.name));
         let _ = writeln!(
             s,
             "static inline int potok_{}_encode(const {ty} *fr, uint8_t *buf, size_t len) {{",
@@ -594,13 +617,14 @@ pub fn gen_c(spec: &Spec) -> String {
         let _ = writeln!(s);
     }
 
-    for frame in &p.frames {
+    for (_profile, frame) in all_frames(spec) {
         for field in &frame.fields {
             if let Some(_scale) = field.scale {
                 let f = up(&frame.name);
                 let n = &field.name;
                 let c = up(&field.name);
                 let ct = c_type(&field.ty);
+                let (min, max) = int_bounds(&field.ty);
                 let _ = writeln!(s, "static inline double potok_{}_{n}_scaled({ct} raw) {{ return (double)raw * POTOK_{f}_{c}_SCALE; }}", frame.name);
                 let _ = writeln!(
                     s,
@@ -608,11 +632,10 @@ pub fn gen_c(spec: &Spec) -> String {
                     frame.name
                 );
                 let _ = writeln!(s, "    double v = value / POTOK_{f}_{c}_SCALE;");
-                let _ = writeln!(s, "    if (v >= 0.0) {{ return ({ct})((v + 0.5) < 2147483647.0 ? (v + 0.5) : 2147483647.0); }}");
-                let _ = writeln!(
-                    s,
-                    "    return ({ct})((v - 0.5) > -2147483648.0 ? (v - 0.5) : -2147483648.0);"
-                );
+                let _ = writeln!(s, "    double r = (v >= 0.0) ? v + 0.5 : v - 0.5;");
+                let _ = writeln!(s, "    if (r > {max}.0) return ({ct}){max};");
+                let _ = writeln!(s, "    if (r < {min}.0) return ({ct}){min};");
+                let _ = writeln!(s, "    return ({ct})r;");
                 let _ = writeln!(s, "}}");
             }
         }
@@ -624,6 +647,18 @@ pub fn gen_c(spec: &Spec) -> String {
     let _ = writeln!(s, "#endif");
     let _ = writeln!(s, "#endif /* {guard} */");
     s
+}
+
+fn int_bounds(ty: &str) -> (i64, i64) {
+    match ty {
+        "i8" => (i8::MIN as i64, i8::MAX as i64),
+        "u8" => (0, u8::MAX as i64),
+        "i16" => (i16::MIN as i64, i16::MAX as i64),
+        "u16" => (0, u16::MAX as i64),
+        "i32" => (i32::MIN as i64, i32::MAX as i64),
+        "u32" => (0, u32::MAX as i64),
+        _ => (i64::MIN, i64::MAX),
+    }
 }
 
 fn field_offset(frame: &Frame, target: &Field) -> usize {
@@ -708,18 +743,10 @@ pub fn gen_python(spec: &Spec) -> String {
     let _ = writeln!(s, "    return crc ^ 0x{:04X}", p.crc.xor_out);
     let _ = writeln!(s);
 
-    for frame in &p.frames {
+    for (profile, frame) in all_frames(spec) {
         let f = up(&frame.name);
-        let cls = if frame.name == "request" {
-            "Request"
-        } else {
-            "Reply"
-        };
-        let ver = if frame.name == "request" {
-            p.versions.request
-        } else {
-            p.versions.reply
-        };
+        let cls = pascal(&frame.name);
+        let ver = version_value(profile, frame);
         let _ = writeln!(s, "{f}_SIZE = {}", frame.size);
         let _ = writeln!(s, "{f}_MAGIC = 0x{:04X}", frame.magic);
         let _ = writeln!(s, "{f}_VERSION = {ver}");
@@ -733,6 +760,13 @@ pub fn gen_python(spec: &Spec) -> String {
             }
             if let Some(scale) = field.scale {
                 let _ = writeln!(s, "{f}_{}_SCALE = {:?}", up(&field.name), scale);
+            }
+            if !field.scales.is_empty() {
+                let n = up(&field.name);
+                let vals = field.scales.iter().map(|v| format!("{v:?}")).collect::<Vec<_>>().join(", ");
+                let names = field.feature_names.iter().map(|x| format!("{x:?}")).collect::<Vec<_>>().join(", ");
+                let _ = writeln!(s, "{f}_{n}_SCALES = ({vals},)");
+                let _ = writeln!(s, "{f}_{n}_NAMES = ({names},)");
             }
             off += sz;
         }
@@ -749,19 +783,19 @@ pub fn gen_python(spec: &Spec) -> String {
             let _ = writeln!(s, "    pass");
         }
         for field in &data_fields {
-            let ty = match &field.r#enum {
-                Some(e) => e.clone(),
+            let (base, comment) = match &field.r#enum {
+                Some(e) => (e.clone(), String::new()),
                 None => match field.ty.as_str() {
-                    "f32" | "f64" => "float".to_string(),
-                    t => format!("int  # {t}"),
+                    "f32" | "f64" => ("float".to_string(), String::new()),
+                    t => ("int".to_string(), format!("  # {t}")),
                 },
             };
             let ann = if field.count() > 1 {
-                format!("list[{ty}]")
+                format!("list[{base}]")
             } else {
-                ty
+                base
             };
-            let _ = writeln!(s, "    {}: {}", field.name, ann);
+            let _ = writeln!(s, "    {}: {}{}", field.name, ann, comment);
         }
         let _ = writeln!(s);
 
@@ -861,6 +895,7 @@ pub fn gen_python(spec: &Spec) -> String {
             if let Some(_scale) = field.scale {
                 let n = &field.name;
                 let c = up(&field.name);
+                let (min, max) = int_bounds(&field.ty);
                 let _ = writeln!(
                     s,
                     "def {}_{n}_scaled(raw: int) -> float: return raw * {f}_{c}_SCALE",
@@ -872,7 +907,8 @@ pub fn gen_python(spec: &Spec) -> String {
                     frame.name
                 );
                 let _ = writeln!(s, "    v = value / {f}_{c}_SCALE");
-                let _ = writeln!(s, "    return int(v + 0.5 if v >= 0 else v - 0.5)");
+                let _ = writeln!(s, "    r = int(v + 0.5 if v >= 0 else v - 0.5)");
+                let _ = writeln!(s, "    return min({max}, max({min}, r))");
             }
         }
         let _ = writeln!(s);

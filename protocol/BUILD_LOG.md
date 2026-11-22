@@ -107,3 +107,62 @@ format and the committed golden frames are unchanged.
 | `golden_wire_bytes_match_c_and_python` + `committed_golden_fixtures_reencode_byte_identical` | OK — golden hex unchanged; rename is wire-neutral |
 
 Only `protocol/` files were touched.
+
+## Lowlat profile (SPEC_PROTOCOL_LOWLAT.md, commit 9caeb1a)
+
+Added as a **second profile**; compat 56/14 frames, their generated names,
+golden bytes and tests are unchanged. `uart.yaml` now has
+`protocol.profiles.compat` and `protocol.profiles.lowlat`, each with its own
+versions and frames. Shared CRC, Phase enum and flag bits stay at protocol
+level. Generator emits compat names exactly as before and prefixes lowlat
+names (`LOWLAT_REQUEST_SIZE`, `LowlatRequestFrame`, `PotokLowlatRequest`,
+`proto.LowlatRequest`, `potok_lowlat_request_encode`).
+
+Lowlat request: 42 B, magic `0x4C54`, 14 int16 features with explicit scales
+in YAML (generated as `LOWLAT_REQUEST_FEATURES_SCALES` / `_NAMES`).
+Lowlat reply: 16 B, magic `0x4C52`, `compute_us` u8 in 100 µs units.
+
+Two spec ambiguities resolved explicitly:
+
+- The spec's reply field list sums to 14 B while it states 16 B. Two
+  `reserved` bytes at offset 12 make the stated size exact; validation pins
+  `lowlat_reply.size == 16`.
+- The spec fixes only the request magic; `0x4C52` was chosen for the reply and
+  is declared in YAML.
+
+Validation additions: profiles `compat`/`lowlat` required; frame-name prefixes
+unique across profiles; feature scale/name arrays must match the int16 array
+length, be finite and positive, and use unique identifier names; lowlat must
+have 14 scaled features and a 16-byte reply with `compute_us` u8.
+
+| command | result |
+|---|---|
+| `cargo run -p potok-generator` | OK — all three artifacts regenerated |
+| `cargo check` | OK — no warnings |
+| `cargo test` | OK — 9 generator + 3 lib + 9 lowlat + 15 compat = 36 passed, 0 failed |
+| `cargo run -p potok-generator -- --check` | OK — `protocol/generated: up to date` |
+| regenerate → `sha256sum generated/*` → `diff` | OK — byte-identical output |
+| `cc -std=c11 -Wall -Wextra -Werror` C harness, both profiles | OK — reproduces both golden frames; compat hex unchanged |
+| Python `protocol.py` harness, both profiles | OK — reproduces both golden frames |
+
+Golden frames (also pinned in `lowlat_tests.rs`, decoded and re-encoded
+byte-identically, and reproduced by C and Python):
+
+- request `544c34127bf15365020112000100feff03000400fbff06000700f8ff09000a000b00f4ff0d000e000a2b`
+- reply `524c34127d0006ffc801012a0000fd1b`
+
+Benchmark (`cargo run --release -p potok-protocol --example hotpath`, 1M
+iterations, 5 reps, minimum; MB/s counts both encode and decode wire bytes):
+
+| case | ns/frame | MB/s |
+|---|---:|---:|
+| compat request encode+decode+CRC | 155.4 | 720.6 |
+| compat reply encode+decode+CRC | 22.8 | 1228.0 |
+| lowlat request encode | 52.9 | 793.5 |
+| lowlat request decode | 69.5 | 604.3 |
+| lowlat reply encode | 12.7 | 1262.1 |
+| lowlat reply decode | 17.6 | 907.6 |
+| **lowlat request encode+decode+CRC** | **128.5** | **653.7** |
+| lowlat reply encode+decode+CRC | 28.7 | 1116.9 |
+
+Only `protocol/` files were touched.

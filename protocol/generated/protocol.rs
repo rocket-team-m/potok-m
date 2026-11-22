@@ -91,6 +91,41 @@ pub const REPLY_OFF_CRC16: usize = 12;
 pub const REPLY_CRC_OFF: usize = 12;
 pub const REPLY_CRC_LEN: usize = 2;
 
+pub const LOWLAT_REQUEST_SIZE: usize = 42;
+pub const LOWLAT_REQUEST_MAGIC: u16 = 0x4c54;
+pub const LOWLAT_REQUEST_VERSION: u8 = 1u8;
+pub const LOWLAT_REQUEST_OFF_MAGIC: usize = 0;
+pub const LOWLAT_REQUEST_OFF_SEQ: usize = 2;
+pub const LOWLAT_REQUEST_OFF_TIME_US: usize = 4;
+pub const LOWLAT_REQUEST_OFF_PHASE: usize = 8;
+pub const LOWLAT_REQUEST_OFF_VERSION: usize = 9;
+pub const LOWLAT_REQUEST_OFF_FLAGS: usize = 10;
+pub const LOWLAT_REQUEST_OFF_RESERVED: usize = 11;
+pub const LOWLAT_REQUEST_OFF_FEATURES: usize = 12;
+pub const LOWLAT_REQUEST_FEATURES_SCALES: [f64; 14] = [0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.0001, 0.0001, 0.0001, 0.01, 1.0, 1.0, 0.1, 1.0];
+pub const LOWLAT_REQUEST_FEATURES_NAMES: [&str; 14] = ["gyro_x", "gyro_y", "gyro_z", "accel_x", "accel_y", "accel_z", "mag_x", "mag_y", "mag_z", "height", "pressure", "pitot_dp", "temperature", "battery_mv"];
+pub const LOWLAT_REQUEST_OFF_CRC16: usize = 40;
+pub const LOWLAT_REQUEST_CRC_OFF: usize = 40;
+pub const LOWLAT_REQUEST_CRC_LEN: usize = 2;
+
+pub const LOWLAT_REPLY_SIZE: usize = 16;
+pub const LOWLAT_REPLY_MAGIC: u16 = 0x4c52;
+pub const LOWLAT_REPLY_VERSION: u8 = 1u8;
+pub const LOWLAT_REPLY_OFF_MAGIC: usize = 0;
+pub const LOWLAT_REPLY_OFF_SEQ: usize = 2;
+pub const LOWLAT_REPLY_OFF_G_PITCH: usize = 4;
+pub const LOWLAT_REPLY_G_PITCH_SCALE: f64 = 0.001;
+pub const LOWLAT_REPLY_OFF_G_YAW: usize = 6;
+pub const LOWLAT_REPLY_G_YAW_SCALE: f64 = 0.001;
+pub const LOWLAT_REPLY_OFF_CONFIDENCE: usize = 8;
+pub const LOWLAT_REPLY_OFF_AI_HEALTHY: usize = 9;
+pub const LOWLAT_REPLY_OFF_VERSION: usize = 10;
+pub const LOWLAT_REPLY_OFF_COMPUTE_US: usize = 11;
+pub const LOWLAT_REPLY_OFF_RESERVED: usize = 12;
+pub const LOWLAT_REPLY_OFF_CRC16: usize = 14;
+pub const LOWLAT_REPLY_CRC_OFF: usize = 14;
+pub const LOWLAT_REPLY_CRC_LEN: usize = 2;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RequestFrame {
     pub seq: u16,
@@ -114,6 +149,29 @@ pub struct ReplyFrame {
     pub confidence: u8,
     pub ai_healthy: u8,
     pub version: u16,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LowlatRequestFrame {
+    pub seq: u16,
+    pub time_us: u32,
+    pub phase: Phase,
+    pub version: u8,
+    pub flags: u8,
+    pub reserved: u8,
+    pub features: [i16; 14],
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LowlatReplyFrame {
+    pub seq: u16,
+    pub g_pitch: i16,
+    pub g_yaw: i16,
+    pub confidence: u8,
+    pub ai_healthy: u8,
+    pub version: u8,
+    pub compute_us: u8,
+    pub reserved: [u8; 2],
 }
 
 pub mod codec {
