@@ -82,8 +82,8 @@ cd_mach = [[0.0, 0.35], [0.4, 0.35], [0.7, 0.39], [0.9, 0.48], [1.1, 0.52], [1.5
 # Mass flows 0.342 / 0.3125 kg/s are the passport propellant masses divided
 # by the 5.5 s / 3.2 s burns. The quoted AVERAGE thrusts correspond to the
 # LOWER passport impulses (2.2 / 1.0 kNs); with this mass and Cd=0.35 they
-# only reach ~160 m/s and ~1.4 km, well short of the TTX targets (240 m/s,
-# ~3 km). We therefore take the UPPER passport impulses (2.4 / 1.2 kNs):
+# only reach ~160 m/s and ~1.4 km, short of the current TTX targets
+# (M=0.5–0.6 / ~170–200 m/s, ~3 km). We therefore take the UPPER passport impulses (2.4 / 1.2 kNs):
 # 436 N for 5.5 s and 375 N for 3.2 s, both below the passport peak thrust.
 # This gives ~203 m/s and ~2.4 km with the placeholder Cd=0.35. Peaks and
 # thrust ripple are NOT modelled; only average thrust and mass flow are.

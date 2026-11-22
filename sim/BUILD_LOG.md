@@ -130,7 +130,7 @@ Two-stage thrust uses the **upper end** of the motor passports' impulse ranges:
 3.2 s / 1.0 kg → 375 N at 0.3125 kg/s (RDK-1000), both below the passport peak
 thrusts. The quoted *average* thrusts (400 / 265 N, lower impulses) were also
 measured: with this mass and Cd=0.35 they give only ~161 m/s and ~1.4 km, so
-they cannot meet the user's 240 m/s / ~3 km TTX. This discrepancy is documented
+they could not meet the earlier 240 m/s / ~3 km TTX (superseded 22.11 by M=0.5–0.6 / ~170–200 m/s). This discrepancy is documented
 in the config and README rather than hidden. Aerodynamic coefficients remain
 explicitly marked placeholders.
 
@@ -191,3 +191,9 @@ What changed (all inside `sim/`):
 Caveat for the AI lane: `validation.bin` is now version 2. `ai/src/potok_ai/data.py`
 still reads 9 metadata, so it must be updated by its owner before consuming
 new files; no files outside `sim/` were touched here.
+
+## TTX revision (22.11.2026)
+
+Max speed is now M=0.5–0.6 ± (~170–200 m/s at 3 km) instead of 240 m/s.
+At the nominal seed the simulator reaches ~203 m/s, so the speed target is met;
+the remaining gap is apogee (~2.4 km vs ~3 km).

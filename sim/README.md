@@ -36,8 +36,8 @@ flags are optional, so every older command line keeps working.
 | diameter / frontal area | 0.102 m / 0.00817 m² | user-stated TTX |
 | static margin | 0.0976 m = 0.957 cal | user-stated TTX |
 | motor impulse | 2.4 + 1.2 kNs (upper passport) | RDK-2000 / RDK-1000 passports, chat PDFs (2.2–2.4 / 1.0–1.2 kNs) |
-| thrust / mass flow | 436 N @ 0.342 kg/s for 5.5 s; 375 N @ 0.3125 kg/s for 3.2 s | propellant masses and burn times from the passports; mass flow = propellant / burn. Upper passport impulses are used because the quoted *average* thrusts (390–400 / 260–270 N) give only ~160 m/s / ~1.4 km, short of the TTX target |
-| target speed / apogee | ~240 m/s / ~3 km | user-stated TTX; this model reaches ~203 m/s / ~2.4 km at nominal seed (see uncertainty below) |
+| thrust / mass flow | 436 N @ 0.342 kg/s for 5.5 s; 375 N @ 0.3125 kg/s for 3.2 s | propellant masses and burn times from the passports; mass flow = propellant / burn. Upper passport impulses are used because the quoted *average* thrusts (390–400 / 260–270 N) give only ~160 m/s / ~1.4 km, short of the earlier TTX target |
+| target speed / apogee | M=0,5–0,6 (±) / ~3 km | current TTX (22.11, Mach-based); this model reaches ~203 m/s / ~2.4 km at nominal seed: speed target met, apogee short |
 | gyro noise | 0.0015 rad/s | previously validated simulator value |
 | accel noise | 0.011 m/s² (1064 µg) | DELTA report |
 | wind (v_10, shear, gust, turbulence) | 3 m/s, 2 m/s, p=0.2, σ=0.6 m/s | launch-day assumption, not passport data; reduced from earlier 8/6 m/s so the vehicle stays near vertical |
@@ -50,8 +50,9 @@ ballpark. Their uncertainty is unquantified; a real OpenRocket/Ansys
 aerodynamic card (as referenced in the project docs) should replace them.
 Motor peaks (500–550 / 550–600 N) and thrust ripple are not modelled — only
 average thrust and mass flow. The remaining gap between simulated (~203 m/s,
-~2.4 km) and stated TTX (~240 m/s, ~3 km) is dominated by these placeholder
-aerodynamics and by the impulse choice within the passport ranges.
+~2.4 km) and stated TTX (~170–200 m/s, ~3 km) is in apogee only;
+it is dominated by these placeholder aerodynamics and by the impulse
+choice within the passport ranges.
 
 ## Domain randomization (Potok-M only)
 
