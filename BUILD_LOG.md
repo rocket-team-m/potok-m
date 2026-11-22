@@ -7,8 +7,8 @@ Date: 2026-11-22. CPU-only work; no GPU jobs, no pushes.
 | command | result |
 |---|---|
 | `uv sync` | Resolved 20 packages; installed `torch==2.15.0+cpu` from `download.pytorch.org/whl/cpu`. No CUDA wheels. |
-| `uv run pytest -q` | `26 passed in 2.96s` initially; `37 passed in 4.89s` after the student work; `44 passed in 5.45s` after the smart work |
-| `uv run ruff check src tests` | `All checks passed!` (after the smart work) |
+| `uv run pytest -q` | `26 passed in 2.96s` initially; `37 passed in 4.89s` after the student work; `44 passed in 5.45s` after the smart work; `51 passed in 6.24s` after the LoopWM work |
+| `uv run ruff check src tests` | `All checks passed!` (after the smart and LoopWM work) |
 | `PYTHONPATH=src uv run python -m potok_ai.train_smart --data <v2 file> --out /tmp/opencode/smart.pt --epochs 1 --window 12 --batch 2 --limit 4 --eval-limit 4 --width 16 --rank 8` | prints three scenario RMSE rows, `ratio=0.7034 limit=1.25 generalises=yes`, teacher + export paths; CPU only |
 | `uv run python benchmark.py --stage train --steps 10` | `params=87875 ms_per_step=68.02 frames_per_s=5881` (width 128, rank 64, batch 8, seq 50) |
 | `uv run python benchmark.py --stage forward --steps 10` | `params=87875 ms_per_step=31.80 frames_per_s=12579` |
@@ -180,6 +180,37 @@ rejection, and one tiny CPU step in each stage.
   shape/bounds, AttnRes weights summing to one, conditioning changing the
   output, std-normalised loss, per-scenario RMSE and ratio, a 20-feature
   student export/load round-trip, and one tiny CPU end-to-end step.
+
+## Privileged LoopWM teacher (SPEC_SMART.md, arXiv:2606.18208 idea)
+
+- `src/potok_ai/loopwm.py` — `LoopWMConfig` / `LoopWM`: one causal latent encoder
+  (3-tap left-padded conv, width 128 by default), FiLM conditioning from the six
+  vehicle numbers, and **one** `LoopBlock` (pre-norm causal self-attention + FFN)
+  reused on every refinement pass. `refine()` adds the block's *increment* to the
+  latent and exits when `mean ||increment||` drops below `exit_threshold`, hard
+  capped at `max_iters = 6`; `RefineInfo` reports the iteration count and update
+  trace. The readout emits two bounded corrections plus confidence from the last
+  frame. The privileged simulator correction (true wind) is never a forward
+  input — it only enters the training loss. No raw-sensor reconstruction: JEPA
+  heads predict the EMA encoder's latents 3/6/10 frames ahead, MSE weighted 0.05.
+  `exit_threshold` is a tunable knob (default `1e-3` is conservative: a fresh
+  width-128 model's update norms are ~3.7-4.1, so all six passes run; raise it
+  on real data when trading passes for latency is wanted).
+- `train_loopwm.py` CLI (`--data --epochs --seed --device cpu --out`, plus sizing
+  overrides): splits by v2 scenario metadata, trains on the non-held-out cells,
+  prints RMSE per scenario and the held-out/train ratio, distils the LoopWM
+  outputs into the unchanged 20-input `StatefulTCN` (reusing
+  `train_smart.distil_student`), and exports v2 `model_kind=2`. It reuses the
+  smart pipeline's scenario/eval/ratio helpers; `SmartTeacher` and
+  `train_smart.py` are untouched, so both CLIs run side by side.
+- Tiny CPU CLI smoke (synthetic v2 file, width 16, 2 epochs) printed three
+  scenario RMSE rows, `ratio=0.8566 limit=1.25 generalises=yes`, teacher and
+  export paths. `tests/test_loopwm.py` adds shared-weight iterative refinement
+  (forward hook counts 6 calls through the single block), adaptive exit and cap,
+  latent target/prediction shapes, conditioning sensitivity, privileged-target
+  isolation, held-out ratio, and a tiny end-to-end train/distil/export step.
+- Verification: `uv run pytest -q` → `51 passed`; `uv run ruff check src tests`
+  → clean. CPU only; no GPU jobs, no pushes, no files outside `ai/`.
 
 ## Skipped
 
