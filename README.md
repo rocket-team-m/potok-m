@@ -4,9 +4,20 @@
 [![AI](https://github.com/rocket-team-m/potok-m/actions/workflows/ai.yml/badge.svg)](https://github.com/rocket-team-m/potok-m/actions/workflows/ai.yml)
 [![Guard](https://github.com/rocket-team-m/potok-m/actions/workflows/guard.yml/badge.svg)](https://github.com/rocket-team-m/potok-m/actions/workflows/guard.yml)
 
-Один репозиторий на весь проект: документация, код и артефакты.
+Репозиторий команды: документация, сборка и общие артефакты. Код вынесен в отдельные репозитории.
 
 **Сайт:** https://rocket-team-m.github.io/potok-m/
+
+## Канонические репозитории
+
+| Репозиторий | Что лежит |
+| --- | --- |
+| [potok-m-ai](https://github.com/rocket-team-m/potok-m-ai) | обучение модели, LoopWM/LRS-RNN, бортовой инференс на Rust |
+| [potok-m-sim](https://github.com/rocket-team-m/potok-m-sim) | 6-DoF симулятор, рандомизация, генерация данных |
+| [potok-m-protocol](https://github.com/rocket-team-m/potok-m-protocol) | UART-протокол, генератор биндингов, план прошивки STM32 |
+
+Папки `ai/`, `sim/`, `protocol/`, `edge/` здесь остаются как рабочие копии;
+изменения кодам вносить в канонических репозиториях.
 
 ## Структура
 
