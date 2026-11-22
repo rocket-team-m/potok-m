@@ -41,9 +41,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - run: cargo fmt --all --manifest-path ai/tui/Cargo.toml -- --check
-      - run: cargo clippy --all-targets --manifest-path ai/tui/Cargo.toml
-      - run: cargo test --all-targets --manifest-path ai/tui/Cargo.toml
+      - run: cargo fmt --all --manifest-path tui/Cargo.toml -- --check
+      - run: cargo clippy --all-targets --manifest-path tui/Cargo.toml
+      - run: cargo test --all-targets --manifest-path tui/Cargo.toml
 
   plots:
     name: SVG · отчётные графики
@@ -53,7 +53,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Render deterministic plots
         run: |
-          cargo run --release --manifest-path ai/tui/Cargo.toml -- \
+          cargo run --release --manifest-path tui/Cargo.toml -- \
             out/final_100 --plot-only --model loopwm \
             --ab-report ab_report.json --plots-out artifacts/plots
           test -s artifacts/plots/rmse_curve.svg
