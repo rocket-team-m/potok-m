@@ -14,6 +14,7 @@ pub const MAX_CORRECTION: f64 = 0.12;
 
 use crate::{
     config::Config,
+    control::MAX_COMMAND_MPS2,
     dynamics::{Phase, State, Vehicle},
     math::{clamp, quat_to_matrix, Vec3},
     sensor::Frame,
@@ -52,7 +53,16 @@ impl ReferenceOptimizer {
         Self::default()
     }
 
-    pub fn solve(&self, s: &State, wind: Vec3, v: &Vehicle, phase: Phase, frame: &Frame) -> Target {
+    /// Desired world-frame lateral acceleration `(ax, ay)` in m/s^2 before the
+    /// attitude/gimbal conversion. Shared by `solve` (which turns it into a
+    /// `g_theta` target) and by `fin_accel_command` (the physical fin demand).
+    fn lateral_accel_demand(
+        &self,
+        s: &State,
+        wind: Vec3,
+        phase: Phase,
+        frame: &Frame,
+    ) -> Option<[f64; 2]> {
         let pos = s.pos();
         let vel = s.vel();
         let v_rel = [vel[0] - wind[0], vel[1] - wind[1], vel[2] - wind[2]];
@@ -63,15 +73,57 @@ impl ReferenceOptimizer {
                 .chain(v_rel.iter())
                 .all(|x| x.is_finite());
         if !healthy || !phase.ai_allowed() {
-            return Target {
-                g_theta: [0.0, 0.0],
-                confidence: 0.0,
-                ai_healthy: false,
-            };
+            return None;
         }
+        Some([
+            -self.kd_vel * vel[0] - self.kp_pos * pos[0],
+            -self.kd_vel * vel[1] - self.kp_pos * pos[1],
+        ])
+    }
+
+    /// Physical fin command in the control seam's `[roll, pitch]` order, in
+    /// m/s^2 of desired lateral acceleration (NOT radians or fin degrees).
+    ///
+    /// Command convention, verified against the flown trajectory: a positive
+    /// `[roll, pitch]` value rotates the nose so the lateral aerodynamic
+    /// response is **opposite** to the naive right-hand-rule body-axis reading
+    /// (the sim's normal force is built from the relative wind in body frame).
+    /// A positive world +Y demand therefore takes a negative roll command, and
+    /// a positive +X demand a negative pitch command. The interlock/health
+    /// gate matches `solve`.
+    ///
+    /// The raw LQR demand can exceed the actuator's acceleration envelope late
+    /// in the flight; the controller saturates at `MAX_COMMAND_MPS2` itself.
+    /// This is the controller's own saturation, not a silent seam fallback.
+    pub fn fin_accel_command(
+        &self,
+        s: &State,
+        wind: Vec3,
+        _v: &Vehicle,
+        phase: Phase,
+        frame: &Frame,
+    ) -> [f64; 2] {
+        match self.lateral_accel_demand(s, wind, phase, frame) {
+            Some([ax, ay]) => [
+                clamp(ay, -MAX_COMMAND_MPS2, MAX_COMMAND_MPS2),
+                clamp(-ax, -MAX_COMMAND_MPS2, MAX_COMMAND_MPS2),
+            ],
+            None => [0.0, 0.0],
+        }
+    }
+
+    pub fn solve(&self, s: &State, wind: Vec3, v: &Vehicle, phase: Phase, frame: &Frame) -> Target {
+        let [ax_des, ay_des] = match self.lateral_accel_demand(s, wind, phase, frame) {
+            Some(g) => g,
+            None => {
+                return Target {
+                    g_theta: [0.0, 0.0],
+                    confidence: 0.0,
+                    ai_healthy: false,
+                }
+            }
+        };
         let axial = ((v.max_thrust() / s.mass().max(v.dry_mass)) + 9.80665).max(2.0);
-        let ax_des = -self.kd_vel * vel[0] - self.kp_pos * pos[0];
-        let ay_des = -self.kd_vel * vel[1] - self.kp_pos * pos[1];
         let pitch_des = (ax_des / axial).atan();
         let roll_des = -(ay_des / axial).atan();
 

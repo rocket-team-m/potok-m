@@ -3,7 +3,9 @@
 #   [aero] source = "card"; card_path = "config/aero_card.toml"
 # reproduces the placeholder behaviour: cd0 is the legacy cd_mach table
 # (clamped past Mach 1.5), cna and pitch_damping are the legacy constants, and
-# cm_delta is zero because the placeholder has no control-surface moment.
+# cm_delta is the documented placeholder tail-fin control derivative
+# (PLACEHOLDER_CM_DELTA = 5.0 /rad), now nonzero so the moment-balance fin
+# mapping has a known authority; it is NOT fitted to any controller.
 #
 # Grids are rectangular: one row per `grid.alpha_deg` knot, one value per
 # `grid.mach` knot in each row (`values[alpha][mach]`). Interpolation is
@@ -57,13 +59,13 @@ pitch_damping = [
   [0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6],
 ]
 cm_delta = [
-  [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-  [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-  [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-  [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-  [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-  [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-  [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-  [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-  [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+  [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0],
+  [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0],
+  [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0],
+  [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0],
+  [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0],
+  [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0],
+  [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0],
+  [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0],
+  [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0],
 ]

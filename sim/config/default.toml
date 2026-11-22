@@ -101,6 +101,11 @@ cna = 1.8
 # Static margin 0.0765 m; with OR outer diameter 118 mm this is ~0.65 cal.
 static_margin_m = 0.0765
 static_margin_cal_range = [0.60, 0.70]
+# CG-to-tail-fin moment arm `l` for the fin actuator moment balance
+# (M_required = m * g_lat * l). 0.25 m ~= 2.1 calibers of the D=0.118 m
+# reference diameter: a tail-fin arm on a short airframe with CG near mid-body.
+# A documented placeholder from vehicle geometry, not a controller gain.
+control_moment_arm_m = 0.25
 pitch_damping = 0.6
 roll_damping = 0.25
 cd_mach = [[0.0, 0.30], [0.2, 0.30], [0.4, 0.31], [0.5, 0.33], [0.7, 0.36], [0.9, 0.39], [1.1, 0.39], [1.5, 0.39]]

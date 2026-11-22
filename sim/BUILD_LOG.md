@@ -475,3 +475,95 @@ Skipped: atomic staging of output files on a failed gate (failed runs leave
 the files for diagnosis and still exit nonzero); AI-side readers outside
 `sim/`; a control-file-specific command channel in the sidecar (the field is
 documented as the optimizer target).
+
+## Actuator mapping fix (22.11.2026) — root cause of the run4 negative A/B
+
+`scripts/ab_diagnosis.md` found the oracle reference worse than zero command.
+The seam was the cause: `optimizer.rs` emits a full-state gimbal-style angle,
+but `dynamics.rs` applied it as a fin deflection with a fabricated authority
+`FIN_CONTROL_AUTHORITY = 0.02`. The fix is a physical actuator mapping, not a
+gain fitted to make the student win. All changes inside `sim/`.
+
+### Mapping now implemented
+
+The control command pair is **desired lateral acceleration in m/s^2**, not a
+deflection angle (`MAX_CONTROL_DEG` is kept as a numeric alias of
+`MAX_COMMAND_MPS2 = 10` so old control files/tests still parse; its unit is
+m/s^2). Per axis, in `dynamics::solve_fin_deflection`:
+
+```
+M_req = m * g_cmd * l                       (m: current RK4 mass, l: CG->fin arm)
+M_fin = qdyn * A * D * Cm_delta * delta     (D = 2*sqrt(A/pi))
+delta = clamp(M_req / (qdyn*A*D*Cm_delta), +-25 deg)
+moment[axis] += qdyn*A*D*Cm_delta*delta
+```
+
+Physical constants, all documented in code/config, none fitted to an A/B:
+- `Cm_delta` placeholder = **5.0 /rad** (order 1-10/rad for tail-controlled
+  rockets); the card is authoritative when present. Selecting the placeholder
+  prints a COUNTED marker `cm_delta=5 /rad count=N` next to the existing aero
+  marker. `config/aero_card.toml` carries the same 5.0 so the card path has the
+  same authority.
+- `aero.control_moment_arm_m` = **0.25 m** (~2.1 calibers of D=0.118 m), a
+  tail-fin arm on a short airframe with CG near mid-body. Added as a
+  serde-defaulted config field so run1-4 configs still parse.
+- Fin mechanical stop = **25 deg**, clamp is COUNTED (`fin_clamp_uses()`).
+- `qdyn <= 1 Pa` with a nonzero command -> safe zero deflection plus a COUNTED
+  marker (`fin_no_authority_uses()`), not a divide-by-zero.
+- Non-finite / zero / negative `Cm_delta` with a nonzero command -> LOUD
+  `SimError::Control` naming the cause, propagated from `derivative` through a
+  `ControlFault` cell. Verified with a zero-`cm_delta` card.
+- The old `cm_delta` gimbal moment is now gated on `thrust > 0`: thrust
+  vectoring exists only while the motor burns; after burnout the aerodynamic
+  fins take over. The AI interlock already forbids boost corrections.
+- Zero command never enters the mapping; that trajectory is bit-identical.
+
+The oracle controller (`ReferenceOptimizer::fin_accel_command`) exposes the
+lateral acceleration demand the solver already computes internally (`ax_des`,
+`ay_des`), saturates it at the actuator envelope, and uses the command sign
+validated against flown truth (a positive value rotates the nose so the
+lateral aerodynamic response is opposite to the naive right-hand-rule reading
+of this sim's relative-wind normal force). `Target`/`g_theta`, the AI models,
+gates, `validation.bin` and both trajectory sidecar versions are untouched.
+
+### Oracle A/B (held-out indices 16-19, pooled lateral RMS = sqrt(mean(rms^2)))
+
+Each arm runs the same 4 episodes per seed, no RNG or config changes:
+
+| seed | zero command (m) | oracle m/s^2 command (m) | delta |
+|---:|---:|---:|---:|
+| 1 | 1536.930 | 1045.631 | **-491.299** |
+| 2 | 1516.967 | 1008.335 | **-508.632** |
+| 3 | 1535.254 | 1019.964 | **-515.290** |
+
+Wrong-sign oracle on seed 1: 1536.930 -> 1630.637 m (**+93.707**, worse), so the
+sign is measured, not assumed. With the old fabricated authority the oracle
+was +530..590 m WORSE; the mapping change reverses that.
+
+Moment-arm sweep (same 3 seeds, corrected sign, Cm_delta = 5.0) — reported
+honestly, including the values that do not work:
+
+| arm | ~calibers | mean delta lateral RMS (m) |
+|---:|---:|---:|
+| 0.20 | 1.7 | -459 |
+| 0.25 | 2.1 | **-505** (shipped) |
+| 0.30 | 2.5 | -510 |
+| 0.40 | 3.4 | -337 |
+| 0.50 | 4.2 | +113 (oracle becomes harmful: the airframe spins, maxw ~23 rad/s) |
+
+0.25 was chosen as a plausible tail-fin arm; the sweep shows a physical
+authority ceiling, not an AI gain search. No AI or gate threshold was changed.
+
+### Verification
+
+```
+cargo fmt --all -- --check        -> clean
+cargo check --workspace --offline -> Finished, no warnings
+cargo test  --workspace --offline -> 62 passed, 0 failed
+```
+
+8 new gates in `core/tests/actuator_mapping_tests.rs`: moment-balance inversion
+and clamping, thin-air counted zero, LOUD zero authority (helper + whole run),
+zero-command bit identity, oracle improves on held-out (3 seeds), wrong sign
+worsens, v1/v2 sidecar round-trip of a controlled flight, placeholder COUNTED.
+All 54 pre-existing tests stay green.

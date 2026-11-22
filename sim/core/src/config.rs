@@ -250,6 +250,19 @@ pub struct AeroConfig {
     pub cna: f64,
     /// Distance from CG to CP along body +Z; positive is statically stable.
     pub static_margin_m: f64,
+    /// Distance from the CG to the tail-fin aerodynamic centre, metres. This is
+    /// the moment arm `l` in `M_required = m * g_lat * l`: a lateral
+    /// acceleration demand at the CG has to be produced by a fin moment about
+    /// the CG. Default 0.50 m ~= 4.2 calibers for D = 0.118 m (derived from the
+    /// 0.011 m^2 reference area), consistent with fins at the tail of a ~1.8 m
+    /// airframe whose CG sits near mid-body. It is a placeholder from vehicle
+    /// geometry, not a value from a wind-tunnel or CFD control derivative.
+    /// The shipped value is 0.25 m ~= 2.1 calibers: a tail-fin arm on a short
+    /// airframe whose CG sits near mid-body. A value near a caliber keeps the
+    /// commanded moment (m*g*l) within the fin authority across the envelope;
+    /// a full ~4-caliber arm would spin the airframe at this mass and inertia.
+    #[serde(default = "default_control_moment_arm_m")]
+    pub control_moment_arm_m: f64,
     /// Static-margin tolerance in calibers; sampled per episode and converted
     /// to metres with the frontal diameter.
     #[serde(default = "default_margin_cal_range")]
@@ -281,6 +294,10 @@ fn default_cd0_range() -> Range {
 
 fn default_margin_cal_range() -> Range {
     Range(0.85, 1.10)
+}
+
+fn default_control_moment_arm_m() -> f64 {
+    0.25
 }
 
 /// The six vehicle numbers supplied to the model as conditioning. They are
@@ -419,6 +436,12 @@ impl Config {
             1e6,
         )?;
         check("aero.area_m2", self.aero.area_m2, 1e-6, 1e3)?;
+        check(
+            "aero.control_moment_arm_m",
+            self.aero.control_moment_arm_m,
+            0.01,
+            10.0,
+        )?;
         check_range("aero.cd0_range", self.aero.cd0_range, 0.0, 2.0)?;
         check_range(
             "aero.static_margin_cal_range",

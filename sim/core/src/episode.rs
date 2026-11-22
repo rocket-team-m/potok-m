@@ -10,9 +10,9 @@ use crate::{
     atmosphere::Atmosphere,
     config::{sample_domain, AeroSource, Conditioning, Config, Range},
     control::validate_command,
-    dynamics::{phase_at, rk4, State, Vehicle},
+    dynamics::{self, phase_at, rk4, Phase, State, Vehicle},
     error::{Result, SimError},
-    math::{episode_seed, mat_t_vec, norm, quat_to_matrix, sub},
+    math::{episode_seed, mat_t_vec, norm, quat_to_matrix, sub, Vec3},
     optimizer::{ReferenceOptimizer, Target},
     physics::PhysicsFeatures,
     scenario::{scenario, Split},
@@ -76,6 +76,27 @@ impl Episode {
     }
 }
 
+/// Full tick context handed to a privileged control closure.
+pub struct ControlContext<'a> {
+    pub frame: &'a Frame,
+    pub state: &'a State,
+    pub wind: Vec3,
+    pub vehicle: &'a Vehicle,
+    pub phase: Phase,
+}
+
+enum ControlMode<'a> {
+    None,
+    Frame(&'a dyn Fn(&Frame) -> (f64, f64)),
+    Context(&'a dyn Fn(&ControlContext) -> (f64, f64)),
+}
+
+impl ControlMode<'_> {
+    fn is_some(&self) -> bool {
+        !matches!(self, ControlMode::None)
+    }
+}
+
 pub struct Simulator {
     cfg: Config,
     atm: Atmosphere,
@@ -95,8 +116,11 @@ impl Simulator {
         let card = match cfg.aero.source {
             AeroSource::Placeholder => {
                 let n = count_placeholder();
+                let cm = dynamics::count_cm_delta_placeholder();
                 eprintln!(
-                    "[potok-sim] aero=placeholder count={n} (COUNTED: set [aero] source=\"card\" to use a coefficient card)"
+                    "[potok-sim] aero=placeholder count={n} cm_delta={} /rad count={cm} \
+                     (COUNTED: set [aero] source=\"card\" to use a coefficient card)",
+                    dynamics::PLACEHOLDER_CM_DELTA
                 );
                 None
             }
@@ -120,26 +144,49 @@ impl Simulator {
     /// Legacy path: the controller is absent, so no command reaches the
     /// dynamics and the trajectory is bit-for-bit the historical one.
     pub fn run_episode(&self, index: u64) -> Result<Episode> {
-        self.run_episode_impl(index, None)
+        self.run_episode_impl(index, ControlMode::None)
     }
 
     /// Drive the vehicle with a per-frame command. `control` is called once
-    /// per 50 Hz tick with the frame just measured; its two degrees are held
-    /// for the `steps_per_frame` integration steps up to the next tick.
-    /// Commands outside +/- `MAX_CONTROL_DEG` (or non-finite) are LOUD errors.
+    /// per 50 Hz tick with the frame just measured; its two degrees are the
+    /// desired lateral accelerations `[roll, pitch]` in m/s^2, held for the
+    /// `steps_per_frame` integration steps up to the next tick. Commands
+    /// outside the limit (or non-finite) are LOUD errors.
     pub fn run_episode_with_control(
         &self,
         index: u64,
         control: &dyn Fn(&Frame) -> (f64, f64),
     ) -> Result<Episode> {
-        self.run_episode_impl(index, Some(control))
+        self.run_episode_impl(index, ControlMode::Frame(control))
     }
 
-    fn run_episode_impl(
+    /// Same seam, but the closure also sees the un-noised state, true wind,
+    /// vehicle and flight phase at that tick. This is how a privileged
+    /// physical controller (the reference optimizer) can drive the fin
+    /// actuator in a test without changing the public control-file path.
+    pub fn run_episode_with_control_ctx(
         &self,
         index: u64,
-        control: Option<&dyn Fn(&Frame) -> (f64, f64)>,
+        control: &dyn Fn(&ControlContext) -> (f64, f64),
     ) -> Result<Episode> {
+        self.run_episode_impl(index, ControlMode::Context(control))
+    }
+
+    /// Oracle arm: the reference optimizer's physical lateral-acceleration
+    /// demand drives the same fin actuator. Used by the held-out A/B.
+    pub fn run_episode_with_oracle(&self, index: u64) -> Result<Episode> {
+        let opt = ReferenceOptimizer::new(&self.cfg);
+        self.run_episode_impl(
+            index,
+            ControlMode::Context(&|ctx| {
+                let g =
+                    opt.fin_accel_command(ctx.state, ctx.wind, ctx.vehicle, ctx.phase, ctx.frame);
+                (g[0], g[1])
+            }),
+        )
+    }
+
+    fn run_episode_impl(&self, index: u64, control: ControlMode<'_>) -> Result<Episode> {
         let cfg = &self.cfg;
         let mut rng = StdRng::seed_from_u64(episode_seed(cfg.run.seed, index ^ 0x494E4954));
         let s_range: Range = cfg.initial.mass_kg;
@@ -308,14 +355,33 @@ impl Simulator {
                     } else {
                         control_frame = Some(frame);
                     }
-                    if let Some(control) = control {
-                        let seen = control_frame
-                            .as_ref()
-                            .or_else(|| frames.last())
-                            .expect("frame at tick");
-                        let (roll, pitch) = control(seen);
-                        let (roll, pitch) = validate_command(roll, pitch)?;
-                        command_deg = [roll, pitch];
+                    match control {
+                        ControlMode::None => {}
+                        ControlMode::Frame(f) => {
+                            let seen = control_frame
+                                .as_ref()
+                                .or_else(|| frames.last())
+                                .expect("frame at tick");
+                            let (roll, pitch) = f(seen);
+                            let (roll, pitch) = validate_command(roll, pitch)?;
+                            command_deg = [roll, pitch];
+                        }
+                        ControlMode::Context(f) => {
+                            let seen = control_frame
+                                .as_ref()
+                                .or_else(|| frames.last())
+                                .expect("frame at tick");
+                            let ctx = ControlContext {
+                                frame: seen,
+                                state: &state,
+                                wind: w,
+                                vehicle: &vehicle,
+                                phase,
+                            };
+                            let (roll, pitch) = f(&ctx);
+                            let (roll, pitch) = validate_command(roll, pitch)?;
+                            command_deg = [roll, pitch];
+                        }
                     }
                 }
                 // The privileged teacher sees the reference optimizer's
@@ -329,8 +395,15 @@ impl Simulator {
                 frames_generated += 1;
             }
 
-            vehicle.control_deg = command_deg;
+            vehicle.control_accel = command_deg;
             state = rk4(t, &state, cfg.run.dt, w, &self.atm, &vehicle);
+            if let Some(f) = vehicle.control_fault.take() {
+                return Err(SimError::Control(format!(
+                    "nonzero command with {} authority (value={}): provide a finite Cm_delta > 0 \
+                     in the aero card or the placeholder, or send a zero command",
+                    f.reason, f.value
+                )));
+            }
             if let Some(f) = vehicle.card_fault.take() {
                 return Err(SimError::AeroOutOfGrid {
                     axis: f.axis.to_string(),

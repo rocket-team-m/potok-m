@@ -24,9 +24,13 @@ pub mod wind;
 pub use aero::{AeroCard, AeroChannel, AeroCoeffs};
 pub use atmosphere::Atmosphere;
 pub use config::{AeroSource, Conditioning, Config, DomainParams, OutputMode};
-pub use control::{validate_command, ControlFile, MAX_CONTROL_DEG};
-pub use dynamics::{Phase, State, Vehicle};
-pub use episode::{Episode, EpisodeMeta, Episodes, Simulator};
+pub use control::{validate_command, ControlFile, MAX_COMMAND_MPS2, MAX_CONTROL_DEG};
+pub use dynamics::{
+    cm_delta_placeholder_uses, fin_clamp_uses, fin_no_authority_uses, solve_fin_deflection,
+    ControlFault, Phase, State, Vehicle, MAX_FIN_DEFLECTION_RAD, MIN_CONTROL_QDYN_PA,
+    PLACEHOLDER_CM_DELTA,
+};
+pub use episode::{ControlContext, Episode, EpisodeMeta, Episodes, Simulator};
 pub use error::{Result, SimError};
 pub use manifest::{config_hash, file_record, read_manifest, write_manifest, DatasetManifest};
 pub use optimizer::{ReferenceOptimizer, Target};

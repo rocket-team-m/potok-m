@@ -5,7 +5,10 @@
 //! the integrator never touches a flat 14-element index space. Body +Z is the
 //! rocket axis; world +Z is up. Inertia is diagonal and scales with mass.
 
-use std::cell::Cell;
+use std::{
+    cell::Cell,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 use crate::{
     aero::{AeroCard, AeroCoeffs},
@@ -69,12 +72,49 @@ impl Phase {
     }
 }
 
-/// Placeholder fin control authority per radian of commanded deflection.
-/// This is a new physical assumption for the control seam, not a tuned knob:
-/// it is the same order as the other placeholder aero coefficients and is
-/// applied symmetrically to both axes. It is only read when a command is
-/// non-zero, so the legacy (zero-command) path is bit-for-bit unchanged.
-pub const FIN_CONTROL_AUTHORITY: f64 = 0.02;
+/// Placeholder fin control derivative `Cm_delta` (per radian of deflection).
+/// The aero card is the authority when present; the legacy placeholder path
+/// has no control derivative, so this documented nonzero value stands in for
+/// it. Tail-controlled rockets have `|Cm_delta|` of order 1-10 /rad; 5.0 is a
+/// mid-range placeholder of the same class as `cna`/`pitch_damping` in
+/// `config/default.toml`, NOT a value fitted to make any controller win.
+/// Selecting it is COUNTED (`cm_delta_placeholder_uses()`).
+pub const PLACEHOLDER_CM_DELTA: f64 = 5.0;
+
+/// Mechanical fin stop, radians (~25 degrees). A deflection demand beyond this
+/// is clamped; the clamp is COUNTED (`fin_clamp_uses()`).
+pub const MAX_FIN_DEFLECTION_RAD: f64 = 25.0 * std::f64::consts::PI / 180.0;
+
+/// Below this dynamic pressure (Pa) aerodynamic fins have no usable authority.
+/// A nonzero command in near-still air is dropped to zero and COUNTED
+/// (`fin_no_authority_uses()`) rather than producing a divide-by-zero blow-up.
+pub const MIN_CONTROL_QDYN_PA: f64 = 1.0;
+
+static CM_DELTA_PLACEHOLDER_USES: AtomicU64 = AtomicU64::new(0);
+static FIN_CLAMP_USES: AtomicU64 = AtomicU64::new(0);
+static FIN_NO_AUTHORITY_USES: AtomicU64 = AtomicU64::new(0);
+
+/// COUNTED: placeholder `Cm_delta` selections since process start.
+pub fn cm_delta_placeholder_uses() -> u64 {
+    CM_DELTA_PLACEHOLDER_USES.load(Ordering::Relaxed)
+}
+pub fn count_cm_delta_placeholder() -> u64 {
+    CM_DELTA_PLACEHOLDER_USES.fetch_add(1, Ordering::Relaxed) + 1
+}
+/// COUNTED: fin deflection demands that hit the mechanical stop.
+pub fn fin_clamp_uses() -> u64 {
+    FIN_CLAMP_USES.load(Ordering::Relaxed)
+}
+pub fn count_fin_clamp() {
+    FIN_CLAMP_USES.fetch_add(1, Ordering::Relaxed);
+}
+/// COUNTED: nonzero commands dropped because dynamic pressure was too low.
+pub fn fin_no_authority_uses() -> u64 {
+    FIN_NO_AUTHORITY_USES.load(Ordering::Relaxed)
+}
+pub fn count_fin_no_authority() {
+    FIN_NO_AUTHORITY_USES.fetch_add(1, Ordering::Relaxed);
+}
 
 #[derive(Debug, Clone)]
 pub struct Vehicle {
@@ -97,9 +137,15 @@ pub struct Vehicle {
     /// An out-of-grid query inside `derivative` is recorded here and returned
     /// as a `SimError::AeroOutOfGrid` by the episode loop. No silent clamp.
     pub card_fault: Cell<Option<CardFault>>,
-    /// Per-step fin command `[roll, pitch]` in body-frame degrees. Set by the
-    /// episode loop from the control closure; zero on the legacy path.
-    pub control_deg: [f64; 2],
+    /// A nonzero command arriving with unknown/zero control authority. Recorded
+    /// inside `derivative` and returned as a LOUD `SimError::Control` by the
+    /// episode loop.
+    pub control_fault: Cell<Option<ControlFault>>,
+    /// Per-step control command `[roll, pitch]`, desired lateral acceleration
+    /// in m/s^2 (NOT fin deflection). Set by the episode loop from the control
+    /// closure; zero on the legacy path. Converted to a fin deflection by the
+    /// moment balance in `derivative`.
+    pub control_accel: [f64; 2],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -108,6 +154,13 @@ pub struct CardFault {
     pub value: f64,
     pub lo: f64,
     pub hi: f64,
+}
+
+/// A nonzero command reached `derivative` while `Cm_delta` was unusable.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ControlFault {
+    pub reason: &'static str,
+    pub value: f64,
 }
 
 fn fault_axis(axis: &str) -> &'static str {
@@ -148,7 +201,8 @@ impl Vehicle {
                 cm_delta: 0.0,
             },
             card_fault: Cell::new(None),
-            control_deg: [0.0; 2],
+            control_fault: Cell::new(None),
+            control_accel: [0.0; 2],
         }
     }
 
@@ -185,13 +239,16 @@ impl Vehicle {
         }
     }
 
-    /// Gimbal control-moment coefficient; zero in placeholder mode.
+    /// Fin/gimbal control-moment derivative per radian. The card is the
+    /// authority when present; the placeholder contributes the documented
+    /// nonzero `PLACEHOLDER_CM_DELTA` so the actuator mapping has a known,
+    /// COUNTED coefficient instead of an implicit zero.
     #[inline]
     pub fn effective_cm_delta(&self) -> f64 {
         if self.aero_card.is_some() {
             self.card_coeffs.cm_delta
         } else {
-            0.0
+            PLACEHOLDER_CM_DELTA
         }
     }
 
@@ -329,6 +386,52 @@ impl State {
     }
 }
 
+/// Solve one axis of the command->fin actuator mapping from a moment balance.
+///
+/// A lateral acceleration demand `g` at the CG needs moment `M_req = m*g*l`,
+/// with `l` the CG-to-fin moment arm. The fins produce `M = qdyn*A*D*Cm_delta*delta`,
+/// so `delta = M_req / (qdyn*A*D*Cm_delta)`, clamped to the mechanical stop.
+///
+/// `Err` means a nonzero demand met unknown/zero authority — LOUD at the episode
+/// boundary. A thin-atmosphere demand returns `Ok(0.0)` and increments the
+/// COUNTED no-authority marker; that is a counted degradation, not a silent one.
+pub fn solve_fin_deflection(
+    g_mps2: f64,
+    mass_kg: f64,
+    qdyn_pa: f64,
+    area_m2: f64,
+    cm_delta: f64,
+    moment_arm_m: f64,
+) -> std::result::Result<f64, ControlFault> {
+    if g_mps2 == 0.0 {
+        return Ok(0.0);
+    }
+    if !cm_delta.is_finite() || cm_delta <= 0.0 {
+        return Err(ControlFault {
+            reason: "cm_delta",
+            value: cm_delta,
+        });
+    }
+    if !g_mps2.is_finite() || !mass_kg.is_finite() || !qdyn_pa.is_finite() {
+        return Err(ControlFault {
+            reason: "non_finite_control_input",
+            value: g_mps2,
+        });
+    }
+    if qdyn_pa <= MIN_CONTROL_QDYN_PA {
+        count_fin_no_authority();
+        return Ok(0.0);
+    }
+    let diameter = 2.0 * (area_m2 / std::f64::consts::PI).sqrt();
+    let authority = qdyn_pa * area_m2 * diameter * cm_delta;
+    let delta = mass_kg * g_mps2 * moment_arm_m / authority;
+    let clamped = delta.clamp(-MAX_FIN_DEFLECTION_RAD, MAX_FIN_DEFLECTION_RAD);
+    if clamped != delta {
+        count_fin_clamp();
+    }
+    Ok(clamped)
+}
+
 /// Right-hand side. `wind` is frozen for the four RK4 stages of a step.
 pub fn derivative(t: f64, s: &State, wind: Vec3, atm: &Atmosphere, v: &Vehicle) -> State {
     let mut d = State::zeros();
@@ -376,7 +479,7 @@ pub fn derivative(t: f64, s: &State, wind: Vec3, atm: &Atmosphere, v: &Vehicle) 
             v.effective_cd(mach),
             v.effective_cna(),
             v.effective_pitch_damping(),
-            0.0,
+            PLACEHOLDER_CM_DELTA,
         )
     };
     let qdyn = 0.5 * air.density * speed * speed;
@@ -395,7 +498,8 @@ pub fn derivative(t: f64, s: &State, wind: Vec3, atm: &Atmosphere, v: &Vehicle) 
         qdyn * v.aero.area_m2 * cna * (vb[1] / az),
         0.0,
     ];
-    let thrust = scale(v.thrust_dir, v.thrust_at(t));
+    let thrust_n = v.thrust_at(t);
+    let thrust = scale(v.thrust_dir, thrust_n);
     let body_force = add(add(drag, normal), thrust);
 
     let w = s.omega;
@@ -422,26 +526,37 @@ pub fn derivative(t: f64, s: &State, wind: Vec3, atm: &Atmosphere, v: &Vehicle) 
         moment_aero[1] - pitch_damp * w[1],
         -roll_damp * w[2],
     ];
-    // `cm_delta` is the gimbal control-moment coefficient. The generated
-    // example card sets it to zero, so a card run reproduces the placeholder
-    // exactly; a real card adds a finite control moment here.
-    if cm_delta != 0.0 {
+    // Thrust-vector (gimbal) control moment. This path exists only while the
+    // motor is burning: after burnout there is no thrust to vector, and the
+    // aerodynamic fins below take over. The interlock forbids AI commands on
+    // the powered segment anyway.
+    if thrust_n > 0.0 && cm_delta != 0.0 {
         let diameter = 2.0 * (v.aero.area_m2 / std::f64::consts::PI).sqrt();
         let cm = cm_delta * qdyn * v.aero.area_m2 * diameter;
         moment[0] += cm * v.thrust_dir[0];
         moment[1] += cm * v.thrust_dir[1];
     }
-    // Commanded fin moment: the actual control->dynamics seam. Scaled with
-    // dynamic pressure like the other aero moments, so it acts on the coast
-    // and descent segments and dies with the atmosphere. Body-X moment is
-    // roll, body-Y moment is pitch (see `roll`/`pitch` in optimizer.rs).
-    // Gated on a non-zero command to keep the zero path exactly identical.
-    if v.control_deg[0] != 0.0 || v.control_deg[1] != 0.0 {
+    // Aerodynamic fin control: the command is a lateral-acceleration demand
+    // (m/s^2), NOT a deflection. Each axis is converted to a fin deflection by
+    // the moment balance in `solve_fin_deflection`, then the matching moment
+    // is applied. Zero command leaves this block untouched, so the legacy
+    // trajectory is bit-for-bit identical.
+    if v.control_accel[0] != 0.0 || v.control_accel[1] != 0.0 {
         let diameter = 2.0 * (v.aero.area_m2 / std::f64::consts::PI).sqrt();
-        let fin_scale =
-            FIN_CONTROL_AUTHORITY * qdyn * v.aero.area_m2 * diameter * std::f64::consts::PI / 180.0;
-        moment[0] += fin_scale * v.control_deg[0];
-        moment[1] += fin_scale * v.control_deg[1];
+        let authority = qdyn * v.aero.area_m2 * diameter * cm_delta;
+        for axis in 0..2 {
+            match solve_fin_deflection(
+                v.control_accel[axis],
+                mass,
+                qdyn,
+                v.aero.area_m2,
+                cm_delta,
+                v.aero.control_moment_arm_m,
+            ) {
+                Ok(delta) => moment[axis] += authority * delta,
+                Err(fault) => v.control_fault.set(Some(fault)),
+            }
+        }
     }
 
     // Launch-rail constraint: before liftoff the rail carries the weight, so

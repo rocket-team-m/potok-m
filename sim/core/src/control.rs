@@ -1,9 +1,13 @@
-//! Offline command source: bounded per-frame gimbal/fin corrections.
+//! Offline command source: bounded per-frame lateral-acceleration demands.
+//!
+//! The two command values are desired lateral accelerations in m/s^2 (NOT fin
+//! deflection degrees). `dynamics::solve_fin_deflection` turns each demand into
+//! a fin deflection by a moment balance; the command itself is merely bounded.
 //!
 //! A control file is whitespace-separated TSV with one row per 50 Hz tick:
 //!
 //! ```text
-//! # frame_index g_roll_deg g_pitch_deg
+//! # frame_index g_roll_mps2 g_pitch_mps2
 //! frame_index  g_roll  g_pitch
 //! 0            0.0     0.0
 //! 1            2.5    -1.0
@@ -22,19 +26,22 @@ use crate::{
     sensor::Frame,
 };
 
-/// Symmetric command limit in degrees. Covers the reference optimizer's
-/// `max_correction = 0.12 rad` (~6.88 deg) with margin; anything larger is
-/// refused loudly instead of being silently clipped.
-pub const MAX_CONTROL_DEG: f64 = 10.0;
+/// Symmetric command limit in m/s^2 of desired lateral acceleration. A 10 m/s^2
+/// demand is about 1 g of lateral acceleration, an ample physical ceiling for
+/// this airframe. Anything larger (or non-finite) is refused loudly rather than
+/// silently clipped. The historical name is kept as an alias because the
+/// control-file/tests API is unchanged numerically; its unit is now m/s^2.
+pub const MAX_COMMAND_MPS2: f64 = 10.0;
+pub const MAX_CONTROL_DEG: f64 = MAX_COMMAND_MPS2;
 pub const CONTROL_FIELDS: usize = 3;
 
 /// Check one command pair. Both axes are finite and within
-/// `[-MAX_CONTROL_DEG, MAX_CONTROL_DEG]`.
+/// `[-MAX_COMMAND_MPS2, MAX_COMMAND_MPS2]` (m/s^2).
 pub fn validate_command(roll_deg: f64, pitch_deg: f64) -> Result<(f64, f64)> {
     for (name, v) in [("g_roll", roll_deg), ("g_pitch", pitch_deg)] {
         if !v.is_finite() || v.abs() > MAX_CONTROL_DEG {
             return Err(SimError::Control(format!(
-                "{name}={v} outside [-{MAX_CONTROL_DEG}, {MAX_CONTROL_DEG}] degrees"
+                "{name}={v} outside [-{MAX_COMMAND_MPS2}, {MAX_COMMAND_MPS2}] m/s^2"
             )));
         }
     }
