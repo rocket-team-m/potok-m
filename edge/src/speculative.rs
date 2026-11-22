@@ -14,7 +14,9 @@ use crate::frame::{
     ReplyFrame, RequestFrame, CORRECTION_SCALE, FLAG_FAULT, FLAG_IMU_OK, PHASE_BURN,
 };
 use crate::runtime::{PhasePolicy, Runtime};
-use crate::student_runtime::{StudentModel, StudentRuntime, WINDOW};
+use crate::student_runtime::{
+    StudentModel, StudentRuntime, COND_FEATURES, PHYSICS_FEATURES, SMART_FRAME_FEATURES, WINDOW,
+};
 use std::collections::VecDeque;
 use std::fmt;
 use std::fs;
@@ -82,9 +84,11 @@ pub struct SpeculativeRuntime {
     student: StudentRuntime,
     window: VecDeque<[f32; 8]>,
     flat: Vec<f32>,
-    /// Last 50 student frames (`in_features` floats each, sensors + phase +
-    /// flags); the teacher window holds only the 8 sensor features.
+    /// Last 50 student frames (`in_features` floats each: 10 legacy or 20
+    /// smart); the teacher window holds only the 8 sensor features.
     student_flat: Vec<f32>,
+    /// Vehicle-conditioning numbers appended to every smart frame.
+    conditioning: [f32; COND_FEATURES],
     policy: PhasePolicy,
     last_seq: Option<u16>,
     last_phase: Option<u8>,
@@ -120,6 +124,7 @@ impl SpeculativeRuntime {
             window,
             flat: vec![0.0; WINDOW * 8],
             student_flat: vec![0.0; WINDOW * student_features],
+            conditioning: [0.0; COND_FEATURES],
             policy: PhasePolicy::default(),
             last_seq: None,
             last_phase: None,
@@ -162,6 +167,12 @@ impl SpeculativeRuntime {
     pub fn with_policy(mut self, policy: PhasePolicy) -> Self {
         self.policy = policy;
         self
+    }
+
+    /// Set the 6 conditioning values appended to each smart (20-input) frame.
+    /// Ignored by a legacy 10-input student.
+    pub fn set_conditioning(&mut self, conditioning: [f32; COND_FEATURES]) {
+        self.conditioning = conditioning;
     }
 
     pub fn student(&self) -> &StudentRuntime {
@@ -270,11 +281,17 @@ impl SpeculativeRuntime {
         self.student_flat.copy_within(nf..WINDOW * nf, 0);
         let last = &mut self.student_flat[(WINDOW - 1) * nf..WINDOW * nf];
         last[..8].copy_from_slice(&req.features());
-        if nf > crate::student_runtime::PHASE_INDEX {
-            last[crate::student_runtime::PHASE_INDEX] = req.phase as f32;
-        }
-        if nf > crate::student_runtime::FLAGS_INDEX {
-            last[crate::student_runtime::FLAGS_INDEX] = req.flags as f32;
+        if nf == SMART_FRAME_FEATURES {
+            // Smart frame: 14 physics features (phase/flags are not part of
+            // this layout) followed by the 6 conditioning numbers.
+            last[PHYSICS_FEATURES..SMART_FRAME_FEATURES].copy_from_slice(&self.conditioning);
+        } else {
+            if nf > crate::student_runtime::PHASE_INDEX {
+                last[crate::student_runtime::PHASE_INDEX] = req.phase as f32;
+            }
+            if nf > crate::student_runtime::FLAGS_INDEX {
+                last[crate::student_runtime::FLAGS_INDEX] = req.flags as f32;
+            }
         }
         self.frame_no += 1;
         self.counters.frames += 1;

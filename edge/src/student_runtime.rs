@@ -39,6 +39,11 @@
 //! a `tanh` head scaled by `tanh(|g_max|)` and a sigmoid confidence finish
 //! the tick. These three points deliberately supersede the older
 //! SPEC_STUDENT.md text; the canonical Python implementation is the authority.
+//!
+//! `in_features` comes from the header: **10** for the legacy frame (8 sensors
+//! + phase + flags) or **20** for the smart frame (14 physics features followed
+//! by the 6 vehicle-conditioning numbers). `step` accepts any frame up to that
+//! width and zero-pads the tail, matching the Python `_as_frame` helper.
 
 use crate::simd::dot;
 use sha2::{Digest, Sha256};
@@ -57,6 +62,10 @@ pub const WINDOW: usize = 50;
 pub const SENSOR_FEATURES: usize = 8;
 pub const PHASE_INDEX: usize = 8;
 pub const FLAGS_INDEX: usize = 9;
+pub const LEGACY_STUDENT_FEATURES: usize = 10;
+pub const PHYSICS_FEATURES: usize = 14;
+pub const COND_FEATURES: usize = 6;
+pub const SMART_FRAME_FEATURES: usize = PHYSICS_FEATURES + COND_FEATURES;
 const CHECKSUM_BYTES: usize = 32;
 const LN_EPS: f32 = 1e-5;
 
@@ -94,6 +103,18 @@ impl fmt::Display for StudentError {
 }
 
 impl std::error::Error for StudentError {}
+
+/// Build a 20-float smart frame: 14 physics features then 6 conditioning
+/// numbers, in the order written by `potok_sim::Conditioning::as_array`.
+pub fn smart_frame(
+    physics: &[f32; PHYSICS_FEATURES],
+    conditioning: &[f32; COND_FEATURES],
+) -> [f32; SMART_FRAME_FEATURES] {
+    let mut frame = [0.0f32; SMART_FRAME_FEATURES];
+    frame[..PHYSICS_FEATURES].copy_from_slice(physics);
+    frame[PHYSICS_FEATURES..].copy_from_slice(conditioning);
+    frame
+}
 
 /// The `model_kind` field. A canonical windowed-teacher v2 file has no such
 /// field: offset 12 holds `in_features = 8` there. Anything other than 2 is

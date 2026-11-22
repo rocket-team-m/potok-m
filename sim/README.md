@@ -16,8 +16,17 @@ cargo check --workspace
 cargo run -p potok-cli -- --help
 cargo run -p potok-cli -- --config config/default.toml --seed 1 --episodes 4 \
     --validation-out out/
+cargo run -p potok-cli -- --episodes 20 --physics-features --split train \
+    --validation-out train/
+cargo run -p potok-cli -- --episodes 20 --physics-features --split held-out \
+    --validation-out heldout/
 cargo bench -p potok-sim --bench throughput   # episodes/s, frames/s
 ```
+
+`config/default.toml` is unchanged (8 output channels). `--physics-features`
+appends the six derived channels to make the 14-value model frame; `--split`
+keeps one side of the withheld wind/gust split in the validation file. Both
+flags are optional, so every older command line keeps working.
 
 ## Source of default numbers
 
@@ -43,6 +52,72 @@ Motor peaks (500–550 / 550–600 N) and thrust ripple are not modelled — onl
 average thrust and mass flow. The remaining gap between simulated (~203 m/s,
 ~2.4 km) and stated TTX (~240 m/s, ~3 km) is dominated by these placeholder
 aerodynamics and by the impulse choice within the passport ranges.
+
+## Domain randomization (Potok-M only)
+
+Per `SPEC_SMART.md` (commit `8894951`) there are **no other rocket types**.
+Every episode is the same airframe with tolerances drawn from independent
+seeded sub-streams; `config/default.toml` itself is untouched (the ranges
+below are serde defaults in `core/src/config.rs` and can be overridden by a
+custom config).
+
+| quantity | range | source |
+|---|---|---|
+| lift-off mass | 12.5–13.5 kg | existing `initial.mass_kg` |
+| thrust scale | 0.94–1.06 | existing `initial.thrust_scale` |
+| CG offset | ±0.02 m | existing `initial.cg_offset_m`, added to the sampled margin |
+| `cd0` | 0.30–0.40 | `aero.cd0_range`, new; shifts the whole mach table |
+| static margin | 0.85–1.10 cal | `aero.static_margin_cal_range`, new; converted with D = 2√(A/π) = 0.102 m |
+| gyro noise | 0.0010–0.0020 rad/s | `sensor.gyro_noise_range`, tolerance around the 0.0015 validated value |
+| accel noise | 0.008–0.014 m/s² | `sensor.accel_noise_range`, tolerance around the DELTA 1064 µg value |
+| wind at 10 m | 0–15 m/s | `wind.v_10_range`, new |
+| gust amplitude | 5–20 m/s | `wind.gust_amplitude_range`, new |
+| shear jump / altitude | 0–8 m/s / 50–400 m | `wind.shear_delta_range`, `wind.shear_altitude_range`, new |
+| sensor lag | ×1.0 train, ×1.5–2.0 withheld | scenario cell, on top of `sensor.lag_tau` |
+
+Mass, thrust and CG use the legacy `INIT` draw; `cd0`, margin and sensor noise
+use an independent `DOMA` sub-seed. Scenario cells replace the old
+`wind.gust_probability` draw with a fixed wind/gust/shear combination, so
+generalization is measured across scenarios rather than random luck.
+
+## Physics features and the 14-value frame
+
+The raw eight channels (`gyro_x/y/z`, `acc_x/y/z`, `baro_h`, `pitot_q`) are
+unchanged. Six features are computed in `core/src/physics.rs` from the RK4
+state, the atmosphere and the sensor's body-frame specific force:
+
+| name | formula |
+|---|---|
+| `alpha_deg` | `atan2(omega_body_z, v_body_x)` in degrees. This is the literal SPEC formula; the classical aerodynamic AoA would use `−v_body_z`. |
+| `beta_deg` | `atan2(v_body_y, v_body_x)` in degrees |
+| `q_dyn_kpa` | `0.5 · rho · ‖v − w‖² / 1000`, `rho` from `Atmosphere::at` |
+| `a_lat_resid` | `hypot(a_meas_x − (N_x + D_x)/m, a_meas_y − (N_y + D_y)/m)`; `N = q_dyn·A·cna·(v_body_i/az)`, `D` is the mach-table drag vector, `az = max(‖v−w‖, 1)` |
+| `drag_est` | `cd0 · q_dyn · A / m_current` (current mass falls during burn) |
+| `static_margin_cal` | `static_margin_m / (2√(A/π))` |
+
+`v_body = R(q)ᵀ(v_world − w_world)`. The first six names live in
+`physics::PHYSICS_FEATURES`; `sensor::FEATURE_NAMES` ends with them.
+
+The six **conditioning** numbers are separate: `mass_kg`, `area_m2`, `cd0`,
+`static_margin_cal`, `thrust_peak_n`, `gyro_noise`. They are written once per
+episode in validation metadata (not into the frame matrix), so a caller can
+broadcast them over the time axis. SPEC's "8 + 6 + 6 = 14" wording is
+inconsistent; the frame is 8 raw + 6 physics = 14, and conditioning is
+metadata.
+
+## Withheld wind/gust scenarios
+
+`core/src/scenario.rs` defines 20 deterministic cells: 16 training and 4
+withheld (ids 16–19). A cell fixes fractions of the wind/gust/shear envelopes
+plus a sensor-lag multiplier. Withheld cells combine envelope extremes that
+appear in **no** training cell (all four knobs at maximum, lag 1.5–2.0×), so
+the train/held-out boundary is a wind/gust scenario boundary, not a vehicle
+type. `episode_index % 20` selects the cell; `EpisodeMeta.scenario_id`,
+`.split`, `.v_10`, `.gust_amplitude` and `.shear_delta` record what ran.
+
+Use `--split train` / `--split held-out` with `--episodes 20` (or a multiple)
+to write the two validation sets. The criterion in the spec is held-out RMSE
+≤ 1.25 × training RMSE.
 
 ## Determinism
 
@@ -106,7 +181,7 @@ its exact byte layout, and `ai/src/potok_ai/data.py` uses the same 80-byte
 | offset | size | field |
 |---|---|---|
 | 0 | 8 | magic `POTOKSIM` |
-| 8 | 4 | version `u32` = 1 |
+| 8 | 4 | version `u32` = 2 (1 = legacy 9-metadata file) |
 | 12 | 8 | seed `u64` |
 | 20 | 4 | episode count `u32` |
 | 24 | 4 | frames per episode `u32` |
@@ -115,15 +190,32 @@ its exact byte layout, and `ai/src/potok_ai/data.py` uses the same 80-byte
 | 36 | 4 | frame rate `f32` |
 | 40 | 4 | dt `f32` |
 | 44 | 4 | duration `f32` |
-| 48 | 32 | reserved (zero) |
+| 48 | 4 | metadata count `u32` = 17 in v2, zero in v1 |
+| 52 | 28 | reserved (zero) |
 
-Per episode: `u64` index, then 9 metadata `f32` (mass, thrust_scale, pitch,
-yaw, gust_start [−1 = none], gust_duration, gust_amplitude, v_10,
-shear_delta), then `frames × features` f32, then `frames × 4` f32 targets
-(g_roll, g_pitch, confidence, ai_healthy as 0/1).
+The writer emits **version 2** (`validation::VERSION = 2`). Per episode:
+`u64` index, then 17 metadata `f32`:
+
+| index | field |
+|---|---|
+| 0–8 | legacy: mass, thrust_scale, pitch, yaw, gust_start [−1 = none], gust_duration, gust_amplitude, v_10, shear_delta |
+| 9–14 | conditioning: mass_kg, area_m2, cd0, static_margin_cal, thrust_peak_n, gyro_noise |
+| 15 | scenario id `u16` as `f32` |
+| 16 | split flag: 0 = train, 1 = held-out |
+
+Then `frames × features` f32, then `frames × 4` f32 targets (g_roll, g_pitch,
+confidence, ai_healthy as 0/1). A consumer concatenates the conditioning
+vector to every frame to form the model input.
+
+**Backward compatibility:** `write_validation_with_version(..., VERSION_V1)`
+writes the original 9-metadata layout with version 1 and a zeroed
+`meta_count`. `read_validation` accepts both versions; for v1 it reconstructs
+nominal Potok-M conditioning (scenario 0, train) from the defaults. Both
+paths are covered by round-trip tests.
 
 `potok_sim::validation::read_validation` parses the format; a round-trip test
-covers it.
+covers it. Note that an AI-side reader must use the v2 layout when consuming
+files produced by the new writer.
 
 ## Reference optimizer
 

@@ -149,3 +149,45 @@ cargo bench -p potok-sim --bench throughput --offline:
   sensors=false fast_field=true  episodes/s=  146.68 frames/s=  220019
   sensors=true  fast_field=false episodes/s=  102.19 frames/s=  153278
 ```
+
+## Smart-model simulator lane (spec 8894951, Potok-M domain randomization)
+
+Scope change from the owner: no five rocket types. One airframe, randomized
+within tolerances, with a held-out **wind/gust scenario** split.
+
+```
+cargo check --workspace --offline   -> Finished, no warnings
+cargo test  --workspace --offline   -> 25 passed, 0 failed
+   (15 sim + 6 smart-sim + 4 CLI; all old tests still green)
+cargo run -p potok-cli --offline -- --help -> --split and --physics-features listed
+nominal seed 1337, episode 0: apogee 2564.2 m, max speed 204.4 m/s
+```
+
+What changed (all inside `sim/`):
+
+- `core/src/config.rs`: new serde-default ranges for `cd0` (0.30–0.40),
+  static margin (0.85–1.10 cal), gyro noise (0.0010–0.0020 rad/s), accel
+  noise (0.008–0.014 m/s²), wind 0–15 m/s, gust 5–20 m/s, shear 0–8 m/s at
+  50–400 m. `config/default.toml` was NOT edited; old configs still parse.
+  Added `Conditioning` (6 numbers) and `sample_domain` on an independent
+  `DOMA` sub-seed so the legacy INIT/SENS/WIND draw order is unchanged.
+- `core/src/scenario.rs` (new): 20 deterministic cells, 16 train + 4 withheld.
+  Withheld ids 16–19 combine all envelope extremes with lag ×1.5–2.0; no
+  withheld signature occurs in training. `episode_index % 20` selects the cell.
+- `core/src/physics.rs` (new): six features computed from the RK4 state,
+  atmosphere and measured body specific force. `alpha_deg` follows the SPEC
+  formula literally (`atan2(omega_body_z, v_body_x)`); the README notes the
+  classical AoA alternative. Appended to `FEATURE_NAMES` and `Frame.physics`
+  (wire layout untouched). Frame vector = 8 raw + 6 physics = 14.
+- `core/src/wind.rs` / `sensor.rs`: scenario cells set v10/gust/shear and lag;
+  sampled noise ranges replace the fixed gyro/accel noise.
+- `core/src/validation.rs`: version 2 writes 17 metadata f32 (legacy 9 +
+  6 conditioning + scenario id + split flag) and records `meta_count` in
+  header bytes 48..52. Reader accepts v1 (9 metadata) and v2; legacy v1
+  conditioning is reconstructed from defaults. Header stays 80 bytes.
+- `cli/src/main.rs`: `--split all|train|held-out` and `--physics-features`;
+  old flag combinations keep working but now emit v2 files.
+
+Caveat for the AI lane: `validation.bin` is now version 2. `ai/src/potok_ai/data.py`
+still reads 9 metadata, so it must be updated by its owner before consuming
+new files; no files outside `sim/` were touched here.

@@ -7,11 +7,13 @@ use rayon::prelude::*;
 
 use crate::{
     atmosphere::Atmosphere,
-    config::{Config, Range},
+    config::{sample_domain, Conditioning, Config, Range},
     dynamics::{phase_at, rk4, State, Vehicle},
     error::{Result, SimError},
     math::episode_seed,
     optimizer::{ReferenceOptimizer, Target},
+    physics::PhysicsFeatures,
+    scenario::{scenario, Split},
     sensor::{feature, Frame, Sensor, FEATURE_NAMES},
     wind::Wind,
 };
@@ -30,6 +32,10 @@ pub struct EpisodeMeta {
     pub gust_amplitude: f64,
     pub v_10: f64,
     pub shear_delta: f64,
+    pub scenario_id: u16,
+    pub split: Split,
+    /// Six vehicle numbers fed to the model as conditioning.
+    pub conditioning: Conditioning,
 }
 
 #[derive(Debug, Clone)]
@@ -98,8 +104,29 @@ impl Simulator {
         ];
         let cg_offset = cfg.initial.cg_offset_m.sample(rng.gen());
 
+        // Tolerances of the one real vehicle. Mass/thrust/CG already come from
+        // the `INIT` draw above; cd0, caliber margin and sensor noise use an
+        // independent sub-seed so the legacy draw order does not move.
+        let domain = sample_domain(cfg, index);
+        let sc = scenario(index);
+        let diameter = 2.0 * (cfg.aero.area_m2 / std::f64::consts::PI).sqrt();
         let mut vehicle = Vehicle::from_config(cfg, mass, thrust_scale, gimbal_deg);
-        vehicle.aero.static_margin_m += cg_offset;
+        vehicle.aero.cd0 = domain.cd0;
+        vehicle.aero.static_margin_m = domain.static_margin_cal * diameter + cg_offset;
+        let thrust_peak_n = cfg
+            .aero
+            .thrust_profile
+            .iter()
+            .map(|p| p.1)
+            .fold(0.0_f64, f64::max);
+        let conditioning = Conditioning {
+            mass_kg: mass as f32,
+            area_m2: cfg.aero.area_m2 as f32,
+            cd0: domain.cd0 as f32,
+            static_margin_cal: domain.static_margin_cal as f32,
+            thrust_peak_n: thrust_peak_n as f32,
+            gyro_noise: domain.gyro_noise as f32,
+        };
         let mut state = State::new(mass, pitch_deg.to_radians(), yaw_deg.to_radians());
         let wind = Wind::new(cfg, index);
         let mut sensor = Sensor::new(cfg, index);
@@ -129,7 +156,7 @@ impl Simulator {
             if step % spf == 0 {
                 frames_generated += 1;
                 if cfg.sim.sensors {
-                    let frame = sensor.measure(
+                    let mut frame = sensor.measure(
                         (step / spf) as u16,
                         t,
                         &state,
@@ -140,6 +167,14 @@ impl Simulator {
                         wind.gust_active_step(step),
                         wind.shear_active(state.pos()[2]),
                     );
+                    frame.physics = PhysicsFeatures::from_state(
+                        &state,
+                        w,
+                        air,
+                        &vehicle,
+                        frame.accel,
+                    )
+                    .as_array();
                     let target = optimizer.solve(&state, w, &vehicle, phase, &frame);
                     if !frame.ai_input_valid() {
                         invalid_frames += 1;
@@ -186,8 +221,11 @@ impl Simulator {
             gust_start_s: gust_info.map(|g| g.0),
             gust_duration_s: gust_info.map(|g| g.1).unwrap_or(0.0),
             gust_amplitude: gust_info.map(|g| g.2).unwrap_or(0.0),
-            v_10: cfg.wind.v_10,
-            shear_delta: cfg.wind.shear_delta,
+            v_10: wind.v_10(),
+            shear_delta: wind.shear_delta(),
+            scenario_id: sc.id,
+            split: sc.split,
+            conditioning,
         };
         Ok(Episode {
             meta,

@@ -8,8 +8,9 @@ use thiserror::Error;
 
 use potok_sim::{
     episode::Episode,
+    scenario::{scenario, Split},
     validation::{write_validation, FILE_NAME},
-    Config, OutputMode, Simulator,
+    Config, OutputMode, Simulator, PHYSICS_FEATURES,
 };
 
 #[derive(Debug, Parser)]
@@ -33,6 +34,19 @@ struct Args {
     /// Generate episodes serially instead of rayon-batching for validation.
     #[arg(long)]
     serial: bool,
+    /// Keep only one side of the withheld-scenario split in the validation file.
+    #[arg(long, value_enum, default_value_t = SplitArg::All, value_name = "SPLIT")]
+    split: SplitArg,
+    /// Append the six physics features to the eight default channels (14 total).
+    #[arg(long)]
+    physics_features: bool,
+}
+
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+enum SplitArg {
+    All,
+    Train,
+    HeldOut,
 }
 
 #[derive(Debug, Error)]
@@ -63,6 +77,11 @@ fn run(args: Args) -> Result<(), CliError> {
     if let Some(seed) = args.seed {
         cfg.run.seed = seed;
     }
+    if args.physics_features {
+        cfg.output
+            .features
+            .extend(PHYSICS_FEATURES.iter().map(|s| s.to_string()));
+    }
     cfg.run.episodes = args.episodes;
     let config_path = args
         .config
@@ -80,7 +99,31 @@ fn run(args: Args) -> Result<(), CliError> {
     } else {
         headless(&sim, &cfg, &config_path, args.episodes)
     };
+    let episodes: Vec<Episode> = episodes
+        .into_iter()
+        .filter(|e| match args.split {
+            SplitArg::All => true,
+            SplitArg::Train => scenario(e.meta.index).split == Split::Train,
+            SplitArg::HeldOut => scenario(e.meta.index).split == Split::HeldOut,
+        })
+        .collect();
+    println!(
+        "split={} kept={}/{}",
+        args.split.as_str(),
+        episodes.len(),
+        args.episodes
+    );
     write_if_requested(&args, &cfg, &episodes)
+}
+
+impl SplitArg {
+    fn as_str(self) -> &'static str {
+        match self {
+            SplitArg::All => "all",
+            SplitArg::Train => "train",
+            SplitArg::HeldOut => "held-out",
+        }
+    }
 }
 
 fn headless(sim: &Simulator, cfg: &Config, config_path: &str, count: usize) -> Vec<Episode> {

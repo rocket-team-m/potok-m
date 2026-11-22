@@ -5,6 +5,10 @@ recurrent blocks of width 64 keep one hidden state each between calls; their
 weights are shared across the 1..3 refinement iterations of a single tick.
 The quantisation primitives are reused from ``model.py`` so an export stores
 the same ternary codes plus fp32 scales as the windowed teacher.
+
+For SPEC_SMART.md the frame is 20 floats: 14 physics features followed by
+6 vehicle-conditioning numbers (concatenated into the stem input). The export
+header records the full width, so an edge reader sees 20 instead of 10.
 """
 
 from __future__ import annotations
@@ -19,8 +23,27 @@ from .model import TSCTLinear, ternary_codes
 SENSOR_FEATURES = 8
 PHASE_INDEX = 8
 FLAGS_INDEX = 9
-FRAME_FEATURES = 10
+FRAME_FEATURES = 10  # legacy: 8 sensors + phase + flags
+PHYSICS_FEATURES = 14  # smart: 8 raw + 6 physics features
+COND_FEATURES = 6  # mass, area, cd0, static margin, thrust, gyro noise
+SMART_FRAME_FEATURES = PHYSICS_FEATURES + COND_FEATURES  # 20
 MAX_LOOPS = 3
+
+
+def smart_student_config(seed: int = 0, **overrides) -> StudentConfig:
+    """SPEC_SMART.md small model: 2 blocks, width 64, 2 loops, decay 0.8."""
+    settings = {
+        "in_features": SMART_FRAME_FEATURES,
+        "width": 64,
+        "out_features": 2,
+        "rank": 16,
+        "n_blocks": 2,
+        "loops": 2,
+        "decay": 0.8,
+        "seed": seed,
+    }
+    settings.update(overrides)
+    return StudentConfig(**settings)
 
 
 @dataclass

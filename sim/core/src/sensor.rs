@@ -48,6 +48,8 @@ pub struct Frame {
     pub shear: bool,
     pub saturated: bool,
     pub pitot_valid: bool,
+    /// Six physics features from the RK4 state; no wire representation.
+    pub physics: [f32; 6],
 }
 
 impl Frame {
@@ -117,6 +119,7 @@ impl Frame {
             shear: false,
             saturated: proto::flag_has(wire.flags, FLAG_FAULT),
             pitot_valid: proto::flag_has(wire.flags, FLAG_PITOT_OK),
+            physics: [0.0; 6],
         };
         f.crc = f.compute_crc();
         Ok(f)
@@ -185,6 +188,8 @@ impl Sensor {
             bias_scale[i] = 0.8 + 0.4 * rng.gen::<f64>();
             noise_scale[i] = 0.85 + 0.3 * rng.gen::<f64>();
         }
+        let domain = crate::config::sample_domain(cfg, episode);
+        let lag_scale = crate::scenario::scenario(episode).lag_scale;
         let s = &cfg.sensor;
         let mag_world = s.mag_world;
         let mag_bias = [
@@ -192,8 +197,12 @@ impl Sensor {
             s.mag_bias[1] * bias_scale[1],
             s.mag_bias[2] * bias_scale[2],
         ];
+        let mut sensor_cfg = s.clone();
+        sensor_cfg.gyro_noise = domain.gyro_noise;
+        sensor_cfg.accel_noise = domain.accel_noise;
+        sensor_cfg.lag_tau *= lag_scale;
         Self {
-            cfg: s.clone(),
+            cfg: sensor_cfg,
             dt: cfg.run.dt,
             gyro_lag: [0.0; 3],
             accel_lag: [0.0; 3],
@@ -295,6 +304,7 @@ impl Sensor {
             shear,
             saturated,
             pitot_valid,
+            physics: [0.0; 6],
         };
         f.crc = f.compute_crc();
         f
@@ -324,7 +334,8 @@ fn cast3(v: Vec3) -> [f32; 3] {
 /// integer `pitot_dp` wire field (Pa).
 pub const FEATURE_NAMES: &[&str] = &[
     "gyro_x", "gyro_y", "gyro_z", "acc_x", "acc_y", "acc_z", "mag_x", "mag_y", "mag_z", "baro_h",
-    "pitot_q", "pitot_dp",
+    "pitot_q", "pitot_dp", "alpha_deg", "beta_deg", "q_dyn_kpa", "a_lat_resid", "drag_est",
+    "static_margin_cal",
 ];
 
 /// Feature lookup by the names used in `output.features`.
@@ -341,6 +352,12 @@ pub fn feature(frame: &Frame, name: &str) -> Option<f32> {
         "mag_z" => frame.mag[2],
         "baro_h" => frame.height,
         "pitot_q" | "pitot_dp" => frame.pitot_dp as f32,
+        "alpha_deg" => frame.physics[0],
+        "beta_deg" => frame.physics[1],
+        "q_dyn_kpa" => frame.physics[2],
+        "a_lat_resid" => frame.physics[3],
+        "drag_est" => frame.physics[4],
+        "static_margin_cal" => frame.physics[5],
         _ => return None,
     })
 }

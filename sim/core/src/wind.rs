@@ -32,12 +32,24 @@ pub struct Wind {
 
 impl Wind {
     pub fn new(cfg: &Config, episode: u64) -> Self {
-        let w = &cfg.wind;
+        // Scenario cells are authoritative: withheld cells combine envelope
+        // extremes that never appear together in a training cell.
+        let sc = crate::scenario::scenario(episode);
+        let mut wind_cfg = cfg.wind.clone();
+        wind_cfg.v_10 = cfg.wind.v_10_range.sample(sc.v10_u);
+        wind_cfg.gust_amplitude = if sc.gust_u > 0.0 {
+            cfg.wind.gust_amplitude_range.sample(sc.gust_u)
+        } else {
+            0.0
+        };
+        wind_cfg.shear_delta = cfg.wind.shear_delta_range.sample(sc.shear_u);
+        wind_cfg.shear_altitude = cfg.wind.shear_altitude_range.sample(sc.shear_alt_u);
+        let w = &wind_cfg;
         let mut rng = StdRng::seed_from_u64(episode_seed(cfg.run.seed, episode ^ 0x57494E44));
         let theta = w.direction_deg.to_radians();
         let dir = [theta.cos(), theta.sin(), 0.0];
         let v_ref = w.v_10.abs().max(2.0);
-        let gust = if rng.gen::<f64>() < w.gust_probability {
+        let gust = if sc.gust_u > 0.0 {
             let t0 = cfg.run.duration_s * (0.08 + 0.55 * rng.gen::<f64>());
             Some((t0, w.gust_duration))
         } else {
@@ -88,7 +100,7 @@ impl Wind {
         }
 
         Self {
-            cfg: w.clone(),
+            cfg: wind_cfg,
             dir,
             gust_field,
             gust_active,
@@ -121,6 +133,15 @@ impl Wind {
 
     pub fn gust_info(&self) -> Option<(f64, f64, f64)> {
         self.gust.map(|(t0, d)| (t0, d, self.cfg.gust_amplitude))
+    }
+
+    /// Effective (scenario-selected) wind parameters used by this episode.
+    pub fn v_10(&self) -> f64 {
+        self.cfg.v_10
+    }
+
+    pub fn shear_delta(&self) -> f64 {
+        self.cfg.shear_delta
     }
 
     pub fn v_ref(&self) -> f64 {

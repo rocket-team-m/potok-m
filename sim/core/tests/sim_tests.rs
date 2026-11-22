@@ -5,7 +5,10 @@ use potok_sim::{
     dynamics::{derivative, Phase, State, Vehicle},
     math::{episode_seed, lerp_table},
     sensor::{gating, wire_flags, FLAG_AI_READY, FLAG_FAULT, FLAG_MOTOR_ARMED},
-    validation::{read_validation, write_validation, Header, FILE_NAME, HEADER_SIZE, TARGET_COUNT},
+    validation::{
+        read_validation, write_validation, Header, FILE_NAME, HEADER_SIZE, META_V2, TARGET_COUNT,
+        VERSION,
+    },
     Frame, Simulator,
 };
 
@@ -191,11 +194,15 @@ fn validation_file_roundtrip() {
     write_validation(&path, &cfg, &episodes).unwrap();
     let raw = std::fs::read(&path).unwrap();
     assert_eq!(&raw[..8], b"POTOKSIM");
-    assert!(raw[48..HEADER_SIZE].iter().all(|b| *b == 0));
+    assert_eq!(u32::from_le_bytes(raw[8..12].try_into().unwrap()), VERSION);
+    assert_eq!(u32::from_le_bytes(raw[48..52].try_into().unwrap()), META_V2 as u32);
+    assert!(raw[52..HEADER_SIZE].iter().all(|b| *b == 0));
     let per_episode =
-        8 + 9 * 4 + cfg.frames_per_episode() * (cfg.feature_count() + TARGET_COUNT) * 4;
+        8 + META_V2 * 4 + cfg.frames_per_episode() * (cfg.feature_count() + TARGET_COUNT) * 4;
     assert_eq!(raw.len(), HEADER_SIZE + 2 * per_episode);
     let rs = read_validation(&path).unwrap();
+    assert_eq!(rs.version, VERSION);
+    assert_eq!(rs.header.meta_count as usize, META_V2);
     assert_eq!(rs.header.seed, cfg.run.seed);
     assert_eq!(rs.header.episode_count, 2);
     assert_eq!(
@@ -206,6 +213,9 @@ fn validation_file_roundtrip() {
     assert_eq!(rs.header.target_count as usize, TARGET_COUNT);
     assert_eq!(rs.episodes.len(), 2);
     for (src, dst) in episodes.iter().zip(rs.episodes.iter()) {
+        assert_eq!(dst.conditioning, src.meta.conditioning);
+        assert_eq!(dst.scenario_id, src.meta.scenario_id);
+        assert_eq!(dst.split, src.meta.split);
         assert_eq!(src.features.len(), dst.features.len());
         assert_eq!(dst.features[[0, 0]], src.features[0]);
         assert_eq!(
@@ -351,6 +361,7 @@ fn canonical_golden_request_is_byte_identical() {
         shear: false,
         saturated: false,
         pitot_valid: true,
+        physics: [0.0; 6],
     };
     let hex: String = f.to_bytes().iter().map(|b| format!("{b:02x}")).collect();
     assert_eq!(hex, GOLDEN);

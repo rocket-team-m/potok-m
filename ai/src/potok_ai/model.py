@@ -255,3 +255,110 @@ class PotokModel(nn.Module):
 
 def count_parameters(model: nn.Module) -> int:
     return sum(p.numel() for p in model.parameters())
+
+
+# ---------------------------------------------------------------------------
+# Smart teacher (SPEC_SMART.md): physics features + vehicle conditioning
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class SmartConfig:
+    """Big teacher: 14-frame features, 6 conditioning numbers, 4 layers, 2 loops."""
+
+    in_features: int = 14  # 8 raw telemetry + 6 physics features
+    cond_features: int = 6  # mass, area, cd0, static margin, thrust, gyro noise
+    width: int = 128
+    rank: int = 64
+    kernel: int = 3
+    dilations: tuple[int, ...] = (1, 2, 4, 8)
+    loops: int = 2
+    out_features: int = 3  # g_roll, g_pitch, confidence
+    g_max: float = 1.0
+    jepa_weight: float = 0.05
+    mtp_weight: float = 0.02
+    mtp_k: int = 3
+    ema_momentum: float = 0.999
+    ternary: bool = True
+    act4bit: bool = True
+
+
+class SmartTeacher(nn.Module):
+    """Windowed causal TCN with two weight-shared loop passes and AttnRes.
+
+    Conditioning choice: **FiLM**. The six vehicle numbers are constant for a
+    whole flight, so a small MLP maps them to a per-channel scale and bias on
+    every frame of the stem output. A global-token concatenation was rejected:
+    a token inserted at frame 0 would let the residual stack attenuate it away,
+    while FiLM reaches every timestep for the cost of two width-sized vectors.
+    The two passes reuse the *same* ``blocks`` module list (weight sharing);
+    a learned query scores content keys of both loop outputs and a softmax
+    allocates the mixture (AttnRes-style).
+    """
+
+    def __init__(self, cfg: SmartConfig | None = None) -> None:
+        super().__init__()
+        self.cfg = cfg or SmartConfig()
+        c = self.cfg
+        if c.in_features < 1 or c.cond_features < 1 or c.loops < 1:
+            raise ValueError("feature counts and loop count must be positive")
+        if c.width < 1 or c.width & (c.width - 1):
+            raise ValueError("teacher width must be a power of two for Hadamard activations")
+
+        self.stem = nn.Conv1d(c.in_features, c.width, 1)
+        self.film = nn.Sequential(
+            nn.Linear(c.cond_features, 2 * c.width),
+            nn.SiLU(),
+            nn.Linear(2 * c.width, 2 * c.width),
+        )
+        self.blocks = nn.ModuleList(
+            CausalDSBlock(c.width, d, c.kernel, c.rank, c.ternary, c.act4bit)
+            for d in c.dilations
+        )
+        self.norm = nn.LayerNorm(c.width)
+        self.key = nn.Linear(c.width, c.width, bias=False)
+        self.query = nn.Parameter(torch.empty(c.width))
+        self.mtp_head = nn.Linear(c.width, c.mtp_k * c.in_features)
+        self.head = nn.Linear(c.width, c.out_features)
+        self.last_alloc: torch.Tensor | None = None
+        nn.init.normal_(self.query, std=c.width**-0.5)
+
+    def forward_features(self, window: torch.Tensor, cond: torch.Tensor | None = None) -> torch.Tensor:
+        """Return the allocated per-frame latent ``(B, T, width)``."""
+        if window.ndim != 3 or window.shape[-1] != self.cfg.in_features:
+            raise ValueError(f"expected a window of shape (batch, time, {self.cfg.in_features})")
+        if cond is None:
+            cond = torch.zeros(
+                window.shape[0], self.cfg.cond_features, device=window.device, dtype=window.dtype
+            )
+        if cond.shape != (window.shape[0], self.cfg.cond_features):
+            raise ValueError(f"conditioning must have shape (batch, {self.cfg.cond_features})")
+
+        h = self.stem(window.transpose(1, 2)).transpose(1, 2)
+        gamma, beta = self.film(cond).chunk(2, dim=-1)
+        h = h * gamma.unsqueeze(1) + beta.unsqueeze(1)
+
+        outputs: list[torch.Tensor] = []
+        z = h
+        for _ in range(self.cfg.loops):
+            for block in self.blocks:
+                z = block(z)
+            outputs.append(z)
+
+        keys = torch.stack([self.key(output[:, -1]) for output in outputs], dim=1)
+        scores = (keys * self.query.view(1, 1, -1)).sum(-1) / (self.cfg.width**0.5)
+        weights = torch.softmax(scores, dim=-1)
+        self.last_alloc = weights.detach()
+        pooled = sum(weights[:, index].view(-1, 1, 1) * out for index, out in enumerate(outputs))
+        return self.norm(pooled)
+
+    def head_from_latent(self, latent: torch.Tensor) -> torch.Tensor:
+        """Apply the readout to a latent from ``forward_features`` (no second pass)."""
+        raw = self.head(latent[:, -1])
+        corrections = torch.tanh(raw[:, :2]) * self.cfg.g_max
+        confidence = torch.sigmoid(raw[:, 2:3])
+        return torch.cat([corrections, confidence], dim=-1)
+
+    def forward(self, window: torch.Tensor, cond: torch.Tensor | None = None) -> torch.Tensor:
+        """Map ``(B, T, 14)`` plus ``(B, 6)`` to bounded corrections and confidence."""
+        return self.head_from_latent(self.forward_features(window, cond))
