@@ -60,7 +60,7 @@ class FilterConfig:
 
     # Гейты.
     accel_gate_g: float = 0.35  # допустимое отклонение |a| от g в долях g
-    baro_dynamic_scale: float = 30.0  # множитель R_baro при q/p ≈ 0,4 (240 м/с, 3 км)
+    baro_dynamic_scale: float = 30.0  # множитель R_baro при q/p ≈ 0,2–0,26 (170–200 м/с, 3 км)
 
 
 @dataclass
