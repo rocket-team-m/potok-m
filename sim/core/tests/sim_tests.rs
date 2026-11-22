@@ -292,7 +292,7 @@ fn defaults_match_real_vehicle_ttx() {
         v.propellant_mass()
     );
     assert!(
-        v.burn_end() >= 9.7 && v.burn_end() <= 9.8,
+        v.burn_end() >= 9.9 && v.burn_end() <= 10.0,
         "burn_end {}",
         v.burn_end()
     );

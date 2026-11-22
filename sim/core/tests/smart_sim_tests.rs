@@ -45,7 +45,7 @@ fn physics_features_are_finite_and_bounded() {
                 assert!((0.0..100.0).contains(&p[2]), "qdyn {}", p[2]);
                 assert!((0.0..1000.0).contains(&p[3]), "a_lat_resid {}", p[3]);
                 assert!((0.0..1000.0).contains(&p[4]), "drag_est {}", p[4]);
-                assert!((0.5..1.5).contains(&p[5]), "margin_cal {}", p[5]);
+                assert!((0.4..0.9).contains(&p[5]), "margin_cal {}", p[5]);
                 nonzero |= p[0].abs() > 1e-6 || p[1].abs() > 1e-6;
             }
             assert!(
@@ -80,11 +80,11 @@ fn domain_randomization_stays_within_tolerances() {
         let c = e.meta.conditioning;
         assert!((10.4..=11.4).contains(&(c.mass_kg as f64)));
         assert!((0.94..=1.06).contains(&e.meta.thrust_scale));
-        assert!((0.30..=0.40).contains(&(c.cd0 as f64)));
-        assert!((0.85..=1.10).contains(&(c.static_margin_cal as f64)));
+        assert!((0.29..=0.31).contains(&(c.cd0 as f64)));
+        assert!((0.60..=0.70).contains(&(c.static_margin_cal as f64)));
         assert!((0.0010..=0.0020).contains(&(c.gyro_noise as f64)));
         assert!((c.area_m2 - 0.011).abs() < 1e-9);
-        assert!((c.thrust_peak_n - 590.0).abs() < 1e-6);
+        assert!((c.thrust_peak_n - 610.0).abs() < 1e-6);
         assert!((0.0..=15.0).contains(&e.meta.v_10));
         assert!((0.0..=8.0).contains(&e.meta.shear_delta));
         if e.meta.gust_amplitude > 0.0 {
@@ -218,9 +218,9 @@ fn validation_v2_roundtrip_carries_conditioning_and_split() {
         Conditioning {
             mass_kg: episodes[0].meta.conditioning.mass_kg,
             area_m2: 0.011,
-            cd0: 0.4,
+            cd0: 0.3,
             static_margin_cal: (0.0765 / (2.0 * (0.011_f64 / std::f64::consts::PI).sqrt())) as f32,
-            thrust_peak_n: 590.0,
+            thrust_peak_n: 610.0,
             gyro_noise: 0.0015,
         }
     );

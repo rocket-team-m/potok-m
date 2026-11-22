@@ -6,6 +6,7 @@
 //! See README.md for the model binary layout and the protocol mapping.
 
 pub mod baseline;
+pub mod calibration;
 pub mod fixture;
 pub mod format_v2;
 pub mod frame;
@@ -17,6 +18,7 @@ pub mod speculative;
 pub mod student_runtime;
 pub mod uart;
 
+pub use calibration::{Calibration, CalibrationError, FALLBACK_THRESHOLD};
 pub use format_v2::{ModelV2, V2Error};
 pub use frame::{FrameError, FrameLayout, ReplyFrame, RequestFrame};
 pub use lowlat::LowlatLayout;

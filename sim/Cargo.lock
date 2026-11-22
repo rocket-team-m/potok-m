@@ -1082,6 +1082,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "potok-or-parity"
+version = "0.1.0"
+dependencies = [
+ "potok-sim",
+]
+
+[[package]]
 name = "potok-protocol"
 version = "0.1.0"
 

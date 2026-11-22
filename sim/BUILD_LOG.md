@@ -240,3 +240,77 @@ What changed:
 Skipped: CFD convergence grid (needs an external solver), bicubic (bilinear
 meets the spec and is exact at nodes), and AI/edge reader changes (outside
 `sim/`).
+
+## OpenRocket Simulation 9 parity oracle (22.11.2026)
+
+Exact source: `/home/sehaxe/Downloads/Telegram Desktop/гугугага.ork`
+(ZIP → `rocket.ork`; `<simulations><simulation><name>Simulation 9</name>`,
+databranch `Маршевая ступень`, `optimumAltitude=3127.362628772149`,
+`timeToOptimumAltitude=26.9`). The fixture
+`tests/fixtures/or_sim9.csv` holds 55 rows on the 0.5 s grid (nearest OR
+datapoint, |Δt| ≤ 0.015 s; final row is the exact 26.9 s apogee point) with
+the eight requested columns. Source column indices in the OR `types` list:
+time 0, altitude 1, total speed 4, mass 21, thrust 29, drag 31, Mach 50,
+axial Cd 35.
+
+Wiring: `sim/tests/` is now a small workspace member (`potok-or-parity`) so
+`sim/tests/or_parity_tests.rs` actually runs under `cargo test --offline`;
+a bare `sim/tests/*.rs` would be invisible to a virtual workspace.
+
+### Drag law — PASS (uses OR's own cd_axial, A = 0.011)
+
+`F = 0.5·rho·v²·A·cd_axial`, with rho from our atmosphere at the OR altitude:
+
+| t (s) | rho (kg/m³) | v (m/s) | cd_axial | F_calc (N) | F_OR (N) | err |
+|---|---|---|---|---|---|---|
+| 5  | 1.1850 | 166.805 | 0.402 | 72.898  | 72.169  | 1.01% |
+| 10 | 1.0768 | 245.267 | 0.394 | 140.372 | 137.618 | 2.00% |
+| 15 | 0.9873 | 134.625 | 0.319 | 31.394  | 30.702  | 2.26% |
+| 20 | 0.9399 | 70.364  | 0.300 | 7.678   | 7.504   | 2.32% |
+
+OR's `drag_N` is computed with **cd_axial** (index 35), not the total Cd
+(index 32, 0.16–0.24 at those rows): solving the drag law for Cd gives
+0.400 / 0.392 / 0.318 / 0.300, matching cd_axial to ~0.5%.
+
+### Our Cd table vs OR cd_axial — DISCREPANCY, not tuned
+
+`sim_cd = (cd0 − 0.30) + lerp(cd_mach, mach)`; episode 0 samples
+`cd0 = 0.3204`, nominal is `cd0 = 0.40`.
+
+| t (s) | Mach | OR cd_axial | sim cd0=0.40 | sim cd0=0.3204 (ep 0) |
+|---|---|---|---|---|
+| 5  | 0.493 | 0.402 | 0.4417 (+9.9%)  | 0.3621 (−9.9%) |
+| 10 | 0.733 | 0.394 | 0.4917 (+24.8%) | 0.4120 (+4.6%) |
+| 15 | 0.407 | 0.319 | 0.4216 (+32.2%) | 0.3420 (+7.2%) |
+| 20 | 0.215 | 0.300 | 0.4108 (+36.9%) | 0.3311 (+10.4%) |
+
+The placeholder `cd_mach` table does not reproduce OR's axial-Cd curve;
+at nominal cd0 it is 10–37% high. This is reported, not tuned.
+
+### Episode 0 parity — FAIL (the "<1% OR match" claim does not hold here)
+
+`Config::default()`, seed 1337, episode 0; altitude from `Frame.height`
+(no speed field in `Frame`, so per-instant speed is NOT compared — only
+`Episode.max_speed_mps` / `apogee_m`; `pitot_dp` is a saturating i16
+dynamic pressure, not a velocity):
+
+| t (s) | OR alt (m) | sim alt (m) | err |
+|---|---|---|---|
+| 5   | 403.240 | 365.000 | 9.48% |
+| 10  | 1476.598 | 1398.012 | 5.32% |
+| 15  | 2388.280 | 2277.347 | 4.64% |
+| 20  | 2891.346 | 2741.033 | 5.20% |
+| 25  | 3110.085 | 2921.056 | 6.08% |
+| 26.9 | 3127.363 | 2923.009 | 6.53% |
+
+apogee: OR 3127.363 m vs sim 2927.149 m → **6.40%** (limit 2%).
+vmax: OR 274.278 m/s (all OR datapoints) vs sim 267.643 m/s → **2.42%**
+(limit 2%). Five of six altitude points and both scalar metrics exceed
+their limits; `episode0_parity_tolerances` fails deliberately so the
+oracle cannot pass while the trajectory is off. The "~276 m/s / ~3116 m,
+within 1%" note above was not reproducible on this code state.
+
+`cargo test --offline --workspace --no-fail-fast`: 36 passed, 1 failed
+(the single parity gate above). All 33 pre-existing tests (4 CLI + 16 sim
++ 6 smart-sim + 7 ideal-loop) remain green; the 3 other new tests
+(fixture sanity, drag law, Cd diagnostic) pass.

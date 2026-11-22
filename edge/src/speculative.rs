@@ -2,7 +2,8 @@
 //! teacher by exception (low confidence / invalid sensors, or every 20 frames).
 //!
 //! Rules from SPEC_STUDENT.md §"Правила dispatch":
-//! 1. student every frame; 2. apply it when confidence >= 0.7 and sensors are
+//! 1. student every frame; 2. apply it when the CALIBRATED confidence meets
+//! the threshold from `calibration.json` (0.7 if no file) and sensors are
 //! valid; 3. otherwise call the teacher on the last 50 frames and apply that;
 //! 4. every 20 frames a forced teacher check compares `|g_t - g_s|` and, above
 //! `3*g_max`, logs an event and re-warms the student from the same window;
@@ -22,7 +23,7 @@ use std::fmt;
 use std::fs;
 use std::path::Path;
 
-pub const DEFAULT_CONFIDENCE_THRESHOLD: f32 = 0.7;
+pub const DEFAULT_CONFIDENCE_THRESHOLD: f32 = crate::calibration::FALLBACK_THRESHOLD;
 pub const DEFAULT_FORCED_CHECK_EVERY: u32 = 20;
 pub const DEFAULT_DIVERGENCE_FACTOR: f32 = 3.0;
 const MAX_EVENTS: usize = 64;
@@ -112,6 +113,9 @@ pub struct SpeculativeRuntime {
 
 impl SpeculativeRuntime {
     pub fn new(teacher: Runtime, student: StudentRuntime) -> Self {
+        // The student owns the calibration map, so the dispatch threshold is
+        // whatever the same held-out fit produced (0.7 with no file).
+        let confidence_threshold = student.calibration().threshold();
         let g_max = teacher.max_correction().max(student.model().g_max);
         let student_features = student.model().in_features;
         let mut window = VecDeque::with_capacity(WINDOW);
@@ -133,7 +137,7 @@ impl SpeculativeRuntime {
             frame_no: 0,
             frames_since_check: 0,
             g_max,
-            confidence_threshold: DEFAULT_CONFIDENCE_THRESHOLD,
+            confidence_threshold,
             forced_check_every: DEFAULT_FORCED_CHECK_EVERY,
             divergence_factor: DEFAULT_DIVERGENCE_FACTOR,
             counters: SpecCounters::default(),
@@ -162,6 +166,25 @@ impl SpeculativeRuntime {
         let model = StudentModel::from_bytes(&student_bytes).map_err(|e| e.to_string())?;
         let teacher = Runtime::load(teacher_path)?;
         Ok(Self::new(teacher, StudentRuntime::new(model)))
+    }
+
+    /// Like [`Self::load`], but attach a `calibration.json`. The file selects
+    /// both the confidence map used by the student and the dispatch threshold.
+    pub fn load_with_calibration(
+        teacher_path: impl AsRef<Path>,
+        student_path: impl AsRef<Path>,
+        calibration_path: impl AsRef<Path>,
+    ) -> Result<Self, String> {
+        let student_bytes =
+            fs::read(student_path.as_ref()).map_err(|e| format!("cannot read student: {e}"))?;
+        if !crate::student_runtime::is_student_file(&student_bytes) {
+            return Err("student path is not a model_kind=2 file".to_owned());
+        }
+        let model = StudentModel::from_bytes(&student_bytes).map_err(|e| e.to_string())?;
+        let student = StudentRuntime::with_calibration_file(model, calibration_path)
+            .map_err(|e| e.to_string())?;
+        let teacher = Runtime::load(teacher_path)?;
+        Ok(Self::new(teacher, student))
     }
 
     pub fn with_policy(mut self, policy: PhasePolicy) -> Self {

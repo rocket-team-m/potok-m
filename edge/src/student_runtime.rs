@@ -45,6 +45,7 @@
 //! by the 6 vehicle-conditioning numbers). `step` accepts any frame up to that
 //! width and zero-pads the tail, matching the Python `_as_frame` helper.
 
+use crate::calibration::{Calibration, CalibrationError, FALLBACK_THRESHOLD};
 use crate::simd::dot;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -489,10 +490,21 @@ pub struct StudentRuntime {
     z: Vec<f32>,
     xpad: Vec<f32>,
     alloc: Vec<f32>,
+    calibration: Calibration,
 }
 
 impl StudentRuntime {
+    /// Backward-compatible constructor: no calibration file means identity
+    /// confidence and the default dispatch threshold. The fallback is LOUD.
     pub fn new(model: StudentModel) -> Self {
+        eprintln!(
+            "potok-edge: calibration: no calibration.json — identity map, threshold {FALLBACK_THRESHOLD}"
+        );
+        Self::with_calibration(model, Calibration::identity())
+    }
+
+    /// Supply an already-loaded calibration map (no I/O, no logging).
+    pub fn with_calibration(model: StudentModel, calibration: Calibration) -> Self {
         let n = model.n_blocks * model.width;
         let mut alloc = vec![0.0f32; model.n_loops];
         let mut max = f32::NEG_INFINITY;
@@ -518,7 +530,23 @@ impl StudentRuntime {
             xpad: vec![0.0; model.in_features],
             alloc,
             model,
+            calibration,
         }
+    }
+
+    /// Load the model and a `calibration.json` together. A missing or bad
+    /// calibration file is a hard error, not a quiet identity fallback.
+    pub fn with_calibration_file(
+        model: StudentModel,
+        path: impl AsRef<Path>,
+    ) -> Result<Self, CalibrationError> {
+        let calibration = Calibration::from_file(path)?;
+        eprintln!(
+            "potok-edge: calibration: loaded {} (threshold {})",
+            calibration.description(),
+            calibration.threshold()
+        );
+        Ok(Self::with_calibration(model, calibration))
     }
 
     pub fn from_file(path: impl AsRef<Path>) -> Result<Self, StudentError> {
@@ -527,6 +555,10 @@ impl StudentRuntime {
 
     pub fn model(&self) -> &StudentModel {
         &self.model
+    }
+
+    pub fn calibration(&self) -> &Calibration {
+        &self.calibration
     }
 
     pub fn reset_state(&mut self) {
@@ -613,7 +645,9 @@ impl StudentRuntime {
             out[k] = out[k].tanh() * self.model.correction_bound;
         }
         let conf = dot(&self.model.head_conf_w[..w], &self.z) + self.model.head_conf_b[0];
-        out[2] = 1.0 / (1.0 + (-conf).exp());
+        // Calibrate the pre-sigmoid scalar: exact for saturated heads, and
+        // identical to Python's confidence after sigmoid when it is not.
+        out[2] = self.calibration.apply_logit(conf);
         out
     }
 

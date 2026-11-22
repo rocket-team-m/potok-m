@@ -346,3 +346,57 @@ reply, CRC and quantize included).
     **168.9 / 260.0 us** (p99 + wire 492.0 us).
   Both stay under the 10 ms dispatch budget; lowlat saves ~17% wire bytes and
   ~2.6x wire time, with essentially the same CPU cost.
+
+## 2026-11-22 — calibration map on the inference side
+
+Landed the reader side of the calibration contract documented in
+`ai/BUILD_LOG.md` (read-only). New `src/calibration.rs`, wired into the
+student and the speculative dispatch. No `ai/`, `sim/`, `protocol/` or
+`docs/` files were touched.
+
+- `Calibration::{from_file, from_json, apply, apply_logit, threshold}`. The
+  runtime uses `apply_logit` on the head's pre-sigmoid scalar, so temperature
+  is exactly Python's `sigmoid(z / T)` even for a saturated head (the case the
+  Python fitter falls back to isotonic for); `apply(raw_sigmoid)` is the
+  probability-facing API and is equivalent only before saturation. Isotonic
+  looks up the PAVA step map by `sigmoid(logit)`. `threshold()` returns the
+  held-out quantile from the same file. `serde`/`serde_json` added (both
+  already in the local registry cache; `--offline` build verified),
+  diagnostics are ignored so future Python fields do not break the reader.
+- `StudentRuntime::new` keeps the old behaviour with a **LOUD** stderr line
+  and an identity map + 0.7 threshold. `with_calibration` (in-memory) and
+  `with_calibration_file` (I/O, hard error on a bad file) are the new seams.
+  `step` applies the map to `out[2]`; the two correction outputs are untouched.
+- `SpeculativeRuntime::new` takes its `confidence_threshold` from the
+  student's calibration, so the file drives the low-confidence branch.
+  `DEFAULT_CONFIDENCE_THRESHOLD` now aliases `calibration::FALLBACK_THRESHOLD`
+  (one source of truth). Added `load_with_calibration(teacher, student,
+  calibration)` for the file-based path. The binary CLIs do not yet expose a
+  `--calibration` flag; `bench_spec` overrides the threshold itself.
+
+### Format finding (record, do not paper over)
+
+`calibration.py::CalibrationResult.as_dict()` writes `method`, `temperature`,
+`threshold`, plus diagnostics (`raw_ece`, `ece`, `temperature_ece`, `coverage`,
+`n`, `loops`, `target_ece`, `model`, `seed`, `config_hash`) — but **no isotonic
+map**. Temperature files load as-is. A file with `method=isotonic` and no map
+is refused with a schema error naming the cause, rather than silently returning
+uncalibrated confidence. The reader accepts the map at top level (`bins` +
+`values`) or nested under `isotonic`, with `n` upper edges or `n+1` edges
+(normalised on load). Whichever shape the Python writer adopts, no invented
+numbers are used here.
+
+### Verification
+
+- `cargo fmt`; `cargo check --all-targets` clean (no warnings).
+- `cargo test --all-targets`: **all green**. New `tests/calibration_test.rs`
+  (6 tests) covers identity fallback, temperature map, isotonic map, threshold
+  driving dispatch, malformed/missing file failing loudly, and no-file
+  backward compatibility; 8 module tests pin the parser, both map forms, and
+  the saturated-logit path.
+  `cargo test --all-targets --release`: all green, including the tight
+  latency tests (real-export low-conf p99 well under 10 ms).
+- The debug-only `real_exports_dispatch_and_report_all_three_paths` p99 budget
+  (10 ms) fails on this shared host at ~10.4-11.3 ms. **Pre-existing**: the
+  same test fails at 11.25 ms on clean HEAD with this change reverted. Release
+  is the authoritative gate for that test and passes.
