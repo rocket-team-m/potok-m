@@ -1,4 +1,4 @@
-# Движок обучения: TCN, LoopWM-lite, LoopWM
+# Движок обучения: LRS-RNN, LoopWM-lite, LoopWM
 
 Статус: черновик. Версия 1.
 
