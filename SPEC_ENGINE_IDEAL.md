@@ -47,3 +47,19 @@
 - Симулятор пишет validation v2.
 - Движок читает v2 и печатает metrics.json.
 - Edge сверяет golden-байты с Python с допуском 1e-5.
+
+## 7. OpenRocket parity gate (22.11.2026)
+
+Рабочий oracle — Simulation 9 из `гугугага.ork`. Fixture:
+`sim/tests/fixtures/or_sim9.csv`. Конфиг без рандомизации:
+`sim/config/or_sim9.toml`.
+
+| Метрика | OR | Наш симулятор | Лимит |
+|---|---|---|---|
+| Апогей | 3127,363 м | 3185,378 м | 2% |
+| Vmax | 274,278 м/с | 278,251 м/с | 2% |
+| Высота в t=5…26,9 с | — | worst 4,95% | 5% |
+| Drag law $F=\frac12\rho v^2 A C_D$ | — | 1–2,3% от OR | 5% |
+
+Gate: `cargo test --workspace -p potok-or-parity`. Тест формально красный,
+если расхождение больше лимита; подгонка коэффициентов под число запрещена.
