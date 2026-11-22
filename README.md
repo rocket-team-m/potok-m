@@ -50,3 +50,7 @@ bun run dev      # http://localhost:4321/potok-m/
 
 - `docs`: `bun run build` → `docs/dist`
 - `ai`: `uv sync && uv run pytest -q`
+
+Собственный код: GPL-3.0-or-later; коммерческая лицензия доступна отдельно. Third-party компоненты сохраняют свои лицензии.
+
+Репозитории: [potok-m](https://github.com/rocket-team-m/potok-m) · [potok-m-ai](https://github.com/rocket-team-m/potok-m-ai) · [potok-m-edge](https://github.com/rocket-team-m/potok-m-edge) · [potok-m-sim](https://github.com/rocket-team-m/potok-m-sim) · [potok-m-protocol](https://github.com/rocket-team-m/potok-m-protocol) · [potok-m-firmware](https://github.com/rocket-team-m/potok-m-firmware) · [potok-m-3d](https://github.com/rocket-team-m/potok-m-3d).
