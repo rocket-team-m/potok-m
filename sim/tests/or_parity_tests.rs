@@ -46,7 +46,10 @@ fn load_or_table() -> Vec<OrRow> {
             .map(|f| f.trim().parse().expect("numeric CSV field"))
             .collect();
         assert_eq!(c.len(), 8, "one row must have 8 columns: {line}");
-        assert!(c.iter().all(|v| v.is_finite()), "non-finite OR sample: {line}");
+        assert!(
+            c.iter().all(|v| v.is_finite()),
+            "non-finite OR sample: {line}"
+        );
         rows.push(OrRow {
             time_s: c[0],
             altitude_m: c[1],
@@ -70,7 +73,11 @@ fn row_at(rows: &[OrRow], t: f64) -> OrRow {
 fn altitude_at(e: &Episode, t: f64) -> f64 {
     let i = (t / FRAME_DT_S).round() as usize;
     assert!(i < e.frames.len(), "frame index {i} out of range at t={t}");
-    assert_eq!(e.frames[i].time_us, (i * 20_000) as u32, "frame time mismatch");
+    assert_eq!(
+        e.frames[i].time_us,
+        (i * 20_000) as u32,
+        "frame time mismatch"
+    );
     e.frames[i].height as f64
 }
 
@@ -87,8 +94,15 @@ fn episode0() -> (Simulator, Episode) {
 #[test]
 fn fixture_covers_or_sim9() {
     let rows = load_or_table();
-    assert_eq!(rows.len(), 55, "54 half-second samples + the 26.9 s apogee row");
-    assert!(rows.windows(2).all(|w| w[1].time_s > w[0].time_s), "times must rise");
+    assert_eq!(
+        rows.len(),
+        55,
+        "54 half-second samples + the 26.9 s apogee row"
+    );
+    assert!(
+        rows.windows(2).all(|w| w[1].time_s > w[0].time_s),
+        "times must rise"
+    );
     let apogee = row_at(&rows, 26.9);
     assert!((apogee.altitude_m - OR_APOGEE_M).abs() < 0.01);
     assert!((apogee.mass_kg - 5.475).abs() < 0.01);
@@ -109,9 +123,17 @@ fn drag_law_with_or_cd_axial_reproduces_or_drag() {
         let err = rel(f, r.drag_n);
         eprintln!(
             "t={t:4.1} rho={rho:.4} v={:7.3} cd_axial={:.4} F_sim={:8.3} F_OR={:8.3} err={:5.2}%",
-            r.speed_mps, r.cd_axial, f, r.drag_n, err * 100.0
+            r.speed_mps,
+            r.cd_axial,
+            f,
+            r.drag_n,
+            err * 100.0
         );
-        assert!(err <= 0.05, "drag law with OR cd_axial missed OR drag at t={t}: {:.2}%", err * 100.0);
+        assert!(
+            err <= 0.05,
+            "drag law with OR cd_axial missed OR drag at t={t}: {:.2}%",
+            err * 100.0
+        );
     }
 }
 
@@ -122,7 +144,10 @@ fn sim_cd_table_vs_or_cd_axial() {
     let cd0_ep0 = sample_domain(&cfg, 0).cd0;
     let rows = load_or_table();
     let cd_base = cfg.aero.cd_mach.first().unwrap().1;
-    eprintln!("sim cd_mach = {:?}; cd0_range = {:?}", cfg.aero.cd_mach, cfg.aero.cd0_range);
+    eprintln!(
+        "sim cd_mach = {:?}; cd0_range = {:?}",
+        cfg.aero.cd_mach, cfg.aero.cd0_range
+    );
     eprintln!("episode 0 sampled cd0 = {cd0_ep0:.4}");
     for t in DRAG_TIMES {
         let r = row_at(&rows, t);
@@ -152,13 +177,21 @@ fn episode0_parity_tolerances() {
         let alt = altitude_at(&e, t);
         eprintln!(
             "{t:6.1} {:10.3} {alt:11.3} {:9.2}% | {:9.3}     (no per-frame speed)",
-            or.altitude_m, rel(alt, or.altitude_m) * 100.0, or.speed_mps
+            or.altitude_m,
+            rel(alt, or.altitude_m) * 100.0,
+            or.speed_mps
         );
     }
     let ap_err = rel(e.apogee_m, OR_APOGEE_M) * 100.0;
     let v_err = rel(e.max_speed_mps, OR_VMAX_MPS) * 100.0;
-    eprintln!("apogee: OR {OR_APOGEE_M:.3} m, sim {:.3} m, err {ap_err:.2}% (limit 2%)", e.apogee_m);
-    eprintln!("vmax:   OR {OR_VMAX_MPS:.3} m/s, sim {:.3} m/s, err {v_err:.2}% (limit 2%)", e.max_speed_mps);
+    eprintln!(
+        "apogee: OR {OR_APOGEE_M:.3} m, sim {:.3} m, err {ap_err:.2}% (limit 2%)",
+        e.apogee_m
+    );
+    eprintln!(
+        "vmax:   OR {OR_VMAX_MPS:.3} m/s, sim {:.3} m/s, err {v_err:.2}% (limit 2%)",
+        e.max_speed_mps
+    );
 
     let mut worst_alt = 0.0_f64;
     let mut worst_t = 0.0_f64;
@@ -168,9 +201,16 @@ fn episode0_parity_tolerances() {
             worst_alt = err;
             worst_t = t;
         }
-        assert!(err <= 0.05, "altitude at t={t}: err {:.2}% > 5%", err * 100.0);
+        assert!(
+            err <= 0.05,
+            "altitude at t={t}: err {:.2}% > 5%",
+            err * 100.0
+        );
     }
-    eprintln!("worst altitude error: {:.2}% at t={worst_t}", worst_alt * 100.0);
+    eprintln!(
+        "worst altitude error: {:.2}% at t={worst_t}",
+        worst_alt * 100.0
+    );
     for t in [5.0_f64, 10.0] {
         let i = (t / 0.02).round() as usize;
         if i > 0 && i + 1 < e.frames.len() {
@@ -178,7 +218,12 @@ fn episode0_parity_tolerances() {
             eprintln!("t={t} sim vh={vh:.1} h={:.1}", e.frames[i].height);
         }
     }
-    assert!(rel(e.apogee_m, OR_APOGEE_M) <= 0.02, "apogee err {ap_err:.2}% > 2%");
-    assert!(rel(e.max_speed_mps, OR_VMAX_MPS) <= 0.02, "vmax err {v_err:.2}% > 2%");
+    assert!(
+        rel(e.apogee_m, OR_APOGEE_M) <= 0.02,
+        "apogee err {ap_err:.2}% > 2%"
+    );
+    assert!(
+        rel(e.max_speed_mps, OR_VMAX_MPS) <= 0.02,
+        "vmax err {v_err:.2}% > 2%"
+    );
 }
-
