@@ -7,7 +7,7 @@ Date: 2026-11-22. CPU-only work; no GPU jobs, no pushes.
 | command | result |
 |---|---|
 | `uv sync` | Resolved 20 packages; installed `torch==2.15.0+cpu` from `download.pytorch.org/whl/cpu`. No CUDA wheels. |
-| `uv run pytest -q` | `26 passed in 2.96s` |
+| `uv run pytest -q` | `26 passed in 2.96s` initially; `37 passed in 4.89s` after the student work |
 | `uv run ruff check src tests` | `All checks passed!` |
 | `uv run python benchmark.py --stage train --steps 10` | `params=87875 ms_per_step=68.02 frames_per_s=5881` (width 128, rank 64, batch 8, seq 50) |
 | `uv run python benchmark.py --stage forward --steps 10` | `params=87875 ms_per_step=31.80 frames_per_s=12579` |
@@ -98,6 +98,45 @@ rejection, and one tiny CPU step in each stage.
   fixtures. `tests/test_sim_validation.py` packs a handcrafted validation file
   and checks header, shapes, index, metadata, and target values; all existing
   tests stay green.
+
+## Stateful student (SPEC_STUDENT.md v1)
+
+- `src/potok_ai/student.py` — `StatefulTCN` (defaults: 2 blocks, width 64,
+  rank 16, 10-value frame = 8 sensors + phase + flags), one frame per `step`,
+  persistent `h` per block. Each block is `tanh(W_h h + W_x x)` followed by a
+  ternary `TSCTLinear` reused from `model.py`. A tick applies the shared blocks
+  1..3 times, mixing loop outputs with `0.8^i` and a learned softmax allocation
+  (`alloc_logits`, AttnRes-style). Head: `g_max·tanh(linear(h))` (two bounded
+  corrections, `g_max = tanh(raw)` with `raw` exported) and
+  `sigmoid(linear_conf(h))`. `reset_state()`, `step(frame)`, `warmup(window)`;
+  all parameters are seeded from a local `torch.Generator`, so global RNG state
+  cannot affect the model. The incoming state is cloned before use: writing it
+  back in place otherwise invalidates tensors saved by autograd (caught by the
+  tiny distillation test).
+- `src/potok_ai/distill_student.py` — CLI with `--teacher-checkpoint --data
+  --out --epochs --seed --device cpu` (plus `--window --loops --lr
+  --conf-weight --conf-temp --limit`). Loads the teacher from a torch checkpoint
+  or a v2 export, scores every 50-frame window, and trains the student at the
+  window's last frame: MSE to `g_teacher` plus MSE of confidence to
+  `exp(-|g_teacher - g_student| / conf_temp)`. State resets at each episode and
+  on a phase-code change (column 8 if present); invalid flags skip the update.
+  Writes a torch checkpoint to `--out` and the binary export to `out.with_suffix(".bin")`.
+- `export.py` — `export_student()` / `load_student_export()` and
+  `ExportedStudent.to_model()`. Header: magic, version 2, `model_kind = 2`,
+  then in_features/width/out_features/rank/n_blocks/n_loops/decay/g_max/flags/
+  n_layers, the same layer records and SHA256 trailer as the teacher format.
+  The teacher's existing header is untouched (kind 1 is still implied by the
+  absence of a `model_kind` field — changing it would break the fixture and the
+  `edge/` reader); student files are rejected by the teacher loader's kind
+  check and vice versa. Exported U/V are effective ternary codes × alpha, so
+  `to_model()` builds with `ternary=False` for a bit-comparable forward.
+- New `tests/test_student.py`: state reset, seed determinism under two different
+  global seeds, 1500-step bounded drift (|h| ≤ 1, finite bounded outputs),
+  export/load round-trip plus tamper and wrong-kind rejection, one tiny CPU
+  distillation step (checkpoint + export written), and phase-change reset.
+- Verification: `uv run pytest -q` → `37 passed`; `uv run ruff check src tests`
+  → clean. `PYTHONPATH=src uv run python -m potok_ai.distill_student --help`
+  exposes the CLI. CPU only; no GPU jobs, no pushes, no files outside `ai/`.
 
 ## Skipped
 

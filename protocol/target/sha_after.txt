@@ -1,3 +1,0 @@
-6d3668a23dd8e0885fe3ca91633666f9f156fccd678d35ce353e8db0204984e2  generated/protocol.h
-cad33929e57bc9f3a8b70d1a604cc669c3271499374f6ef8a9cec5d91bd411dd  generated/protocol.py
-656ddeddd471cb34dd2009678e72238c0fac1c5c63d974ac51e1df3060d448a5  generated/protocol.rs

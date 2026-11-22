@@ -1,1 +1,0 @@
-/home/sehaxe/potok-m/protocol/target/debug/examples/hotpath: /home/sehaxe/potok-m/protocol/potok-protocol/../generated/protocol.rs /home/sehaxe/potok-m/protocol/potok-protocol/examples/hotpath.rs /home/sehaxe/potok-m/protocol/potok-protocol/src/lib.rs

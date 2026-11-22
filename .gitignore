@@ -35,3 +35,6 @@ __pycache__/
 *.gz
 *.mp4
 *.mkv
+
+# Rust build outputs
+target/

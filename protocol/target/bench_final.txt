@@ -1,9 +1,0 @@
-iters=1000000 reps=5 (min duration reported)
-crc16 bitwise (before)            150.0 ns/frame      360.11 MB/s
-crc16 slicing-by-4                 87.2 ns/frame      618.92 MB/s
-request encode                     75.3 ns/frame      743.88 MB/s
-request decode                     81.2 ns/frame      689.99 MB/s
-reply encode                       10.0 ns/frame     1406.20 MB/s
-reply decode                        9.2 ns/frame     1518.22 MB/s
-request encode+decode+crc         160.0 ns/frame      700.17 MB/s
-reply encode+decode+crc            23.3 ns/frame     1199.25 MB/s
