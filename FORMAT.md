@@ -23,7 +23,7 @@ recompute it and refuse the file on mismatch.
 |---:|---|---|---|
 | 0 | 8 bytes | magic | `POTOKM1\0` = `50 4F 54 4F 4B 4D 31 00` |
 | 8 | u32 | version | `2` |
-| 12 | u32 | `in_features` | 8 in the shipped fixtures |
+| 12 | u32 | `in_features` | 8 in the teacher fixture; 10 for a legacy student (8 sensors + phase + flags); 20 for a smart student (14 physics features + 6 conditioning numbers) |
 | 16 | u32 | `width` | channel width of the TCN |
 | 20 | u32 | `out_features` | 3 (pitch, yaw, confidence) |
 | 24 | u32 | `rank` | TSCT rank |
@@ -160,3 +160,36 @@ distillation reference.
 anything else falls back to the older `POTOK1\0\0` fixture format or a bare
 float32 array. `tests/test_sim_validation.py` packs a tiny validation file with
 Python `struct` and checks shapes, metadata, and target values.
+
+## Smart validation input (`POTOKSIM` version 2, SPEC_SMART.md)
+
+This is the format actually written by `potok_sim::validation` (commit with
+the domain-randomization work). The header is still 80 bytes, with `version = 2`
+and bytes 48..52 (the first four reserved bytes) holding `meta_count = 17` as a
+u32; bytes 52..80 stay zero. `feature_count` must be at least 14 and the first
+14 features are used. Every episode is one randomized Potok-M flight inside
+the real tolerances (mass 12.5-13.5 kg, thrust 0.94-1.06 of nominal, CG
++/-0.02 m, Cd0 0.30-0.40, static margin 0.85-1.10 cal, sensor noise, wind
+0-15 m/s, gusts 5-20 m/s and shear layers). There are no other vehicle types.
+Per episode the layout is `u64 index` followed by **17 f32 metadata**:
+
+| index | type | field | meaning |
+|---:|---|---|---|
+| 0..8 | 9 f32 | legacy meta | mass, thrust scale, pitch, yaw, gust start/duration/amplitude, v_10, shear delta |
+| 9..14 | 6 f32 | `conditioning` | `mass_kg, area_m2, cd0, static_margin_cal, thrust_peak_n, gyro_noise` (the order of Rust `Conditioning::as_array`) |
+| 15 | f32 | `scenario_id` | integer wind/gust cell id (0..19 in `sim/core/src/scenario.rs`) |
+| 16 | f32 | `split` | 0 = train, 1 = held-out scenario |
+
+Then `frames x feature_count` f32 features (8 raw channels plus `alpha_deg,
+beta_deg, q_dyn_kpa, a_lat_resid, drag_est, static_margin_cal`) and `frames x 4`
+f32 targets as in v1. `read_validation` exposes these as `Episode.metadata`
+(legacy 9), `Episode.conditioning` (6), `Episode.scenario_id` and
+`Episode.scenario` (`"scenario_16"`), and `Episode.held_out`. A v1 file has no
+conditioning (a zero vector is used), scenario id or split flag and cannot be
+used for the smart CLI. `group_by_scenario` groups by `scenario` string. The
+holdout is always by scenario, never by vehicle.
+
+`train_smart.py` reads the split straight from these flags. The teacher sees a
+`(B, 50, 14)` window plus a `(B, 6)` conditioning batch; the exported smart
+student header carries `in_features = 20` (14 physics features followed by the
+6 conditioning values in every per-frame input). Edge is synced separately.

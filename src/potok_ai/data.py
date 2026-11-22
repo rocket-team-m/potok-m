@@ -1,7 +1,8 @@
 """Episode loaders for Potok-M training data.
 
-Canonical input: the simulator's ``validation.bin`` (``POTOKSIM`` magic), exactly
-as documented in ``sim/README.md`` and written by ``potok_sim::validation``.
+Canonical input: the simulator's ``validation.bin`` (``POTOKSIM`` magic), written
+by ``potok_sim::validation``. Version 1 is the legacy 8-feature / 9-metadata
+layout; version 2 adds conditioning, a wind/gust scenario id and a split flag.
 The older ``POTOK1\\0\\0`` layout and a bare float32 array are still accepted as
 fallbacks for local synthetic fixtures.
 """
@@ -25,7 +26,19 @@ SIM_VERSION = 1
 SIM_TARGETS = 4  # g_roll, g_pitch, confidence, ai_healthy
 # magic, version, seed, count, frames, features, targets, rate, dt, duration, reserved
 SIM_HEADER = struct.Struct("<8sIQ4I3f32s")
-SIM_EPISODE = struct.Struct("<Q9f")  # index + 9 metadata floats
+SIM_EPISODE = struct.Struct("<Q9f")  # index + 9 legacy metadata floats
+
+# SPEC_SMART.md v2, written by potok_sim::validation: the same 80-byte header
+# (with meta_count=17 in reserved bytes 48..52) and per episode 17 metadata
+# floats: the legacy 9, then 6 conditioning numbers, scenario id and split.
+SIM_VERSION_SMART = 2
+SIM_META_V1 = 9
+SIM_META_V2 = 17
+SIM_V2_EPISODE = struct.Struct("<Q17f")  # index + 17 metadata floats
+SMART_FEATURES = 14  # 8 raw telemetry + 6 physics features
+SMART_COND_FEATURES = 6  # mass, area, cd0, static margin, thrust, gyro noise
+SMART_SPLIT_TRAIN = 0
+SMART_SPLIT_HELD_OUT = 1
 
 
 @dataclass
@@ -35,7 +48,12 @@ class Episode:
     frames: np.ndarray  # (T, F) float32
     targets: np.ndarray | None = None  # (T, K) float32, K = 4 for validation sets
     index: int | None = None
-    metadata: np.ndarray | None = None  # (9,) f32: mass, thrust, pitch, yaw, gust...
+    metadata: np.ndarray | None = None  # (9,) f32 legacy, or (6,) conditioning
+    scenario: str | None = None  # wind/gust group, e.g. "scenario_16"
+    scenario_id: int | None = None  # numeric cell id from a v2 validation file
+    conditioning: np.ndarray | None = None  # (6,) f32 vehicle numbers
+    held_out: bool = False  # scenario reserved for the generalisation check
+    source: str | None = None  # file stem, used as a scenario fallback for v1 files
 
 
 @dataclass
@@ -48,6 +66,7 @@ class ValidationHeader:
     frame_rate_hz: float
     dt: float
     duration_s: float
+    version: int = SIM_VERSION
 
 
 @dataclass
@@ -61,28 +80,59 @@ def read_validation(path: str | Path) -> ValidationData:
 
     The header fields and their offsets come from ``sim/README.md``; reading
     them sequentially yields 80 bytes (the README's "76 bytes" undercounts its
-    own 32-byte reserved field). Per episode: u64 index, 9 metadata f32,
-    frames x features f32, then frames x 4 target f32, all row-major.
+    own 32-byte reserved field). Version 1 carries 9 metadata floats and 8
+    features; version 2 (SPEC_SMART.md) carries a scenario name, 6 conditioning
+    numbers, a held-out flag and 14 physics features. Frames and targets are
+    row-major in both.
     """
     raw = Path(path).read_bytes()
     if len(raw) < SIM_HEADER.size:
         raise ValueError("validation file is shorter than its header")
-    magic, version, seed, count, frames, features, targets, rate, dt, duration, _ = (
+    magic, version, seed, count, frames, features, targets, rate, dt, duration, reserved = (
         SIM_HEADER.unpack_from(raw, 0)
     )
-    if magic != SIM_MAGIC or version != SIM_VERSION:
-        raise ValueError("not a version 1 POTOKSIM validation file")
+    if magic != SIM_MAGIC:
+        raise ValueError("not a POTOKSIM validation file")
+    if version not in (SIM_VERSION, SIM_VERSION_SMART):
+        raise ValueError(f"unsupported validation version {version}, expected version 1 or 2")
     if targets != SIM_TARGETS or frames < 1 or features < 1:
         raise ValueError("unsupported validation dimensions")
+    smart = version == SIM_VERSION_SMART
+    if smart:
+        if features < SMART_FEATURES:
+            raise ValueError(f"smart validation needs at least {SMART_FEATURES} features")
+        meta_count = struct.unpack_from("<I", reserved, 0)[0]
+        if meta_count != SIM_META_V2:
+            raise ValueError(f"unsupported metadata count {meta_count}")
+    record = SIM_V2_EPISODE if smart else SIM_EPISODE
 
-    header = ValidationHeader(seed, count, frames, features, targets, rate, dt, duration)
+    header = ValidationHeader(
+        seed, count, frames, features, targets, rate, dt, duration, version=version
+    )
     offset = SIM_HEADER.size
     episodes: list[Episode] = []
     for _ in range(count):
-        if len(raw) < offset + SIM_EPISODE.size:
+        if len(raw) < offset + record.size:
             raise ValueError("validation file truncated at an episode header")
-        index, *metadata = SIM_EPISODE.unpack_from(raw, offset)
-        offset += SIM_EPISODE.size
+        fields = record.unpack_from(raw, offset)
+        offset += record.size
+        index, *meta = fields
+        if smart:
+            metadata = np.asarray(meta[:SIM_META_V1], np.float32)
+            conditioning = np.asarray(meta[SIM_META_V1 : SIM_META_V1 + SMART_COND_FEATURES], np.float32)
+            scenario_value, split = meta[-2], meta[-1]
+            if not float(scenario_value).is_integer() or not 0 <= scenario_value <= 65535:
+                raise ValueError("bad scenario id")
+            if split not in (SMART_SPLIT_TRAIN, SMART_SPLIT_HELD_OUT):
+                raise ValueError("bad split flag")
+            scenario_id = int(scenario_value)
+            scenario = f"scenario_{scenario_id:02d}"
+            held_out = split == SMART_SPLIT_HELD_OUT
+        else:
+            metadata = np.asarray(meta, np.float32)
+            # v1 files have no conditioning; a zero vector says "nominal Potok-M".
+            conditioning = np.zeros(SMART_COND_FEATURES, np.float32)
+            scenario_id, scenario, held_out = None, None, False
         frame_bytes = frames * features * 4
         target_bytes = frames * targets * 4
         if len(raw) < offset + frame_bytes + target_bytes:
@@ -96,7 +146,16 @@ def read_validation(path: str | Path) -> ValidationData:
         ).reshape(frames, targets).copy()
         offset += target_bytes
         episodes.append(
-            Episode(frame_data, target_data, index=index, metadata=np.asarray(metadata, np.float32))
+            Episode(
+                frame_data,
+                target_data,
+                index=index,
+                metadata=metadata,
+                scenario=scenario,
+                scenario_id=scenario_id,
+                conditioning=conditioning,
+                held_out=held_out,
+            )
         )
     if offset != len(raw):
         raise ValueError("trailing bytes in validation file")
@@ -151,11 +210,20 @@ def load_episodes(path: str | Path, n_features: int = 8) -> list[Episode]:
     for file in files:
         with file.open("rb") as handle:
             magic = handle.read(len(SIM_MAGIC))
-        if magic == SIM_MAGIC:
-            episodes.extend(read_validation(file).episodes)
-        else:
-            episodes.append(read_episode(file, n_features))
+        loaded = read_validation(file).episodes if magic == SIM_MAGIC else [read_episode(file, n_features)]
+        for episode in loaded:
+            episode.source = file.stem
+        episodes.extend(loaded)
     return episodes
+
+
+def group_by_scenario(episodes: list[Episode]) -> dict[str, list[Episode]]:
+    """Group episodes by wind/gust scenario; v1 files fall back to the file name."""
+    groups: dict[str, list[Episode]] = {}
+    for episode in episodes:
+        name = episode.scenario or episode.source or "default"
+        groups.setdefault(name, []).append(episode)
+    return groups
 
 
 def make_synthetic_episode(
@@ -219,3 +287,91 @@ def make_synthetic_dataset(
 ) -> WindowDataset:
     episodes = [make_synthetic_episode(seed + i, frames) for i in range(n_episodes)]
     return WindowDataset(episodes, window=window, step=step, limit=limit)
+
+
+def make_smart_episode(
+    seed: int,
+    frames: int = 80,
+    scenario_id: int = 0,
+    conditioning: np.ndarray | None = None,
+    held_out: bool = False,
+) -> Episode:
+    """Deterministic 14-feature Potok-M episode for tests and CLI smoke runs."""
+    rng = np.random.default_rng(seed)
+    raw = rng.normal(0.0, 1.0, (frames, 8)).astype(np.float32)
+    raw[:, 1] += np.sin(np.linspace(0.0, np.pi, frames, dtype=np.float32)) * 2.0
+    physics = np.stack(
+        [
+            raw[:, 2] * 3.0,  # alpha_deg
+            raw[:, 1] * 1.5,  # beta_deg
+            np.abs(raw[:, 0]) + 0.5,  # q_dyn_kpa
+            raw[:, 3] * 0.4,  # a_lat_resid
+            np.abs(raw[:, 0]) * 0.2,  # drag_est
+            np.full(frames, 0.95, np.float32),  # static_margin_cal
+        ],
+        axis=1,
+    ).astype(np.float32)
+    frames_array = np.concatenate([raw, physics], axis=1)
+    targets = np.tanh(frames_array[:, 1:3] * 0.3).astype(np.float32)
+    targets = np.concatenate([targets, np.ones((frames, 2), np.float32)], axis=1)
+    if conditioning is None:
+        conditioning = np.array([13.0, 0.0082, 0.35, 0.95, 3000.0, 0.01], np.float32)
+    legacy_meta = np.array([13.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0], np.float32)
+    return Episode(
+        frames_array,
+        targets,
+        index=seed,
+        metadata=legacy_meta,
+        scenario=f"scenario_{scenario_id:02d}",
+        scenario_id=scenario_id,
+        conditioning=np.asarray(conditioning, np.float32).copy(),
+        held_out=held_out,
+    )
+
+
+class SmartWindowDataset(Dataset):
+    """Sliding windows of 14 features with conditioning and a correction target."""
+
+    def __init__(
+        self,
+        episodes: list[Episode],
+        window: int = 50,
+        step: int = 1,
+        limit: int | None = None,
+    ) -> None:
+        if window < 1:
+            raise ValueError("window must be positive")
+        self.samples: list[tuple[np.ndarray, np.ndarray, np.ndarray]] = []
+        for episode in episodes:
+            if episode.frames.shape[1] < SMART_FEATURES:
+                raise ValueError(
+                    f"smart episodes need {SMART_FEATURES} features, got {episode.frames.shape[1]}"
+                )
+            if episode.conditioning is None:
+                raise ValueError("smart episodes need a conditioning vector")
+            for start in range(0, len(episode.frames) - window + 1, step):
+                target = (
+                    episode.targets[start + window - 1, :2]
+                    if episode.targets is not None
+                    else np.zeros(2, np.float32)
+                )
+                self.samples.append(
+                    (
+                        episode.frames[start : start + window, :SMART_FEATURES],
+                        episode.conditioning,
+                        target,
+                    )
+                )
+        if limit is not None:
+            self.samples = self.samples[:limit]
+
+    def __len__(self) -> int:
+        return len(self.samples)
+
+    def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        window, conditioning, target = self.samples[index]
+        return (
+            torch.from_numpy(np.asarray(window, dtype=np.float32)),
+            torch.from_numpy(np.asarray(conditioning, dtype=np.float32)),
+            torch.from_numpy(np.asarray(target, dtype=np.float32)),
+        )

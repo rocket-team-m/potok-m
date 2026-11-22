@@ -7,8 +7,9 @@ Date: 2026-11-22. CPU-only work; no GPU jobs, no pushes.
 | command | result |
 |---|---|
 | `uv sync` | Resolved 20 packages; installed `torch==2.15.0+cpu` from `download.pytorch.org/whl/cpu`. No CUDA wheels. |
-| `uv run pytest -q` | `26 passed in 2.96s` initially; `37 passed in 4.89s` after the student work |
-| `uv run ruff check src tests` | `All checks passed!` |
+| `uv run pytest -q` | `26 passed in 2.96s` initially; `37 passed in 4.89s` after the student work; `44 passed in 5.45s` after the smart work |
+| `uv run ruff check src tests` | `All checks passed!` (after the smart work) |
+| `PYTHONPATH=src uv run python -m potok_ai.train_smart --data <v2 file> --out /tmp/opencode/smart.pt --epochs 1 --window 12 --batch 2 --limit 4 --eval-limit 4 --width 16 --rank 8` | prints three scenario RMSE rows, `ratio=0.7034 limit=1.25 generalises=yes`, teacher + export paths; CPU only |
 | `uv run python benchmark.py --stage train --steps 10` | `params=87875 ms_per_step=68.02 frames_per_s=5881` (width 128, rank 64, batch 8, seq 50) |
 | `uv run python benchmark.py --stage forward --steps 10` | `params=87875 ms_per_step=31.80 frames_per_s=12579` |
 | `PYTHONPATH=src uv run python -m potok_ai.train --help` | CLI exposes both stages, `--opt`, `--ns-steps`, `--limit` |
@@ -138,9 +139,54 @@ rejection, and one tiny CPU step in each stage.
   → clean. `PYTHONPATH=src uv run python -m potok_ai.distill_student --help`
   exposes the CLI. CPU only; no GPU jobs, no pushes, no files outside `ai/`.
 
+## Smart teacher / scenario holdout (SPEC_SMART.md v1, commit 8894951)
+
+- `model.py` adds `SmartConfig` / `SmartTeacher`: a 50x14 window through a
+  causal TCN (4 layers, width 128, TSCT rank 64, dilations 1/2/4/8), FiLM
+  conditioning from the 6 vehicle numbers, two **weight-shared** passes over
+  the same block stack, and AttnRes-style softmax allocation over the two loop
+  outputs with a learned query and content keys. Head = two bounded corrections
+  plus confidence. Width must be a power of two for the existing Hadamard
+  activation quantiser.
+- **FiLM, not a global token**: the conditioning is constant over a flight, so
+  an MLP to per-channel `(gamma, beta)` reaches every frame directly; a token
+  at frame 0 could be attenuated by the residual stack. Documented on
+  `SmartTeacher`.
+- **Loss**: correction MSE divided by the target's per-column std (a constant
+  predictor scores ~1, so it cannot win), plus JEPA 0.05 and MTP K=3 0.02 as
+  spec constants in `SmartConfig`. JEPA reuses `mask_windows`/`JEPAPredictor`
+  with a locally deep-copied EMA of the teacher; MTP predicts the next 3 frames
+  at every in-window position from the shared latent (one teacher forward per
+  step is reused for correction, JEPA source and MTP source).
+- **Data / split**: `data.py` reads the v2 `POTOKSIM` file that the simulator
+  owner's `write_validation` actually emits: 80-byte header with `meta_count=17`
+  in reserved bytes 48..52, then per episode `u64 index` + 17 f32 (legacy 9,
+  6 conditioning, scenario id, split flag), then 14 features and 4 targets.
+  `group_by_scenario` groups by `"scenario_<id>"`; v1 (8 features, 9 metadata)
+  files still read with a zero conditioning vector but cannot train the smart
+  CLI, which needs 14 features and an explicit held-out scenario. No vehicle
+  names or per-vehicle splits exist: all episodes are randomized Potok-M.
+  The Python reader was aligned with the Rust writer's bytes after that writer
+  landed; the invented interim layout was dropped.
+- `train_smart.py` CLI: `--data DIR_OR_FILE --epochs --seed --device cpu --out`
+  plus sizing/limit overrides. It prints RMSE for the two corrections per
+  scenario and `ratio = mean(held-out RMSE) / mean(train RMSE)` with the 1.25
+  acceptance limit. Distillation trains a `StatefulTCN` from a 20-value frame
+  (14 physics features + 6 conditioning) against the teacher with a small
+  (0.1) weight on the simulation target; it exports v2 `model_kind=2` via the
+  unchanged binary layout. `export.py` and `FORMAT.md` document 10 (legacy)
+  vs 20 (smart) `in_features`. Edge is a separate owner.
+- `tests/test_smart.py` covers the v2 reader and scenario split, loop forward
+  shape/bounds, AttnRes weights summing to one, conditioning changing the
+  output, std-normalised loss, per-scenario RMSE and ratio, a 20-feature
+  student export/load round-trip, and one tiny CPU end-to-end step.
+
 ## Skipped
 
 - No GPU wheels, no A/B runs, no training beyond the tiny CPU smoke steps.
+  The sim owner still has to emit v2 `POTOKSIM` files with real physics
+  features, conditioning and scenario flags before a real 50-frame smoke run
+  can replace the synthetic one; `sim/`, `edge/` and `docs/` were not touched.
 - The simulator's episode writer does not exist yet, so `data.py` defines a magic
   header format plus a tolerant raw-float32 fallback. Align the header with
   `sim/README.md` when that lands.

@@ -4,6 +4,11 @@ All integers are little-endian. The header carries the full architecture so a
 foreign reader never has to guess the causal layout. Ternary factors are stored
 as codes plus their scale; the effective inference weight is ``codes * alpha``
 and must NOT be quantised again.
+
+The v2 kind-2 student header's ``in_features`` is the full per-frame width:
+10 for the legacy frame (8 sensors + phase + flags), 20 for the smart frame
+(14 physics features + 6 vehicle-conditioning values, see SPEC_SMART.md).
+The binary layout is unchanged; the count is read straight from the header.
 """
 
 from __future__ import annotations
@@ -28,6 +33,8 @@ TSCT_LAYER = 1
 FP32_LAYER = 2
 MODEL_KIND_TEACHER = 1
 MODEL_KIND_STUDENT = 2
+LEGACY_STUDENT_FEATURES = 10  # 8 sensors + phase + flags
+SMART_STUDENT_FEATURES = 20  # 14 physics features + 6 conditioning numbers
 
 
 @dataclass
