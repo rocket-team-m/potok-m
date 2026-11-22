@@ -121,7 +121,7 @@ change outside `sim/` was needed.
 ## Real vehicle TTX defaults
 
 `config/default.toml` now uses the user-stated Potok-M values: mass
-12.5–13.5 kg, area 0.00817 m² (D=0.102 m), static margin 0.0976 m (0.957 cal),
+12.5–13.5 kg, area 0.00817 m² (D=0.102 m), static margin 0.0765 m (0.75 cal),
 accel noise 0.011 m/s² (DELTA 1064 µg), gyro noise 0.0015 rad/s. Source table
 and uncertainty notes are in `sim/README.md`.
 
@@ -130,7 +130,7 @@ Two-stage thrust uses the **upper end** of the motor passports' impulse ranges:
 3.2 s / 1.0 kg → 375 N at 0.3125 kg/s (RDK-1000), both below the passport peak
 thrusts. The quoted *average* thrusts (400 / 265 N, lower impulses) were also
 measured: with this mass and Cd=0.35 they give only ~161 m/s and ~1.4 km, so
-they could not meet the earlier 240 m/s / ~3 km TTX (superseded 22.11 by M=0.5–0.6 / ~170–200 m/s). This discrepancy is documented
+they could not meet the speed TTX M=0.5–0.6 / ~170–200 m/s and the ~3 km apogee target. This discrepancy is documented
 in the config and README rather than hidden. Aerodynamic coefficients remain
 explicitly marked placeholders.
 
@@ -194,6 +194,6 @@ new files; no files outside `sim/` were touched here.
 
 ## TTX revision (22.11.2026)
 
-Max speed is now M=0.5–0.6 ± (~170–200 m/s at 3 km) instead of 240 m/s.
+Max speed TTX: M=0.5–0.6 ± (~170–200 m/s at 3 km).
 At the nominal seed the simulator reaches ~203 m/s, so the speed target is met;
 the remaining gap is apogee (~2.4 km vs ~3 km).

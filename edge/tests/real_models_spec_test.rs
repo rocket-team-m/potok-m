@@ -81,9 +81,9 @@ fn real_student_matches_python_reference() {
     // `ai` venv, 2026-11-22, after the leaky-state / total+source update:
     // load_student_export(STUDENT).to_model().step/warmup(frame).
     let cases: [(&str, usize, [f32; 3]); 3] = [
-        ("single", 0, [0.01283988, -0.11056500, 0.81397998]),
-        ("warm3", 3, [0.00487398, -0.10744341, 0.81799018]),
-        ("warm50", 50, [-0.00207486, -0.11013591, 0.81836659]),
+        ("single", 0, [0.01283988, -0.110_565, 0.813_98]),
+        ("warm3", 3, [0.00487398, -0.10744341, 0.817_990_2]),
+        ("warm50", 50, [-0.00207486, -0.11013591, 0.818_366_6]),
     ];
     for (name, warm, expected) in cases {
         let mut student = StudentRuntime::from_file(STUDENT).unwrap();

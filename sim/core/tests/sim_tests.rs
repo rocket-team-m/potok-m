@@ -100,10 +100,10 @@ fn gating_flags_follow_phase_and_sensor_health() {
             gating(f.phase, sensor_ok, f.pitot_valid, f.saturated),
         );
     }
-    assert!(gating(Phase::Boost, true, true, false) == false);
-    assert!(gating(Phase::Coast, true, true, false) == true);
-    assert!(gating(Phase::Coast, false, true, false) == false);
-    assert!(gating(Phase::Coast, true, true, true) == false);
+    assert!(!gating(Phase::Boost, true, true, false));
+    assert!(gating(Phase::Coast, true, true, false));
+    assert!(!gating(Phase::Coast, false, true, false));
+    assert!(!gating(Phase::Coast, true, true, true));
     // Gust/shear have no protocol bit; they stay simulator-side context.
     let e3 = sim().run_episode(3).unwrap();
     if e3.frames.iter().any(|f| f.gust) {
@@ -276,7 +276,7 @@ fn defaults_match_real_vehicle_ttx() {
     assert!((cfg.initial.mass_kg.0 - 12.5).abs() < 1e-9);
     assert!((cfg.initial.mass_kg.1 - 13.5).abs() < 1e-9);
     assert!((cfg.aero.area_m2 - 0.00817).abs() < 1e-9);
-    assert!((cfg.aero.static_margin_m - 0.0976).abs() < 1e-9);
+    assert!((cfg.aero.static_margin_m - 0.0765).abs() < 1e-9);
     assert!((cfg.sensor.accel_noise - 0.011).abs() < 1e-9);
     assert!((cfg.sensor.gyro_noise - 0.0015).abs() < 1e-9);
 

@@ -127,7 +127,7 @@ fn warmup_replays_a_window_exactly() {
     let mut a = student();
     a.warmup(&window);
     let mut b = student();
-    for f in window.chunks_exact(10) {
+    for f in window.as_chunks::<10>().0 {
         b.step(f);
     }
     assert_eq!(a.state(), b.state());

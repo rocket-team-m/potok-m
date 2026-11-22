@@ -197,7 +197,7 @@ fn write_if_requested(args: &Args, cfg: &Config, episodes: &[Episode]) -> Result
         None => None,
     };
     if let Some(dir) = dir {
-        fs::create_dir_all(&dir).map_err(|e| potok_sim::SimError::Io(e))?;
+        fs::create_dir_all(&dir).map_err(potok_sim::SimError::Io)?;
         let out = dir.join(FILE_NAME);
         write_validation(&out, cfg, episodes)?;
         println!("validation: {}", out.display());

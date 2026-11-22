@@ -176,23 +176,23 @@ pub struct LowlatReplyFrame {
 
 pub mod codec {
     #[inline(always)]
-    pub fn put_u16(buf: &mut [u8], off: usize, v: u16) { let b = v.to_le_bytes(); buf[off + 0] = b[0];buf[off + 1] = b[1]; }
+    pub fn put_u16(buf: &mut [u8], off: usize, v: u16) { let b = v.to_le_bytes(); buf[off] = b[0];buf[off + 1] = b[1]; }
     #[inline(always)]
-    pub fn get_u16(buf: &[u8], off: usize) -> u16 { u16::from_le_bytes([buf[off + 0], buf[off + 1]]) }
+    pub fn get_u16(buf: &[u8], off: usize) -> u16 { u16::from_le_bytes([buf[off], buf[off + 1]]) }
     #[inline(always)]
-    pub fn put_u32(buf: &mut [u8], off: usize, v: u32) { let b = v.to_le_bytes(); buf[off + 0] = b[0];buf[off + 1] = b[1];buf[off + 2] = b[2];buf[off + 3] = b[3]; }
+    pub fn put_u32(buf: &mut [u8], off: usize, v: u32) { let b = v.to_le_bytes(); buf[off] = b[0];buf[off + 1] = b[1];buf[off + 2] = b[2];buf[off + 3] = b[3]; }
     #[inline(always)]
-    pub fn get_u32(buf: &[u8], off: usize) -> u32 { u32::from_le_bytes([buf[off + 0], buf[off + 1], buf[off + 2], buf[off + 3]]) }
+    pub fn get_u32(buf: &[u8], off: usize) -> u32 { u32::from_le_bytes([buf[off], buf[off + 1], buf[off + 2], buf[off + 3]]) }
     #[inline(always)]
     pub fn put_u8(buf: &mut [u8], off: usize, v: u8) { buf[off] = v; }
     #[inline(always)]
     pub fn get_u8(buf: &[u8], off: usize) -> u8 { buf[off] }
     #[inline(always)]
-    pub fn put_f32(buf: &mut [u8], off: usize, v: f32) { let b = v.to_le_bytes(); buf[off + 0] = b[0];buf[off + 1] = b[1];buf[off + 2] = b[2];buf[off + 3] = b[3]; }
+    pub fn put_f32(buf: &mut [u8], off: usize, v: f32) { let b = v.to_le_bytes(); buf[off] = b[0];buf[off + 1] = b[1];buf[off + 2] = b[2];buf[off + 3] = b[3]; }
     #[inline(always)]
-    pub fn get_f32(buf: &[u8], off: usize) -> f32 { f32::from_le_bytes([buf[off + 0], buf[off + 1], buf[off + 2], buf[off + 3]]) }
+    pub fn get_f32(buf: &[u8], off: usize) -> f32 { f32::from_le_bytes([buf[off], buf[off + 1], buf[off + 2], buf[off + 3]]) }
     #[inline(always)]
-    pub fn put_i16(buf: &mut [u8], off: usize, v: i16) { let b = v.to_le_bytes(); buf[off + 0] = b[0];buf[off + 1] = b[1]; }
+    pub fn put_i16(buf: &mut [u8], off: usize, v: i16) { let b = v.to_le_bytes(); buf[off] = b[0];buf[off + 1] = b[1]; }
     #[inline(always)]
-    pub fn get_i16(buf: &[u8], off: usize) -> i16 { i16::from_le_bytes([buf[off + 0], buf[off + 1]]) }
+    pub fn get_i16(buf: &[u8], off: usize) -> i16 { i16::from_le_bytes([buf[off], buf[off + 1]]) }
 }
