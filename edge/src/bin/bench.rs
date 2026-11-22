@@ -4,7 +4,7 @@
 
 use potok_edge::baseline::forward_naive;
 use potok_edge::frame::{
-    build_request, PotokUartV1, RequestFrame, PHASE_LANDING, REPLY_LEN, REQUEST_LEN, FLAG_IMU_OK,
+    build_request, PotokUartV1, RequestFrame, FLAG_IMU_OK, PHASE_LANDING, REPLY_LEN, REQUEST_LEN,
 };
 use potok_edge::runtime::Runtime;
 use potok_edge::FrameLayout;
@@ -63,6 +63,8 @@ fn main() {
     let mut req_bytes = [0u8; REQUEST_LEN];
     let mut reply_bytes = [0u8; REPLY_LEN];
     let mut samples = Vec::with_capacity(frames);
+    let mut model_samples = Vec::with_capacity(frames);
+    let mut overhead_samples = Vec::with_capacity(frames);
     let mut checksum = 0u64;
     let mut max_err = 0f32;
     let mut bit_identical = 0usize;
@@ -83,9 +85,14 @@ fn main() {
         build_request(&req, &mut req_bytes).unwrap();
         let t0 = Instant::now();
         let decoded = layout.decode_request(&req_bytes).unwrap();
+        let t1 = Instant::now();
         let reply = runtime.on_request(&decoded);
+        let t2 = Instant::now();
         layout.encode_reply(&reply, &mut reply_bytes).unwrap();
-        samples.push(t0.elapsed());
+        let t3 = Instant::now();
+        samples.push(t3 - t0);
+        model_samples.push(t2 - t1);
+        overhead_samples.push((t1 - t0) + (t3 - t2));
         checksum = checksum
             .wrapping_add(reply.g_pitch as u64)
             .wrapping_add(reply.g_yaw as u64);
@@ -98,7 +105,11 @@ fn main() {
                 .zip(slow.iter())
                 .fold(0.0f32, |m, (a, b)| m.max((a - b).abs()));
             max_err = max_err.max(err);
-            if fast.iter().zip(slow.iter()).all(|(a, b)| a.to_bits() == b.to_bits()) {
+            if fast
+                .iter()
+                .zip(slow.iter())
+                .all(|(a, b)| a.to_bits() == b.to_bits())
+            {
                 bit_identical += 1;
             }
         }
@@ -115,19 +126,45 @@ fn main() {
         baseline_samples.sort_unstable();
     }
     samples.sort_unstable();
+    model_samples.sort_unstable();
+    overhead_samples.sort_unstable();
     let p50 = percentile(&samples, 0.50);
     let p99 = percentile(&samples, 0.99);
+    let model_p50 = percentile(&model_samples, 0.50);
+    let model_p99 = percentile(&model_samples, 0.99);
+    let overhead_p50 = percentile(&overhead_samples, 0.50);
+    let overhead_p99 = percentile(&overhead_samples, 0.99);
     println!("potok-edge benchmark: {frames} synthetic frames");
     println!("  p50    : {:>9.1} us", p50.as_secs_f64() * 1e6);
     println!("  p99    : {:>9.1} us", p99.as_secs_f64() * 1e6);
-    println!("  memory : {} bytes ({} KiB) — weights + preallocated buffers", memory, memory / 1024);
+    println!(
+        "  model      p50 {:>7.1} us / p99 {:>7.1} us",
+        model_p50.as_secs_f64() * 1e6,
+        model_p99.as_secs_f64() * 1e6
+    );
+    println!(
+        "  overhead   p50 {:>7.1} us / p99 {:>7.1} us (decode+encode, no UART wire)",
+        overhead_p50.as_secs_f64() * 1e6,
+        overhead_p99.as_secs_f64() * 1e6
+    );
+    println!(
+        "  memory : {} bytes ({} KiB) — weights + preallocated buffers",
+        memory,
+        memory / 1024
+    );
     println!("  checksum: {checksum:#x}");
     if compare && !runtime.is_v2() {
         let b50 = percentile(&baseline_samples, 0.50);
         let b99 = percentile(&baseline_samples, 0.99);
-        println!("  naive control: p50 {:>9.1} us, p99 {:>9.1} us", b50.as_secs_f64() * 1e6, b99.as_secs_f64() * 1e6);
+        println!(
+            "  naive control: p50 {:>9.1} us, p99 {:>9.1} us",
+            b50.as_secs_f64() * 1e6,
+            b99.as_secs_f64() * 1e6
+        );
         println!("  baseline comparison: max |diff| = {max_err:.3e}, bit-identical {bit_identical}/{frames}");
     } else if compare {
-        println!("  baseline comparison: skipped (v2 model; naive control covers legacy POTM only)");
+        println!(
+            "  baseline comparison: skipped (v2 model; naive control covers legacy POTM only)"
+        );
     }
 }
