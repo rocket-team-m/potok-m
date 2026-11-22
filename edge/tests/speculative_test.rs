@@ -83,7 +83,7 @@ fn model_kind_dispatch() {
     );
 
     // Canonical teacher v2 has no model_kind field: offset 12 is in_features.
-    let v2 = Path::new(env!("CARGO_MANIFEST_DIR")).join("../ai/tests/fixtures/tiny_model.bin");
+    let v2 = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/tiny_model.bin");
     let v2 = fs::read(v2).unwrap();
     assert!(!is_student_file(&v2));
     assert_eq!(model_kind(&v2).unwrap(), 8);

@@ -8,7 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 fn fixture_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../ai/tests/fixtures")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
 }
 
 /// Minimal NumPy `.npy` v1 reader: little-endian float32, C order.
