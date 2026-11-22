@@ -7,12 +7,14 @@ Date: 2026-11-22. CPU-only work; no GPU jobs, no pushes.
 | command | result |
 |---|---|
 | `uv sync` | Resolved 20 packages; installed `torch==2.15.0+cpu` from `download.pytorch.org/whl/cpu`. No CUDA wheels. |
-| `uv run pytest -q` | `26 passed in 2.96s` initially; `37 passed in 4.89s` after the student work; `44 passed in 5.45s` after the smart work; `51 passed in 6.24s` after the LoopWM work |
-| `uv run ruff check src tests` | `All checks passed!` (after the smart and LoopWM work) |
+| `uv run pytest -q` | `26 passed in 2.96s` initially; `37 passed in 4.89s` after the student work; `44 passed in 5.45s` after the smart work; `51 passed in 6.24s` after the LoopWM work; `61 passed in 10.32s` after the engine work |
+| `uv run ruff check src tests` | `All checks passed!` (after the smart, LoopWM and engine work) |
 | `PYTHONPATH=src uv run python -m potok_ai.train_smart --data <v2 file> --out /tmp/opencode/smart.pt --epochs 1 --window 12 --batch 2 --limit 4 --eval-limit 4 --width 16 --rank 8` | prints three scenario RMSE rows, `ratio=0.7034 limit=1.25 generalises=yes`, teacher + export paths; CPU only |
 | `uv run python benchmark.py --stage train --steps 10` | `params=87875 ms_per_step=68.02 frames_per_s=5881` (width 128, rank 64, batch 8, seq 50) |
 | `uv run python benchmark.py --stage forward --steps 10` | `params=87875 ms_per_step=31.80 frames_per_s=12579` |
 | `PYTHONPATH=src uv run python -m potok_ai.train --help` | CLI exposes both stages, `--opt`, `--ns-steps`, `--limit` |
+| `PYTHONPATH=src uv run python -m potok_ai.engine --help` | CLI exposes `--model {lrs,loopwm-lite,loopwm}`, `--stage {train,distill,eval}`, `--data`, `--out`, `--epochs`, `--seed`, `--device` |
+| `PYTHONPATH=src uv run python -m potok_ai.engine --model loopwm-lite --stage train --data <v2 file> --out /tmp/opencode/engine_lite --epochs 1 --seed 3 --device cpu --window 12 --batch 2 --limit 4 --eval-limit 4 --width 16 --lite-width 64 --attn-rank 8` | printed the one metrics table: `rmse_train=0.7375 rmse_held_out=0.7218 ratio=0.9787 params=34819 mac=207296 bytes=150095`; the `eval` stage on the same `--out` reproduced the same RMSE, params and MAC |
 
 Tests cover: forward shape/bounds, 5-block layout and dilations, TSCT param count,
 seed determinism, causality, ternary codes and STE gradient flow, ternary anneal,
@@ -212,9 +214,61 @@ rejection, and one tiny CPU step in each stage.
 - Verification: `uv run pytest -q` → `51 passed`; `uv run ruff check src tests`
   → clean. CPU only; no GPU jobs, no pushes, no files outside `ai/`.
 
+## Unified training engine (SPEC_ENGINE.md v1, commit fd5d2dc)
+
+- `src/potok_ai/engine.py` — one CLI (`python -m potok_ai.engine`), one
+  `TrainConfig` and one metrics report. `--model lrs|loopwm-lite|loopwm`,
+  `--stage train|distill|eval`, `--data FILE`, `--out DIR`, `--epochs`, `--seed`,
+  `--device cpu` plus sizing/limit overrides. `out/metrics.json` carries exactly
+  the seven SPEC fields: `model, rmse_train, rmse_held_out, ratio, params, mac,
+  bytes`; the same values are printed as one table. `rmse_train` /
+  `rmse_held_out` are means over the v2 `scenario_<id>` groups, `ratio` reuses
+  `train_smart.generalisation_ratio`, `bytes` is the real export size on disk.
+- **Dispatch**: `loopwm` calls the existing `train_loopwm.run` (and its
+  `train_smart` helpers) unchanged; `lrs` and `loopwm-lite` go through the
+  shared adapter loop. Every adapter implements `build`, `train_step`,
+  `evaluate`, `export`, `load`, `mac`, `count_params`. `distill` is the same
+  pipeline as `train` — all three families already learn from a teacher, so
+  there is no second training path. `eval` loads an export and scores it
+  without training.
+- **LRS adapter**: wraps `StatefulTCN` / `smart_student_config` (20-value
+  frames = 14 features + 6 conditioning), one optimizer step per tick after
+  the window, export via `export_student` (`out/lrs.bin`), load via
+  `load_student_export().to_model()`. `train_smart.py` and `train_loopwm.py`
+  were not changed.
+- `src/potok_ai/loopwm_lite.py` — Perceiver encoder (50x14 -> 16 tokens, width
+  64) via rank-8 cross-attention; ONE parameter-shared `LiteBlock` applied at
+  most twice with adaptive exit on the mean latent-update norm (hard cap 2,
+  `exit_threshold` configurable); heads for the full LoopWM's 3/6-frame latents
+  plus a bounded 2-value correction and confidence. No raw reconstruction:
+  latent targets are detached outputs of the teacher's own latent heads, the
+  reference correction is loss-only and never a forward input. The teacher is
+  kept out of the module tree (`object.__setattr__`), so it is never optimised
+  or exported; `target_proj` is training-only and excluded from both the
+  export and the reported parameter count.
+- **MAC**: `analytical_mac()` counts every projection, attention score/sum and
+  FFN matmul for one window inference: default 50 frames, 16 tokens, width 64,
+  rank 8, two passes = **289 984 MAC (~0.29 M)**, inside SPEC_ENGINE.md's
+  0.2-0.4 M band. Full-width attention here would be ~0.8 M; the rank-bottleneck
+  attention and FFN are the deliberate latency trade. `loopwm_mac()` gives the
+  privileged teacher's analytic count with the same convention.
+- **Determinism**: one `seed_everything()` for all families (torch + numpy +
+  one CPU thread). `StatefulTCN` also seeds its own local generator from
+  `--seed`. Tests run seeds 7/7/9 and assert bit-equal exports for repeats and
+  different weights for a changed seed.
+- `tests/test_engine.py` (10 new tests): CLI help via subprocess, adapter
+  registry and `train_loopwm` dispatch (monkeypatched), lite shape/exit/shared
+  weights/teacher isolation, analytic MAC band, JSON schema and table, one tiny
+  CPU end-to-end per family, `eval` stage, deterministic seeding. Verification:
+  `uv run pytest -q` -> `61 passed`; `uv run ruff check src tests` -> clean.
+
 ## Skipped
 
 - No GPU wheels, no A/B runs, no training beyond the tiny CPU smoke steps.
+  LoopWM-lite's latent teacher is randomly initialised unless a previous
+  `loopwm` stage left `out/loopwm.pt` in the same `--out` directory; wiring a
+  real trained teacher checkpoint and measuring the 0.3-0.6 ms Pi estimate
+  need a simulator-produced corpus and are not done here.
   The sim owner still has to emit v2 `POTOKSIM` files with real physics
   features, conditioning and scenario flags before a real 50-frame smoke run
   can replace the synthetic one; `sim/`, `edge/` and `docs/` were not touched.

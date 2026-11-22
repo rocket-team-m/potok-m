@@ -1,0 +1,587 @@
+"""Unified training engine (SPEC_ENGINE.md v1).
+
+One CLI, one TrainConfig and one metrics report for all three model families.
+``lrs`` and ``loopwm-lite`` go through the shared adapter loop below; ``loopwm``
+dispatches to the existing ``train_loopwm`` / ``train_smart`` pipelines, which
+train the privileged teacher, distil the onboard student and export it. The
+``distill`` stage uses the same pipeline: every family already learns from a
+teacher (full LoopWM latents for lite, LoopWM outputs for lrs/loopwm), so there
+is no second training code path to maintain. ``eval`` loads an export and only
+scores it.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+from abc import ABC, abstractmethod
+from dataclasses import asdict, dataclass
+from pathlib import Path
+
+import numpy as np
+import torch
+from torch import nn
+from torch.nn import functional as F
+from torch.optim import AdamW
+
+from .data import (
+    SMART_COND_FEATURES,
+    SMART_FEATURES,
+    SmartWindowDataset,
+    group_by_scenario,
+    load_episodes,
+)
+from .export import export_student, load_student_export
+from .loopwm import LoopWM, LoopWMConfig
+from .loopwm_lite import LiteConfig, LiteModel
+from .loopwm_lite import analytical_mac as lite_analytical_mac
+from .student import StatefulTCN, smart_student_config
+from .train_loopwm import run as run_loopwm
+from .train_smart import _batches, generalisation_ratio, normalized_correction_loss
+from .train_smart import evaluate as window_evaluate
+
+MODELS = ("lrs", "loopwm-lite", "loopwm")
+STAGES = ("train", "distill", "eval")
+METRIC_FIELDS = ("model", "rmse_train", "rmse_held_out", "ratio", "params", "mac", "bytes")
+
+
+@dataclass
+class TrainConfig:
+    """The single configuration shared by every adapter."""
+
+    model: str
+    stage: str
+    data: Path
+    out: Path
+    epochs: int = 1
+    seed: int = 1
+    device: str = "cpu"
+    window: int = 50
+    batch: int = 8
+    limit: int | None = None
+    eval_limit: int | None = None
+    lr: float = 2e-3
+    student_lr: float = 1e-3
+    width: int = 128  # full LoopWM width
+    rank: int = 64
+    heads: int = 4
+    max_iters: int = 6
+    exit_threshold: float = 1e-3
+    latent_weight: float = 0.05
+    target_weight: float = 0.1
+    latent_tokens: int = 16
+    lite_width: int = 64
+    attn_rank: int = 8
+    lite_iters: int = 2
+    lite_threshold: float = 1e-2
+
+    @classmethod
+    def from_args(cls, args: argparse.Namespace) -> TrainConfig:
+        fields = {name: getattr(args, name) for name in cls.__dataclass_fields__}
+        return cls(**fields)
+
+    def legacy_args(self, out: Path) -> argparse.Namespace:
+        """Adapt to the existing train_smart / train_loopwm CLI helpers."""
+        return argparse.Namespace(
+            data=self.data,
+            epochs=self.epochs,
+            seed=self.seed,
+            device=self.device,
+            out=out,
+            window=self.window,
+            batch=self.batch,
+            limit=self.limit,
+            eval_limit=self.eval_limit,
+            lr=self.lr,
+            student_lr=self.student_lr,
+            target_weight=self.target_weight,
+            width=self.width,
+            rank=self.rank,
+            heads=self.heads,
+            max_iters=self.max_iters,
+            exit_threshold=self.exit_threshold,
+            latent_weight=self.latent_weight,
+        )
+
+
+@dataclass
+class Metrics:
+    """The one report format written to ``out/metrics.json``."""
+
+    model: str
+    rmse_train: float
+    rmse_held_out: float
+    ratio: float
+    params: int
+    mac: int
+    bytes: int
+
+    def as_dict(self) -> dict:
+        return {field: getattr(self, field) for field in METRIC_FIELDS}
+
+
+def print_table(metrics: Metrics) -> None:
+    """Print the single table SPEC_ENGINE.md asks for."""
+    values = [str(metrics.as_dict()[field]) for field in METRIC_FIELDS]
+    widths = [max(len(field), len(value)) for field, value in zip(METRIC_FIELDS, values)]
+    print("  ".join(field.ljust(width) for field, width in zip(METRIC_FIELDS, widths)))
+    print("  ".join("-" * width for width in widths))
+    print("  ".join(value.ljust(width) for value, width in zip(values, widths)))
+
+
+def write_metrics(out: Path, metrics: Metrics) -> Path:
+    out.mkdir(parents=True, exist_ok=True)
+    path = out / "metrics.json"
+    path.write_text(json.dumps(metrics.as_dict(), indent=2) + "\n")
+    return path
+
+
+def _held_out(groups: dict) -> set[str]:
+    held = {name for name, episodes in groups.items() if any(e.held_out for e in episodes)}
+    if not held or len(held) == len(groups):
+        raise ValueError("validation data needs at least one held-out and one training scenario")
+    return held
+
+
+def _split_metrics(model: str, rmse: dict, held_out: set[str], params: int, mac: int,
+                   size: int) -> Metrics:
+    train = [value for name, value in rmse.items() if name not in held_out]
+    held = [value for name, value in rmse.items() if name in held_out]
+    return Metrics(
+        model=model,
+        rmse_train=sum(train) / len(train),
+        rmse_held_out=sum(held) / len(held),
+        ratio=generalisation_ratio(rmse, held_out),
+        params=int(params),
+        mac=int(mac),
+        bytes=int(size),
+    )
+
+
+class ModelAdapter(ABC):
+    """The five operations every family exposes, plus the shared run loop."""
+
+    name: str
+
+    @abstractmethod
+    def build(self, cfg: TrainConfig, device: torch.device) -> nn.Module: ...
+
+    @abstractmethod
+    def batches(self, episodes: list, cfg: TrainConfig): ...
+
+    @abstractmethod
+    def train_step(self, model: nn.Module, batch, optimizer: AdamW, cfg: TrainConfig) -> float: ...
+
+    @abstractmethod
+    def evaluate(self, model: nn.Module, groups: dict, cfg: TrainConfig,
+                 device: torch.device) -> dict[str, float]: ...
+
+    @abstractmethod
+    def export_path(self, cfg: TrainConfig) -> Path: ...
+
+    @abstractmethod
+    def export(self, model: nn.Module, cfg: TrainConfig) -> Path: ...
+
+    @abstractmethod
+    def load(self, cfg: TrainConfig, device: torch.device) -> nn.Module: ...
+
+    @abstractmethod
+    def mac(self, cfg: TrainConfig) -> int: ...
+
+    def count_params(self, model: nn.Module) -> int:
+        return sum(parameter.numel() for parameter in model.parameters())
+
+    def run(self, cfg: TrainConfig) -> Metrics:
+        """Train, evaluate, export and report -- shared by lrs and loopwm-lite."""
+        seed_everything(cfg.seed)
+        device = torch.device(cfg.device)
+        episodes = load_episodes(cfg.data)
+        groups = group_by_scenario(episodes)
+        held_out = _held_out(groups)
+        model = self.build(cfg, device)
+        optimizer = AdamW(model.parameters(), lr=cfg.lr)
+        for _ in range(cfg.epochs):
+            for batch in self.batches(episodes, cfg):
+                self.train_step(model, batch, optimizer, cfg)
+        rmse = self.evaluate(model, groups, cfg, device)
+        path = self.export(model, cfg)
+        return self._metrics(model, cfg, rmse, held_out, path)
+
+    def evaluate_only(self, cfg: TrainConfig) -> Metrics:
+        device = torch.device(cfg.device)
+        groups = group_by_scenario(load_episodes(cfg.data))
+        held_out = _held_out(groups)
+        model = self.load(cfg, device)
+        path = self.export_path(cfg)
+        if not path.exists():
+            raise ValueError(f"no export at {path}; run the train stage first")
+        return self._metrics(model, cfg, self.evaluate(model, groups, cfg, device),
+                             held_out, path)
+
+    def _metrics(self, model: nn.Module, cfg: TrainConfig, rmse: dict, held_out: set[str],
+                 path: Path) -> Metrics:
+        return _split_metrics(self.name, rmse, held_out, self.count_params(model),
+                              self.mac(cfg), path.stat().st_size)
+
+
+def seed_everything(seed: int) -> None:
+    """All families share this seeding rule; CPU threading is fixed to one."""
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    torch.set_num_threads(1)
+
+
+def _smart_frames(episode) -> tuple[np.ndarray, np.ndarray | None]:
+    """A 20-value frame per tick: 14 features plus the 6 conditioning numbers."""
+    frames = np.asarray(episode.frames[:, :SMART_FEATURES], dtype=np.float32)
+    conditioning = np.asarray(episode.conditioning, dtype=np.float32)
+    with_cond = np.concatenate([frames, np.tile(conditioning, (len(frames), 1))], axis=1)
+    targets = None if episode.targets is None else np.asarray(episode.targets, dtype=np.float32)
+    return with_cond, targets
+
+
+class LRSAdapter(ModelAdapter):
+    """Onboard student (StatefulTCN): one 20-value frame per tick."""
+
+    name = "lrs"
+
+    def build(self, cfg: TrainConfig, device: torch.device) -> StatefulTCN:
+        return StatefulTCN(smart_student_config(seed=cfg.seed)).to(device)
+
+    def batches(self, episodes: list, cfg: TrainConfig):
+        data = [_smart_frames(episode) for episode in episodes]
+        if cfg.limit is not None:
+            data = data[: cfg.limit]
+        yield from data
+
+    def train_step(self, model: StatefulTCN, batch, optimizer: AdamW,
+                   cfg: TrainConfig) -> float:
+        frames, targets = batch
+        if targets is None:
+            raise ValueError("lrs training needs reference corrections")
+        device = next(model.parameters()).device
+        model.reset_state()
+        total, steps = 0.0, 0
+        for tick, frame in enumerate(frames):
+            corrections, confidence = model.step(frame)
+            if tick + 1 < cfg.window:
+                continue
+            reference = torch.as_tensor(targets[tick, :2], dtype=torch.float32, device=device)
+            wanted = torch.as_tensor(0.95, dtype=torch.float32, device=device)
+            loss = F.mse_loss(corrections, reference) + 0.1 * F.mse_loss(confidence, wanted)
+            optimizer.zero_grad(set_to_none=False)
+            loss.backward()
+            optimizer.step()
+            total += float(loss.detach())
+            steps += 1
+        if steps == 0:
+            raise ValueError("no student updates: episodes must be longer than the window")
+        return total / steps
+
+    def evaluate(self, model: StatefulTCN, groups: dict, cfg: TrainConfig,
+                 device: torch.device) -> dict[str, float]:
+        result: dict[str, float] = {}
+        model.eval()
+        with torch.no_grad():
+            for name, episodes in groups.items():
+                squared, count = 0.0, 0
+                for episode in episodes:
+                    frames, targets = _smart_frames(episode)
+                    if targets is None:
+                        raise ValueError(f"scenario {name} has no reference corrections")
+                    model.reset_state()
+                    for tick, frame in enumerate(frames):
+                        corrections, _ = model.step(frame)
+                        if tick + 1 < cfg.window:
+                            continue
+                        reference = torch.as_tensor(
+                            targets[tick, :2], dtype=torch.float32, device=device
+                        )
+                        squared += float((corrections - reference).square().sum())
+                        count += 2
+                result[name] = (squared / count) ** 0.5
+        return result
+
+    def export_path(self, cfg: TrainConfig) -> Path:
+        return cfg.out / "lrs.bin"
+
+    def export(self, model: StatefulTCN, cfg: TrainConfig) -> Path:
+        return export_student(model, self.export_path(cfg))
+
+    def load(self, cfg: TrainConfig, device: torch.device) -> StatefulTCN:
+        return load_student_export(self.export_path(cfg)).to_model().to(device)
+
+    def mac(self, cfg: TrainConfig) -> int:
+        c = smart_student_config()
+        w, r = c.width, c.rank
+        # stem + loops * blocks * (rec_h, rec_x, fused TSCT) + heads
+        return int(c.in_features * w + c.loops * c.n_blocks * (3 * w * w + 2 * w * r)
+                   + w * (2 + 1))
+
+
+class LiteAdapter(ModelAdapter):
+    """LoopWM-lite: Perceiver encoder, two shared passes, latent distillation."""
+
+    name = "loopwm-lite"
+
+    def _teacher(self, cfg: TrainConfig, device: torch.device) -> LoopWM:
+        teacher = LoopWM(
+            LoopWMConfig(
+                width=cfg.width,
+                heads=cfg.heads,
+                max_iters=cfg.max_iters,
+                exit_threshold=cfg.exit_threshold,
+            )
+        )
+        checkpoint = cfg.out / "loopwm.pt"
+        if checkpoint.exists():
+            stored = torch.load(checkpoint, map_location="cpu", weights_only=True)
+            teacher.load_state_dict(stored["state_dict"])
+        return teacher.to(device)
+
+    def build(self, cfg: TrainConfig, device: torch.device) -> LiteModel:
+        model = LiteModel(
+            LiteConfig(
+                window=cfg.window,
+                latent_tokens=cfg.latent_tokens,
+                width=cfg.lite_width,
+                attn_rank=cfg.attn_rank,
+                max_iters=cfg.lite_iters,
+                exit_threshold=cfg.lite_threshold,
+                target_width=cfg.width,
+            )
+        ).to(device)
+        model.set_teacher(self._teacher(cfg, device))
+        return model
+
+    def batches(self, episodes: list, cfg: TrainConfig):
+        dataset = SmartWindowDataset(episodes, window=cfg.window, limit=cfg.limit)
+        if not dataset.samples:
+            raise ValueError("no training windows in the non-held-out scenarios")
+        yield from _batches(dataset, cfg.batch)
+
+    def train_step(self, model: LiteModel, batch, optimizer: AdamW,
+                   cfg: TrainConfig) -> float:
+        windows, conditions, targets = batch
+        latent, _ = model.refine(windows, conditions)
+        pooled = latent.mean(dim=1)
+        prediction = model.head_from_latent(pooled)
+        correction = normalized_correction_loss(prediction[:, :2], targets)
+        teacher_targets = model.teacher_targets(windows, conditions)
+        predictions = model.latent_predictions(pooled)
+        latent_loss = torch.stack(
+            [F.mse_loss(predictions[h], teacher_targets[h]) for h in predictions]
+        ).mean()
+        wanted = torch.full_like(prediction[:, 2:3], 0.95)
+        confidence = F.mse_loss(prediction[:, 2:3], wanted)
+        loss = correction + cfg.latent_weight * latent_loss + 0.1 * confidence
+        optimizer.zero_grad(set_to_none=False)
+        loss.backward()
+        optimizer.step()
+        return float(loss.detach())
+
+    def evaluate(self, model: LiteModel, groups: dict, cfg: TrainConfig,
+                 device: torch.device) -> dict[str, float]:
+        return window_evaluate(model, groups, cfg.legacy_args(cfg.out / "unused.pt"), device)
+
+    def export_path(self, cfg: TrainConfig) -> Path:
+        return cfg.out / "lite.pt"
+
+    def export(self, model: LiteModel, cfg: TrainConfig) -> Path:
+        path = self.export_path(cfg)
+        torch.save(
+            {
+                "model_config": asdict(model.cfg),
+                "state_dict": {
+                    key: value for key, value in model.state_dict().items()
+                    if not key.startswith("target_proj.")
+                },
+                "seed": cfg.seed,
+            },
+            path,
+        )
+        return path
+
+    def load(self, cfg: TrainConfig, device: torch.device) -> LiteModel:
+        stored = torch.load(self.export_path(cfg), map_location="cpu", weights_only=True)
+        model = LiteModel(LiteConfig(**stored["model_config"]))
+        model.load_state_dict(stored["state_dict"], strict=False)
+        return model.to(device)
+
+    def count_params(self, model: LiteModel) -> int:
+        # target_proj is a training-only teacher adapter; it is not exported.
+        return sum(
+            parameter.numel()
+            for name, parameter in model.named_parameters()
+            if not name.startswith("target_proj.")
+        )
+
+    def mac(self, cfg: TrainConfig) -> int:
+        return lite_analytical_mac(
+            LiteConfig(
+                window=cfg.window,
+                latent_tokens=cfg.latent_tokens,
+                width=cfg.lite_width,
+                attn_rank=cfg.attn_rank,
+                max_iters=cfg.lite_iters,
+            )
+        )
+
+
+def loopwm_mac(cfg: TrainConfig) -> int:
+    """Analytic MAC count for one full LoopWM window inference."""
+    t, d, w, heads = cfg.window, cfg.width, cfg.max_iters, cfg.heads
+    encoder = t * 14 * d + SMART_COND_FEATURES * 2 * d + (2 * d) * (2 * d)
+    per_iter = t * d * 3 * d + 2 * heads * t * t * (d // heads)
+    per_iter += t * d * d + 2 * t * d * 4 * d
+    heads_cost = 3 * t * d * d + d * 3
+    return int(encoder + w * per_iter + heads_cost)
+
+
+class LoopWMAdapter(ModelAdapter):
+    """Privileged LoopWM; train/distill dispatches to the existing scripts."""
+
+    name = "loopwm"
+
+    def build(self, cfg: TrainConfig, device: torch.device) -> LoopWM:
+        return LoopWM(
+            LoopWMConfig(
+                width=cfg.width,
+                heads=cfg.heads,
+                max_iters=cfg.max_iters,
+                exit_threshold=cfg.exit_threshold,
+                latent_weight=cfg.latent_weight,
+            )
+        ).to(device)
+
+    def batches(self, episodes: list, cfg: TrainConfig):
+        dataset = SmartWindowDataset(episodes, window=cfg.window, limit=cfg.limit)
+        if not dataset.samples:
+            raise ValueError("no training windows in the non-held-out scenarios")
+        yield from _batches(dataset, cfg.batch)
+
+    def train_step(self, model: LoopWM, batch, optimizer: AdamW,
+                   cfg: TrainConfig) -> float:
+        from .jepa import EMATeacher
+
+        if not hasattr(self, "_target_encoder"):
+            self._target_encoder = EMATeacher(model.encoder, model.cfg.ema_momentum)
+        windows, conditions, targets = batch
+        latent, _ = model.refine(windows, conditions)
+        main = normalized_correction_loss(model.head_from_latent(latent)[:, :2], targets)
+        latent_loss = model.latent_prediction_loss(
+            windows, conditions, self._target_encoder, latent=latent
+        )
+        loss = main + cfg.latent_weight * latent_loss
+        optimizer.zero_grad(set_to_none=False)
+        loss.backward()
+        optimizer.step()
+        self._target_encoder.update(model.encoder)
+        return float(loss.detach())
+
+    def evaluate(self, model: LoopWM, groups: dict, cfg: TrainConfig,
+                 device: torch.device) -> dict[str, float]:
+        return window_evaluate(model, groups, cfg.legacy_args(cfg.out / "unused.pt"), device)
+
+    def export_path(self, cfg: TrainConfig) -> Path:
+        return cfg.out / "loopwm.pt"
+
+    def export(self, model: LoopWM, cfg: TrainConfig) -> Path:
+        path = self.export_path(cfg)
+        torch.save(
+            {
+                "model_config": model.cfg.__dict__,
+                "state_dict": model.state_dict(),
+                "seed": cfg.seed,
+            },
+            path,
+        )
+        return path
+
+    def load(self, cfg: TrainConfig, device: torch.device) -> LoopWM:
+        stored = torch.load(self.export_path(cfg), map_location="cpu", weights_only=True)
+        model = LoopWM(LoopWMConfig(**stored["model_config"]))
+        model.load_state_dict(stored["state_dict"])
+        return model.to(device)
+
+    def mac(self, cfg: TrainConfig) -> int:
+        return loopwm_mac(cfg)
+
+    def run(self, cfg: TrainConfig) -> Metrics:
+        """Dispatch to the existing train_loopwm (and its train_smart helpers)."""
+        seed_everything(cfg.seed)
+        result = run_loopwm(cfg.legacy_args(self.export_path(cfg)))
+        model = self.build(cfg, torch.device(cfg.device))
+        student_bin = self.export_path(cfg).with_name("loopwm_student.bin")
+        return _split_metrics(
+            self.name,
+            result["rmse"],
+            set(result["held_out"]),
+            self.count_params(model),
+            self.mac(cfg),
+            student_bin.stat().st_size if student_bin.exists() else 0,
+        )
+
+
+ADAPTERS: dict[str, type[ModelAdapter]] = {
+    "lrs": LRSAdapter,
+    "loopwm-lite": LiteAdapter,
+    "loopwm": LoopWMAdapter,
+}
+
+
+def run(cfg: TrainConfig) -> Metrics:
+    """Dispatch one run by model name and stage."""
+    if cfg.model not in ADAPTERS:
+        raise ValueError(f"unknown model {cfg.model}; expected one of {MODELS}")
+    if cfg.stage not in STAGES:
+        raise ValueError(f"unknown stage {cfg.stage}; expected one of {STAGES}")
+    if cfg.epochs < 1 or cfg.batch < 1 or cfg.window <= max(LiteConfig.horizons):
+        raise ValueError("epochs and batch must be positive; window must exceed the horizons")
+    cfg.out.mkdir(parents=True, exist_ok=True)
+    adapter = ADAPTERS[cfg.model]()
+    if cfg.stage == "eval":
+        return adapter.evaluate_only(cfg)
+    return adapter.run(cfg)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="potok-engine", description=__doc__.splitlines()[0])
+    parser.add_argument("--model", choices=MODELS, required=True)
+    parser.add_argument("--stage", choices=STAGES, default="train")
+    parser.add_argument("--data", type=Path, required=True, help="v2 validation file or directory")
+    parser.add_argument("--out", type=Path, required=True, help="directory for exports and metrics")
+    parser.add_argument("--epochs", type=int, default=1)
+    parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument("--device", choices=["cpu"], default="cpu")
+    parser.add_argument("--window", type=int, default=50)
+    parser.add_argument("--batch", type=int, default=8)
+    parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--eval-limit", type=int, default=None)
+    parser.add_argument("--lr", type=float, default=2e-3)
+    parser.add_argument("--student-lr", type=float, default=1e-3)
+    parser.add_argument("--width", type=int, default=128, help="full LoopWM width")
+    parser.add_argument("--rank", type=int, default=64)
+    parser.add_argument("--heads", type=int, default=4)
+    parser.add_argument("--max-iters", type=int, default=6)
+    parser.add_argument("--exit-threshold", type=float, default=1e-3)
+    parser.add_argument("--latent-weight", type=float, default=0.05)
+    parser.add_argument("--target-weight", type=float, default=0.1)
+    parser.add_argument("--latent-tokens", type=int, default=16)
+    parser.add_argument("--lite-width", type=int, default=64)
+    parser.add_argument("--attn-rank", type=int, default=8)
+    parser.add_argument("--lite-iters", type=int, default=2)
+    parser.add_argument("--lite-threshold", type=float, default=1e-2)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = build_parser().parse_args(argv)
+    cfg = TrainConfig.from_args(args)
+    metrics = run(cfg)
+    print_table(metrics)
+    write_metrics(cfg.out, metrics)
+
+
+if __name__ == "__main__":
+    main()
