@@ -738,3 +738,45 @@ control, `ratio < 1` still does **not** prove generalisation over an easier spli
 Verification after the sweep: `uv run pytest -q` → `88 passed`;
 `uv run ruff check src tests` → clean. Only files under `ai/out/sweep/` and this
 log changed; `scripts/`, `sim/`, `edge/` and `protocol/` were not touched.
+
+## FINAL exports — 100 epochs, seed 1 (`ai/out/final_100/`, 2026-11-22)
+
+Deliverable built from the sweep's seed-1/100-epoch runs, copied byte-for-byte
+(`sha256` of `lrs.bin` `2bb54c7cb97641a…`, `lite.pt` `5a3cf7ec0d99b7e1…`,
+`loopwm_student.bin` `458a4b3976d035e8…`); no re-training, so the final numbers
+are exactly the sweep's seed-1 numbers. Provenance re-checked by rebuilding the
+train-stage `config_hash` with the sweep flags and `out/run4/data`: it matches
+each stored hash (`aa21e36ca6185ce1`, `993232786e2b4c23`, `7482d23e9b21faaf`).
+`data/` is a byte-copy of run4's 80 train / 20 held-out × 1500-frame dataset;
+`sim.toml`, `logs/sweep_results.csv`, `logs/sweep_SUMMARY.md` and `REPORT.md`
+travel with the exports. No gate, loss, architecture or threshold changed.
+
+Paths: `out/final_100/{lrs/lrs.bin, lite/lite.pt,
+loopwm/loopwm{,_student}.pt, loopwm/loopwm_student.bin}`, each with its original
+`metrics.json` + `calibration.json` + `run.log`.
+
+Exact seed-1 numbers (from `out/final_100/*/metrics.json` and `calibration.json`):
+
+| model | rmse_train | rmse_held_out | ratio | ece (cal.) | raw_ece | coverage | n | params | mac | bytes |
+|---|---|---|---|---|---|---|---|---|---|---|
+| lrs | 0.23977497354527916 | 0.18175296497222185 | 0.7580147430936931 | 1.3485651832541958e-19 | 0.3103861131295122 | 0.2917298414886285 | 29020 | 22439 | 58816 | 78171 |
+| loopwm-lite | 0.20965406781013954 | 0.19033253500748856 | 0.9078408875894154 | 1.3046889933380356e-17 | 0.21477641878789935 | 0.31013094417643006 | 5804 | 34819 | 289984 | 150095 |
+| loopwm | 0.19225856890709406 | 0.17891006795923656 | 0.9305700597703505 | 5.5415508310459656e-17 | 0.30570284977463075 | 0.6481736733287388 | 5804 | 83075 | 6231744 | 78171 |
+
+All three calibration files use `method=isotonic`, `loops=3`, `target_ece=0.05`;
+`temperature` 0.1 / 0.2734375 / 2.0 and `threshold` 0.0 / 0.0 /
+0.33032694475760993 for lrs / lite / loopwm respectively. These are the
+mean-RMSE-selected epoch-100 winners (see sweep section above); the single
+seed-1 rows are one draw from those 3-seed means, not the means themselves.
+
+Reload verification (temp copies in `/tmp/opencode/final100_verify`, final dir
+untouched): all three exports load through `potok_ai.engine --stage eval` with
+the exact seed-1 flags; finite RMSE/ratio, matching `params`/`mac`, and reload
+RMSE within ~1e-9 of the stored values (lrs 0.239774974/0.181752965, lite
+0.209654068/0.190332535, loopwm 0.192258569/0.178910068). Eval-stage loopwm
+reports `loopwm.pt` bytes (341477) rather than the student binary (78171) —
+existing engine behaviour, not a reload defect. `uv run pytest -q` → **88
+passed**; `uv run ruff check src tests` → clean. Verifier log:
+`/tmp/opencode/verify_final100.log`. Caveats from the sweep (held-out spent on
+selection, in-sample/degenerate ECE, curriculum tied to epoch count, ratio not
+a generalisation proof) are carried in `out/final_100/REPORT.md`.
