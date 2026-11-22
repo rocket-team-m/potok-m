@@ -1,0 +1,329 @@
+# Deterministic Potok-M simulation defaults. Every randomized quantity is
+# derived from `run.seed` and the episode index; there is no global RNG.
+# See sim/README.md "Source of default numbers" for the provenance table.
+
+[run]
+seed = 1337
+duration_s = 12.0
+dt = 0.002
+frame_rate_hz = 50.0
+episodes = 1
+# false = exact analytic wind profile (reference); true = grid lookup.
+fast_field = true
+
+[sim]
+boundary_profile = "config/boundary_profile.csv"
+altitude_grid_m = 10.0
+# false = dynamics only (no sensor frames, used by the throughput benchmark).
+sensors = true
+
+[wind]
+# Launch-day winds are TTX assumptions, not passport values. Reduced from the
+# earlier 8/6 m/s so the wind does not turn the vehicle far off vertical.
+v_10 = 2.0
+shear_exponent = 0.22
+shear_delta = 0.0
+shear_thickness = 12.0     # m
+shear_altitude = 150.0     # m
+direction_deg = 25.0
+gust_probability = 0.0
+gust_amplitude = 9.0       # m/s
+gust_duration = 2.0        # s
+turbulence_sigma = 0.1
+turbulence_scale = 60.0    # m, integral scale
+
+[initial]
+# User-stated TTX: ~13 kg lift-off mass.
+mass_kg = [10.4, 11.4]
+cg_offset_m = [-0.02, 0.02]
+thrust_scale = [0.94, 1.06]
+pitch_deg = [0.0, 0.0]
+yaw_deg = [0.0, 0.0]
+gimbal_deg = [0.0, 0.0]
+
+[sensor]
+# DELTA report: 1064 ug = 0.0104 m/s^2 -> 0.011 m/s^2.
+gyro_noise = 0.0015        # rad/s, kept at the previously validated value
+gyro_bias = [0.002, -0.001, 0.0005]
+accel_noise = 0.011        # m/s^2, DELTA report 1064 ug
+accel_bias = [0.02, -0.015, 0.01]
+mag_noise = 0.02
+mag_bias = [0.01, -0.01, 0.005]
+mag_world = [0.22, 0.08, 0.38]
+baro_noise = 0.35
+baro_bias = -0.4
+pitot_noise = 25.0
+pitot_bias = -8.0
+lag_tau = 0.012
+quant_step = 0.0005
+gyro_sat = 12.0
+accel_sat = 250.0
+pitot_sat = 30000.0
+
+# Allan-variance instrument model. 0 (the default) keeps the legacy
+# white-noise + constant-bias model and its RNG draw order unchanged. ARW is
+# a density (rad/s/sqrt(Hz), m/s^2/sqrt(Hz)); the discrete std is arw/sqrt(dt).
+# Bias stability drives a seeded random walk on top of the constant bias.
+gyro_arw = 0.0
+gyro_bias_stability = 0.0
+accel_arw = 0.0
+accel_bias_stability = 0.0
+# Other non-ideal effects; all 0/off by default for legacy behaviour.
+# Whole-frame measurement delay (frames) on gyro/accel/mag/baro/pitot.
+latency_steps = 0
+# Per-channel quantization; 0 means "use quant_step above".
+gyro_quant_step = 0.0
+accel_quant_step = 0.0
+# Extra saturation limits; 0 means "no limit".
+mag_sat = 0.0
+baro_sat = 0.0
+# Per-frame seeded spike injection (probability, magnitude).
+spike_probability = 0.0
+spike_amplitude = 0.0
+
+[aero]
+# Inner diameter is 102 mm. Outer diameter (and area) depends on wall
+# thickness, still unspecified; 0.102 m / 0.00817 m^2 is a placeholder.
+area_m2 = 0.011
+# "placeholder" (default) uses the analytic coefficients below and prints a
+# COUNTED marker. "card" loads the 2-D (Mach, alpha) grid named by card_path;
+# out-of-grid queries are a LOUD error. config/aero_card.toml is generated
+# from these placeholder values and reproduces them when selected.
+source = "placeholder"
+# card_path = "config/aero_card.toml"
+# PLACEHOLDER aero coefficients (NOT from the real Potok-M aero model):
+# cd0, cna, pitch_damping, roll_damping and the cd_mach table are estimates.
+# Their uncertainty is unquantified; a real OpenRocket/Ansys card would replace
+# them. Only area and static margin below are user-stated physical values.
+cd0 = 0.30
+cd0_range = [0.29, 0.31]
+cna = 1.8
+# Static margin 0.0765 m; with OR outer diameter 118 mm this is ~0.65 cal.
+static_margin_m = 0.0765
+static_margin_cal_range = [0.60, 0.70]
+pitch_damping = 0.6
+roll_damping = 0.25
+cd_mach = [[0.0, 0.30], [0.2, 0.30], [0.4, 0.31], [0.5, 0.33], [0.7, 0.36], [0.9, 0.39], [1.1, 0.39], [1.5, 0.39]]
+# Motor passports (chat PDFs):
+#   stage 1 RDK-2000: 2.2-2.4 kNs, avg 390-400 N, peak 500-550 N,
+#     burn 5-6 s, propellant 1.88 kg.
+#   stage 2 RDK-1000: 1.0-1.2 kNs, avg 260-270 N, peak 550-600 N,
+#     burn 3-3.5 s, propellant 1.0 kg.
+# Motor passports: 2.2 + 1.0 kNs minimum (400 N for 5.5 s and 312.5 N for
+# 3.2 s), both below the passport peak thrusts.
+# First stage is jettisoned at 5.5 s; its RDK-2000 casing is 2.8 - 1.88 = 0.92 kg.
+stage_sep_time_s = 6.0
+stage_sep_mass_kg = 2.55
+# Mass flows 0.342 / 0.3125 kg/s are the passport propellant masses divided
+# by the burn times. Peaks and thrust ripple are NOT modelled; only average
+# thrust and mass flow are.
+thrust_profile = [
+  [0.000, 0.00, 0.0000],
+  [0.050, 20.00, 0.0000],
+  [0.100, 150.00, 0.1000],
+  [0.150, 250.00, 0.2000],
+  [0.200, 280.00, 0.2000],
+  [0.250, 295.00, 0.2000],
+  [0.300, 310.00, 0.2000],
+  [0.350, 320.00, 0.3000],
+  [0.400, 330.00, 0.2000],
+  [0.450, 295.00, 0.2000],
+  [0.500, 260.00, 0.2667],
+  [0.556, 350.00, 0.2647],
+  [0.600, 420.00, 0.2727],
+  [0.650, 501.25, 0.3800],
+  [0.680, 550.00, 0.4000],
+  [0.750, 380.00, 0.3600],
+  [0.787, 410.00, 0.3514],
+  [0.837, 450.00, 0.3600],
+  [0.900, 500.00, 0.4167],
+  [0.947, 485.94, 0.3571],
+  [0.989, 473.28, 0.3810],
+  [1.039, 458.28, 0.3800],
+  [1.100, 440.00, 0.3636],
+  [1.141, 459.14, 0.3600],
+  [1.178, 476.37, 0.3784],
+  [1.250, 510.00, 0.4091],
+  [1.283, 498.96, 0.3636],
+  [1.333, 482.41, 0.4000],
+  [1.400, 460.00, 0.4118],
+  [1.465, 476.16, 0.3846],
+  [1.515, 488.66, 0.3800],
+  [1.565, 501.16, 0.3800],
+  [1.600, 510.00, 0.4000],
+  [1.650, 522.50, 0.4200],
+  [1.700, 535.00, 0.4400],
+  [1.750, 547.50, 0.4200],
+  [1.800, 560.00, 0.4400],
+  [1.850, 585.00, 0.4600],
+  [1.900, 610.00, 0.4600],
+  [1.950, 565.00, 0.4600],
+  [2.000, 520.00, 0.4400],
+  [2.050, 517.50, 0.4200],
+  [2.100, 515.00, 0.4000],
+  [2.150, 512.50, 0.4200],
+  [2.200, 510.00, 0.4200],
+  [2.250, 513.33, 0.4000],
+  [2.300, 516.67, 0.4200],
+  [2.350, 520.00, 0.4200],
+  [2.400, 523.33, 0.4200],
+  [2.450, 526.67, 0.4000],
+  [2.500, 530.00, 0.4200],
+  [2.550, 525.00, 0.4200],
+  [2.600, 520.00, 0.4000],
+  [2.650, 515.00, 0.4200],
+  [2.700, 510.00, 0.4000],
+  [2.750, 505.00, 0.4200],
+  [2.800, 500.00, 0.4000],
+  [2.850, 504.17, 0.4200],
+  [2.900, 508.33, 0.4000],
+  [2.950, 512.50, 0.4200],
+  [3.000, 516.67, 0.4000],
+  [3.050, 520.83, 0.4200],
+  [3.100, 525.00, 0.4000],
+  [3.150, 520.83, 0.4200],
+  [3.200, 516.67, 0.4000],
+  [3.250, 512.50, 0.4000],
+  [3.300, 508.33, 0.4200],
+  [3.350, 504.17, 0.4000],
+  [3.400, 500.00, 0.4200],
+  [3.450, 496.67, 0.3800],
+  [3.500, 493.33, 0.4000],
+  [3.550, 490.00, 0.3800],
+  [3.600, 486.67, 0.4000],
+  [3.650, 483.33, 0.4000],
+  [3.700, 480.00, 0.3800],
+  [3.750, 473.33, 0.3800],
+  [3.800, 466.67, 0.3600],
+  [3.850, 460.00, 0.3600],
+  [3.900, 453.33, 0.3800],
+  [3.950, 446.67, 0.3600],
+  [4.000, 440.00, 0.3600],
+  [4.050, 435.00, 0.3400],
+  [4.100, 430.00, 0.3400],
+  [4.150, 425.00, 0.3400],
+  [4.200, 420.00, 0.3400],
+  [4.250, 415.00, 0.3400],
+  [4.300, 410.00, 0.3400],
+  [4.350, 408.33, 0.3200],
+  [4.400, 406.67, 0.3200],
+  [4.450, 405.00, 0.3400],
+  [4.500, 403.33, 0.3200],
+  [4.550, 401.67, 0.3200],
+  [4.600, 400.00, 0.3200],
+  [4.650, 403.33, 0.3200],
+  [4.700, 406.67, 0.3400],
+  [4.750, 410.00, 0.3200],
+  [4.800, 413.33, 0.3400],
+  [4.850, 416.67, 0.3200],
+  [4.900, 420.00, 0.3200],
+  [4.950, 395.00, 0.3200],
+  [5.000, 370.00, 0.3200],
+  [5.050, 322.50, 0.2200],
+  [5.100, 275.00, 0.2200],
+  [5.150, 227.50, 0.2200],
+  [5.200, 180.00, 0.2200],
+  [5.250, 140.00, 0.1000],
+  [5.300, 100.00, 0.1200],
+  [5.350, 83.75, 0.0600],
+  [5.400, 67.50, 0.0400],
+  [5.450, 51.25, 0.0600],
+  [5.500, 35.00, 0.0600],
+  [5.550, 30.00, 0.0200],
+  [5.600, 25.00, 0.0200],
+  [5.650, 20.00, 0.0200],
+  [5.700, 15.00, 0.0200],
+  [5.750, 13.33, 0.0000],
+  [5.800, 11.67, 0.0000],
+  [5.850, 10.00, 0.0200],
+  [5.900, 8.33, 0.0000],
+  [5.950, 6.67, 0.0200],
+  [6.000, 0.00, 0.6000],
+  [6.050, 15.00, 0.0000],
+  [6.100, 30.00, 0.0200],
+  [6.150, 70.00, 0.0400],
+  [6.200, 120.00, 0.0800],
+  [6.250, 140.00, 0.1000],
+  [6.300, 160.00, 0.1200],
+  [6.350, 190.00, 0.1400],
+  [6.400, 220.00, 0.1600],
+  [6.450, 277.50, 0.2200],
+  [6.500, 335.00, 0.2000],
+  [6.550, 372.50, 0.3000],
+  [6.600, 410.00, 0.3000],
+  [6.650, 531.00, 0.4000],
+  [6.700, 423.75, 0.3600],
+  [6.750, 380.00, 0.3200],
+  [6.800, 415.00, 0.3400],
+  [6.850, 450.00, 0.3200],
+  [6.900, 440.00, 0.3400],
+  [6.950, 430.00, 0.3400],
+  [7.000, 420.00, 0.3400],
+  [7.050, 475.00, 0.3800],
+  [7.100, 530.00, 0.3600],
+  [7.150, 516.67, 0.4000],
+  [7.200, 503.33, 0.4000],
+  [7.250, 490.00, 0.4000],
+  [7.300, 530.00, 0.4200],
+  [7.350, 570.00, 0.4200],
+  [7.400, 576.67, 0.4600],
+  [7.450, 583.33, 0.4400],
+  [7.500, 590.00, 0.4600],
+  [7.550, 583.33, 0.4600],
+  [7.600, 576.67, 0.4600],
+  [7.650, 570.00, 0.4400],
+  [7.700, 556.67, 0.4400],
+  [7.750, 543.33, 0.4200],
+  [7.800, 530.00, 0.4400],
+  [7.850, 522.50, 0.4000],
+  [7.900, 515.00, 0.4000],
+  [7.950, 507.50, 0.4200],
+  [8.000, 500.00, 0.4000],
+  [8.050, 486.67, 0.3800],
+  [8.100, 473.33, 0.3600],
+  [8.150, 460.00, 0.3800],
+  [8.200, 478.33, 0.3800],
+  [8.250, 496.67, 0.3800],
+  [8.300, 515.00, 0.4000],
+  [8.350, 478.75, 0.3400],
+  [8.400, 442.50, 0.3400],
+  [8.450, 406.25, 0.3600],
+  [8.500, 370.00, 0.3400],
+  [8.550, 360.00, 0.2800],
+  [8.600, 350.00, 0.2600],
+  [8.650, 340.00, 0.2800],
+  [8.700, 330.00, 0.2800],
+  [8.750, 320.00, 0.2400],
+  [8.800, 310.00, 0.2400],
+  [8.850, 300.00, 0.2400],
+  [8.900, 290.00, 0.2400],
+  [8.950, 270.00, 0.2200],
+  [9.000, 250.00, 0.2200],
+  [9.050, 230.00, 0.1800],
+  [9.100, 210.00, 0.1800],
+  [9.150, 170.00, 0.1200],
+  [9.200, 130.00, 0.1400],
+  [9.250, 95.00, 0.0800],
+  [9.300, 60.00, 0.0600],
+  [9.350, 45.00, 0.0400],
+  [9.400, 30.00, 0.0400],
+  [9.450, 24.00, 0.0200],
+  [9.500, 18.00, 0.0200],
+  [9.550, 16.50, 0.0200],
+  [9.600, 15.00, 0.0000],
+  [9.650, 14.25, 0.0200],
+  [9.700, 13.50, 0.0000],
+  [9.750, 12.75, 0.0200],
+  [9.800, 12.00, 0.0000],
+  [9.850, 11.50, 0.0200],
+  [9.900, 11.00, 0.0000],
+  [9.950, 10.50, 0.0200],
+]
+
+[output]
+mode = "both"
+# Feature vector consumed by the AI model (window 50 x 8).
+features = ["gyro_x", "gyro_y", "gyro_z", "acc_x", "acc_y", "acc_z", "baro_h", "pitot_q"]
+# false writes classic v2 (17 metadata floats). true appends 22 truth floats
+# (true wind, gust, shear and the full 6-DoF state) as v2 metadata (39 total).
+truth_metadata = false

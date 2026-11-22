@@ -160,6 +160,8 @@ class StatefulTCN(nn.Module):
         allocation = torch.softmax(self.alloc_logits[: self.cfg.loops], dim=0)
 
         source = self.stem(x)
+        current = source  # direct current-frame path; the recurrent state alone
+        # converges to a fixed point and washes out the frame that determines error.
         total = None
         for iteration in range(self.cfg.loops):
             for index, block in enumerate(self.blocks):
@@ -170,7 +172,7 @@ class StatefulTCN(nn.Module):
         for index, value in enumerate(state):
             self.h[index] = value.detach()
 
-        z = self.norm(total + source)
+        z = self.norm(current + 0.25 * (total + source))
         self.last_z = z
         bound = torch.tanh(self.g_max.abs())
         corrections = torch.tanh(self.head_corr(z)) * bound

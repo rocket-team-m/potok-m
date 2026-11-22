@@ -1,0 +1,15 @@
+{
+  "threshold": 0.0,
+  "ece": 6.107108164609456e-18,
+  "raw_ece": 0.2980822611109567,
+  "temperature_ece": 0.22367017485382704,
+  "coverage": 0.3221415607985481,
+  "temperature": 0.19140625,
+  "method": "isotonic",
+  "loops": 3,
+  "n": 11020,
+  "target_ece": 0.05,
+  "model": "lrs",
+  "seed": 1,
+  "config_hash": "6abda25cb80869a2"
+}
