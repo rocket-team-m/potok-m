@@ -456,7 +456,12 @@ impl Config {
         }
         let s = &self.sensor;
         check("sensor.gyro_arw", s.gyro_arw, 0.0, 100.0)?;
-        check("sensor.gyro_bias_stability", s.gyro_bias_stability, 0.0, 100.0)?;
+        check(
+            "sensor.gyro_bias_stability",
+            s.gyro_bias_stability,
+            0.0,
+            100.0,
+        )?;
         check("sensor.accel_arw", s.accel_arw, 0.0, 1000.0)?;
         check(
             "sensor.accel_bias_stability",
@@ -468,12 +473,7 @@ impl Config {
         check("sensor.accel_quant_step", s.accel_quant_step, 0.0, 100.0)?;
         check("sensor.mag_sat", s.mag_sat, 0.0, 1e6)?;
         check("sensor.baro_sat", s.baro_sat, 0.0, 1e9)?;
-        check(
-            "sensor.spike_probability",
-            s.spike_probability,
-            0.0,
-            1.0,
-        )?;
+        check("sensor.spike_probability", s.spike_probability, 0.0, 1.0)?;
         check("sensor.spike_amplitude", s.spike_amplitude, 0.0, 1e6)?;
         Ok(())
     }

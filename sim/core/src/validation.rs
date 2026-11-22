@@ -244,11 +244,7 @@ pub fn write_validation_with_version(
 
 /// Writes version 2 with 39 metadata floats per episode: the classic 17 plus
 /// the `TruthRecord` captured at the episode's last frame tick.
-pub fn write_validation_with_truth(
-    path: &Path,
-    cfg: &Config,
-    episodes: &[Episode],
-) -> Result<()> {
+pub fn write_validation_with_truth(path: &Path, cfg: &Config, episodes: &[Episode]) -> Result<()> {
     write_validation_impl(path, cfg, episodes, VERSION, true)
 }
 
@@ -376,9 +372,7 @@ pub fn read_validation(path: &Path) -> Result<ValidationSet> {
             };
             (c, 0, Split::Train)
         };
-        let truth = if vh.version == VERSION
-            && vh.header.meta_count as usize == META_V2_TRUTH
-        {
+        let truth = if vh.version == VERSION && vh.header.meta_count as usize == META_V2_TRUTH {
             let mut a = [0f32; TRUTH_COUNT];
             for v in a.iter_mut() {
                 let mut b = [0u8; 4];

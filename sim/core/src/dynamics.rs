@@ -331,7 +331,12 @@ pub fn derivative(t: f64, s: &State, wind: Vec3, atm: &Atmosphere, v: &Vehicle) 
     let (cd, cna, pitch_k, cm_delta) = if let Some(card) = &v.aero_card {
         match card.coeffs(mach, alpha_deg, v.aero.cd0) {
             Ok(c) => (c.cd0, c.cna, c.pitch_damping, c.cm_delta),
-            Err(SimError::AeroOutOfGrid { axis, value, lo, hi }) => {
+            Err(SimError::AeroOutOfGrid {
+                axis,
+                value,
+                lo,
+                hi,
+            }) => {
                 v.card_fault.set(Some(CardFault {
                     axis: fault_axis(&axis),
                     value,

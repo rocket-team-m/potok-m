@@ -85,7 +85,10 @@ fn card_interpolation_matches_grid_nodes_and_is_linear_between_them() {
     )
     .unwrap();
     assert_eq!(tilted.interpolate(AeroChannel::Cd0, 0.5, 5.0).unwrap(), 1.5);
-    assert_eq!(tilted.interpolate(AeroChannel::Cd0, 0.25, 2.5).unwrap(), 0.75);
+    assert_eq!(
+        tilted.interpolate(AeroChannel::Cd0, 0.25, 2.5).unwrap(),
+        0.75
+    );
 }
 
 #[test]
@@ -146,10 +149,7 @@ fn card_out_of_grid_during_a_run_returns_an_error() {
     cfg.aero.card_path = Some(path.clone());
     let sim = Simulator::new(cfg).unwrap();
     let err = sim.run_episode(0).unwrap_err();
-    assert!(
-        matches!(err, SimError::AeroOutOfGrid { .. }),
-        "got {err:?}"
-    );
+    assert!(matches!(err, SimError::AeroOutOfGrid { .. }), "got {err:?}");
     std::fs::remove_file(&path).unwrap();
 }
 
@@ -168,7 +168,11 @@ fn generated_card_reproduces_placeholder_and_placeholder_is_counted() {
         .unwrap()
         .run_episode(0)
         .unwrap();
-    assert_eq!(placeholder_uses(), after_placeholder, "card path must not mark");
+    assert_eq!(
+        placeholder_uses(),
+        after_placeholder,
+        "card path must not mark"
+    );
     assert_eq!(card.features, placeholder.features);
     assert_eq!(card.apogee_m.to_bits(), placeholder.apogee_m.to_bits());
     for (fa, fb) in card.frames.iter().zip(placeholder.frames.iter()) {
@@ -192,9 +196,8 @@ fn truth_extended_v2_roundtrip_and_legacy_readers_still_work() {
         u32::from_le_bytes(raw[48..52].try_into().unwrap()),
         META_V2_TRUTH as u32
     );
-    let per_episode = 8
-        + META_V2_TRUTH * 4
-        + cfg.frames_per_episode() * (cfg.feature_count() + TARGET_COUNT) * 4;
+    let per_episode =
+        8 + META_V2_TRUTH * 4 + cfg.frames_per_episode() * (cfg.feature_count() + TARGET_COUNT) * 4;
     assert_eq!(raw.len(), HEADER_SIZE + episodes.len() * per_episode);
 
     let rs = read_validation(&path).unwrap();

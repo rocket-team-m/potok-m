@@ -186,11 +186,11 @@ impl Simulator {
                 let mach = norm(v_rel) / air.speed_of_sound.max(1.0);
                 let vb = mat_t_vec(quat_to_matrix(state.quat()), v_rel);
                 let alpha_deg = state.omega()[2].atan2(vb[0]).to_degrees();
-                let coeffs = vehicle
-                    .aero_card
-                    .as_ref()
-                    .unwrap()
-                    .coeffs(mach, alpha_deg, vehicle.aero.cd0)?;
+                let coeffs = vehicle.aero_card.as_ref().unwrap().coeffs(
+                    mach,
+                    alpha_deg,
+                    vehicle.aero.cd0,
+                )?;
                 vehicle.card_coeffs = coeffs;
             }
 

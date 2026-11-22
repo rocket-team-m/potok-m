@@ -228,10 +228,8 @@ impl Sensor {
         sensor_cfg.gyro_noise = domain.gyro_noise;
         sensor_cfg.accel_noise = domain.accel_noise;
         sensor_cfg.lag_tau *= lag_scale;
-        let allan_gyro =
-            sensor_cfg.gyro_arw > 0.0 || sensor_cfg.gyro_bias_stability > 0.0;
-        let allan_accel =
-            sensor_cfg.accel_arw > 0.0 || sensor_cfg.accel_bias_stability > 0.0;
+        let allan_gyro = sensor_cfg.gyro_arw > 0.0 || sensor_cfg.gyro_bias_stability > 0.0;
+        let allan_accel = sensor_cfg.accel_arw > 0.0 || sensor_cfg.accel_bias_stability > 0.0;
         let latency = sensor_cfg.latency_steps.min(1024);
         let dt = cfg.run.dt;
         Self {
@@ -359,9 +357,7 @@ impl Sensor {
         };
 
         // Seeded fault injection. All draws happen only when enabled.
-        if self.cfg.spike_probability > 0.0
-            && self.rng.gen::<f64>() < self.cfg.spike_probability
-        {
+        if self.cfg.spike_probability > 0.0 && self.rng.gen::<f64>() < self.cfg.spike_probability {
             let axis = self.rng.gen_range(0..3);
             let sign = if self.rng.gen::<bool>() { 1.0 } else { -1.0 };
             out.gyro[axis] += sign * self.cfg.spike_amplitude;
@@ -388,10 +384,7 @@ impl Sensor {
             saturated = true;
         }
         let pitot = out.pitot;
-        if pitot.abs() > self.cfg.pitot_sat
-            || pitot > i16::MAX as f64
-            || pitot < i16::MIN as f64
-        {
+        if pitot.abs() > self.cfg.pitot_sat || pitot > i16::MAX as f64 || pitot < i16::MIN as f64 {
             saturated = true;
         }
         let pitot_dp = clamp(pitot, i16::MIN as f64, i16::MAX as f64).round() as i16;

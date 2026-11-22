@@ -108,15 +108,14 @@ struct RawCoefficients {
 
 impl AeroCard {
     pub fn from_toml_str(s: &str) -> Result<Self> {
-        let raw: RawCard = toml::from_str(s)
-            .map_err(|e| SimError::AeroCard(format!("TOML parse error: {e}")))?;
+        let raw: RawCard =
+            toml::from_str(s).map_err(|e| SimError::AeroCard(format!("TOML parse error: {e}")))?;
         Self::from_raw(raw)
     }
 
     pub fn from_file(path: &Path) -> Result<Self> {
-        let text = std::fs::read_to_string(path).map_err(|e| {
-            SimError::AeroCard(format!("{}: {e}", path.display()))
-        })?;
+        let text = std::fs::read_to_string(path)
+            .map_err(|e| SimError::AeroCard(format!("{}: {e}", path.display())))?;
         Self::from_toml_str(&text)
             .map_err(|e| SimError::AeroCard(format!("{}: {e}", path.display())))
     }
@@ -197,8 +196,7 @@ impl AeroCard {
         if v00 == v01 && v10 == v11 {
             return Ok(v00 + mu * (v10 - v00));
         }
-        Ok((1.0 - au) * ((1.0 - mu) * v00 + mu * v10)
-            + au * ((1.0 - mu) * v01 + mu * v11))
+        Ok((1.0 - au) * ((1.0 - mu) * v00 + mu * v10) + au * ((1.0 - mu) * v01 + mu * v11))
     }
 
     /// All four coefficients at one point. The `cd0` shift relative to
@@ -224,7 +222,9 @@ impl AeroCard {
 
 fn check_axis(name: &str, axis: &[f64]) -> Result<()> {
     if axis.len() < 2 {
-        return Err(SimError::AeroCard(format!("{name} needs at least two knots")));
+        return Err(SimError::AeroCard(format!(
+            "{name} needs at least two knots"
+        )));
     }
     for w in axis.windows(2) {
         if !w[0].is_finite() || !w[1].is_finite() || w[1] <= w[0] {
