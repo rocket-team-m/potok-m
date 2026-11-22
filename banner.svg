@@ -1,43 +1,29 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300" role="img" aria-label="Поток-М: ИИ-стек">
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300" role="img" aria-label="ИИ-СТЕК">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#0a1018"/>
-      <stop offset="0.55" stop-color="#0d1622"/>
-      <stop offset="1" stop-color="#111b28"/>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0c0c0c"/>
+      <stop offset="1" stop-color="#141414"/>
     </linearGradient>
     <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
-      <path d="M40 0 H0 V40" fill="none" stroke="#1b2736" stroke-width="1" opacity="0.55"/>
+      <path d="M40 0H0V40" fill="none" stroke="#262626" stroke-width="1"/>
     </pattern>
-    <linearGradient id="wave" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#22d3ee" stop-opacity="0"/>
-      <stop offset="0.45" stop-color="#22d3ee" stop-opacity="0.85"/>
-      <stop offset="1" stop-color="#22d3ee" stop-opacity="0"/>
-    </linearGradient>
-    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
-      <feGaussianBlur stdDeviation="5" result="b"/>
-      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-    </filter>
   </defs>
-
-  <rect width="1200" height="300" fill="url(#bg)"/>
-  <rect width="1200" height="300" fill="url(#grid)"/>
-  <rect x="0" y="0" width="8" height="300" fill="#22d3ee"/>
-
-  <g fill="none" stroke-linecap="round">
-    <path d="M560 218 C660 150 720 258 820 186 S980 132 1160 176" stroke="url(#wave)" stroke-width="2.5"/>
-    <path d="M560 248 C660 180 720 288 820 216 S980 162 1160 206" stroke="#22d3ee" stroke-width="1.5" opacity="0.28"/>
-    <path d="M700 270 Q900 120 1032 104" stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="4 9" opacity="0.4"/>
+  <rect width="1200" height="300" fill="url(#g)"/>
+  <rect width="1200" height="300" fill="url(#grid)" opacity="0.55"/>
+  <rect x="0" y="0" width="6" height="300" fill="#6b8fff"/>
+  <text x="56" y="62" fill="#6b8fff" font-family="DejaVu Sans Mono, monospace" font-size="18">[01] ПОТОК-М</text>
+  <text x="56" y="152" fill="#f5f5f5" font-family="DejaVu Sans, sans-serif" font-size="58" font-weight="600" letter-spacing="2">ИИ-СТЕК</text>
+  <text x="58" y="194" fill="#8a8a8a" font-family="DejaVu Sans Mono, monospace" font-size="19">обучение · дистилляция · инференс</text>
+  <line x1="56" y1="224" x2="1144" y2="224" stroke="#262626" stroke-width="1"/>
+  <text x="56" y="264" fill="#8a8a8a" font-family="DejaVu Sans Mono, monospace" font-size="14">OPEN SOURCE · RUST · TEAM TOOLING</text>
+  <g transform="translate(890,88)" fill="none" stroke="#6b8fff" stroke-width="2" opacity="0.9">
+    <path d="M0 132 L56 4 L112 132 L56 104 Z"/>
+    <path d="M56 104 L56 156"/>
+    <path d="M32 132 L80 132"/>
+    <circle cx="56" cy="52" r="8" fill="#6b8fff" stroke="none"/>
   </g>
-
-  <g filter="url(#glow)" opacity="0.95">
-    <path d="M1032 46 C1046 68 1046 90 1032 106 C1018 90 1018 68 1032 46 Z" fill="#0d1622" stroke="#22d3ee" stroke-width="2.5"/>
-    <circle cx="1032" cy="72" r="4.5" fill="#22d3ee"/>
-    <path d="M1018 88 L1004 108 L1018 102 M1046 88 L1060 108 L1046 102" fill="none" stroke="#22d3ee" stroke-width="2.5" stroke-linejoin="round"/>
-    <path d="M1026 106 L1032 126 L1038 106 Z" fill="#22d3ee" opacity="0.7"/>
+  <g transform="translate(760,210)" fill="none" stroke="#262626" stroke-width="2">
+    <path d="M0 20 C40 0 80 40 120 20 S200 0 240 20"/>
+    <path d="M0 36 C40 16 80 56 120 36 S200 16 240 36"/>
   </g>
-
-  <text x="56" y="132" font-family="'DejaVu Sans','Arial',sans-serif" font-size="54" font-weight="700" fill="#f2f6fb" letter-spacing="1">ПОТОК-М: ИИ</text>
-  <rect x="58" y="154" width="74" height="4" fill="#22d3ee"/>
-  <text x="56" y="196" font-family="'DejaVu Sans','Arial',sans-serif" font-size="20" fill="#22d3ee" opacity="0.92">Обучение · дистилляция · экспорт модели</text>
-  <text x="56" y="248" font-family="'DejaVu Sans','Arial',sans-serif" font-size="14" fill="#7d8ea3" letter-spacing="2">rocket-team-m / potok-m-ai</text>
 </svg>
