@@ -5,6 +5,35 @@ description: Что за изделие, куда летит и чего ком�
 
 «Поток-М» — двухступенчатая ракета на твёрдотопливных двигателях.
 
+Проект живёт в нескольких репозиториях: здесь — документация, ADR и общие
+артефакты; код, симулятор, прошивка и CAD-часть — в канонических репозиториях.
+
+## Канонические репозитории
+
+| Репозиторий | Что лежит |
+| --- | --- |
+| [potok-m](https://github.com/rocket-team-m/potok-m) | этот сайт, ADR, общие артефакты |
+| [potok-m-ai](https://github.com/rocket-team-m/potok-m-ai) | обучение модели, LoopWM/LRS-RNN, бортовой инференс на Rust |
+| [potok-m-sim](https://github.com/rocket-team-m/potok-m-sim) | 6-DoF симулятор, рандомизация, генерация данных и validation v3 |
+| [potok-m-protocol](https://github.com/rocket-team-m/potok-m-protocol) | UART-протокол, генератор биндингов, план прошивки STM32 |
+| [potok-m-firmware](https://github.com/rocket-team-m/potok-m-firmware) | прошивка STM32 на Embassy, драйвер протокола |
+| [potok-m-edge](https://github.com/rocket-team-m/potok-m-edge) | бортовой инференс, калибровка, спекулятивный dispatch |
+| [potok-m-3d](https://github.com/rocket-team-m/potok-m-3d) | CAD-артефакты и обмен геометрией |
+| [RocketCraft / potok-m-workbench](https://github.com/rocket-team-m/potok-m-workbench) | настольный воркбенч: CAD → mesh → CFD/FEA → аэрокарточка → траектория → отчёт |
+
+Изменения кода вносятся в канонический репозиторий, а не сюда. Аэрокарточку,
+которую потребляет симулятор, производит RocketCraft.
+
+## Лицензия
+
+Собственный код — `GPL-3.0-or-later`. Для проприетарного использования
+предусмотрена отдельная коммерческая лицензия (`LICENSE-COMMERCIAL.md` в корне
+репозитория). Сторонние компоненты сохраняют свои лицензии: `Apache-2.0`
+(solidcore), `MIT OR Apache-2.0` (SolidCraft-производные части), `OFL-1.1`
+(Inter) и лицензия OpenTUI Mono; `NOTICE` и `THIRD-PARTY-LICENSES` поставляются
+вместе с артефактами. Внутреннее использование без распространения GPL не
+обязывает открывать код.
+
 ## Тактико-технические характеристики
 
 | Параметр | Значение |
