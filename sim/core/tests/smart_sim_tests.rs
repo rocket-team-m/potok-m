@@ -84,7 +84,7 @@ fn domain_randomization_stays_within_tolerances() {
         assert!((0.85..=1.10).contains(&(c.static_margin_cal as f64)));
         assert!((0.0010..=0.0020).contains(&(c.gyro_noise as f64)));
         assert!((c.area_m2 - 0.00817).abs() < 1e-9);
-        assert!((c.thrust_peak_n - 363.0).abs() < 1e-6);
+        assert!((c.thrust_peak_n - 400.0).abs() < 1e-6);
         assert!((0.0..=15.0).contains(&e.meta.v_10));
         assert!((0.0..=8.0).contains(&e.meta.shear_delta));
         if e.meta.gust_amplitude > 0.0 {
@@ -221,7 +221,7 @@ fn validation_v2_roundtrip_carries_conditioning_and_split() {
             cd0: 0.35,
             static_margin_cal: (0.0765 / (2.0 * (0.00817_f64 / std::f64::consts::PI).sqrt()))
                 as f32,
-            thrust_peak_n: 363.0,
+            thrust_peak_n: 400.0,
             gyro_noise: 0.0015,
         }
     );

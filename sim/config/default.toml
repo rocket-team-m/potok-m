@@ -106,15 +106,15 @@ cd_mach = [[0.0, 0.35], [0.4, 0.35], [0.7, 0.39], [0.9, 0.48], [1.1, 0.52], [1.5
 #     burn 5-6 s, propellant 1.88 kg.
 #   stage 2 RDK-1000: 1.0-1.2 kNs, avg 260-270 N, peak 550-600 N,
 #     burn 3-3.5 s, propellant 1.0 kg.
-# Motor limit: total impulse <= 3.0 kNs. The profile below uses 2.0 + 1.0 kNs
-# (363 N for 5.42 s and 312.5 N for 3.2 s), inside the passport peak thrusts.
+# Motor passports: 2.2 + 1.0 kNs minimum (400 N for 5.5 s and 312.5 N for
+# 3.2 s), both below the passport peak thrusts.
 # Mass flows 0.342 / 0.3125 kg/s are the passport propellant masses divided
 # by the burn times. Peaks and thrust ripple are NOT modelled; only average
 # thrust and mass flow are.
 thrust_profile = [
   [0.0, 0.0, 0.0],
-  [0.08, 363.0, 0.342],
-  [5.5, 363.0, 0.342],
+  [0.08, 400.0, 0.342],
+  [5.5, 400.0, 0.342],
   [5.5, 312.5, 0.3125],
   [8.7, 312.5, 0.3125],
   [8.7, 0.0, 0.0],
