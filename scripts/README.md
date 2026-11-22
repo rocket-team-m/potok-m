@@ -44,12 +44,12 @@ but the ECE gate does not (the head is trained toward confidence 0.95 while its
 command error is ~1). That is an engine finding, not a harness defect; the
 script reports it as FAIL and exits 1 until the engine closes it.
 
-## PID vs AI assistant (`ab_pid_vs_ai.py`) — CLOSED-LOOP, supersedes the surrogate
+## PID vs AI assistant (`ab_pid_vs_ai.py`) — FINAL run4, closed-loop
 
-The earlier surrogate A/B (commit `237920a`) is **void**: it measured a
-tilt/gravity proxy on recorded commands, because the simulator had no
-command→dynamics seam. `sim` now has one (`c25eabb`), and this script measures
-apogee and lateral RMS from the flown-truth POTOKTRJ v1 sidecar instead.
+This is the FINAL report. It SUPERSEDES the 12 s closed-loop report (commit
+`42df574`) and the gravity/tilt surrogate report (commit `237920a`); both are
+void. The simulator's command→dynamics seam (`c25eabb`) is used read-only, and
+apogee/lateral RMS come from the flown-truth POTOKTRJ v1 sidecar.
 
 ```bash
 cargo build --release --manifest-path scripts/ab_control/Cargo.toml \
@@ -57,32 +57,47 @@ cargo build --release --manifest-path scripts/ab_control/Cargo.toml \
 ai/.venv/bin/python scripts/ab_pid_vs_ai.py
 ```
 
-`scripts/ab_control/` is a ~100-line Rust driver that only READS `sim/` through
-its public API (`run_episode_with_control`). The CLI's `--control-file` applies
-one TSV to every episode in a run, so per-episode control needs the API. No sim
-source/config is touched; artifacts land in `scripts/ab_work/`.
+`scripts/ab_control/` is a thin Rust driver reading `sim/` through its public
+API (`run_episode_with_control`); the CLI's `--control-file` applies one TSV to
+all episodes, so per-episode control needs the API. No sim source/config is
+touched; artifacts land in `scripts/ab_work/`.
 
-Scope: 20 OR-aligned held-out episodes / 4 scenarios (indices
-16..19,36..39,56..59,76..79,96..99), 12 s, 50 Hz. Baseline = zero command.
-Assisted = `physics_baseline(frame) + student Delta` in degrees (×0.12 rad,
-then ×180/π), emitted only where the interlock allows (401/12000 ticks on seed
-1). Both exported students are scored (`loopwm` primary, `lrs` secondary).
-The student forward is reimplemented locally from the trained/exported weights
-because an uncommitted change in `ai/src/potok_ai/student.py` is not valid for
-these exports; it reproduces the old report's tracking RMSE exactly.
+Scope: run4, 20 OR-aligned held-out episodes / 4 scenarios (indices
+16..19,36..39,56..59,76..79,96..99), 1500 frames each, 30 s, 50 Hz, seed 1.
+Baseline = zero command. Assisted = `physics_baseline(frame) + model Delta`,
+mapped ×0.12 rad ×180/π to degrees and emitted only where `ai_healthy`
+(AI_READY/no FAULT/phase interlock) is set and confidence clears the threshold.
+Run4 exports: `loopwm_student.bin` (primary), `lrs.bin`, and the windowed
+`lite.pt` (50-frame window). The v2 binary has NO calibration field — thresholds
+are read from run4 `calibration.json` (loopwm 0, lrs 0.313924, lite 0.011412),
+never hardcoded. AI-active ticks actually used: 18 404 on seed 1 (≈920/episode).
 
-Seeds 1, 2, 3: the simulator supports them, so all three are run. Seeds 2/3 use
-the seed-1-trained students and are labelled off-training generalization, not
-a training seed sweep.
+Seeds 1, 2, 3 are all run; seeds 2/3 reuse the seed-1 exports and are labelled
+off-training generalization, not a training seed sweep.
 
 Writes `ab_report.json` (per-scenario, aggregate, per-seed, sidecar sha256) and
 `ab_report.md`. Exit `0` iff the primary assisted arm reduces lateral RMS on
 seed 1, `1` otherwise; numbers are written before exiting either way.
 
-Current result (seed 1, loopwm): lateral RMS 566.002412 → 566.002452 m
-(+3.9e-5 m, 100.000007 % — below the f32 coordinate ULP at ~600 m, a tie);
-apogee 1321.346 → 1321.343 m (-0.0028 m). All three seeds and both students
-are essentially tied or slightly worse; the script exits 1. The reason is that
-the interlock only opens in the last ~0.4 s of a 12 s flight, so the assist has
-almost no time to act. Do not read this as the controller being generally
-useless — it is untested over a long AI-active window.
+FINAL result (seed 1, loopwm): lateral RMS 1528.366295 → 1528.725432 m
+(+0.359 m, 100.023498 % of baseline), apogee 1734.977 → 1733.811 m (-1.167 m).
+`lrs` (+0.067 m lateral, -0.198 m apogee) and `lite` (+0.161 m, -0.474 m) also
+worsen. Seeds 2/3 agree in sign for all three arms. The script exits 1.
+Differences are real above the f32 ULP (~1.2e-4 m at this scale) but small
+(0.004–0.026 % of lateral RMS). No physics, gain or threshold was tuned to win.
+The paired interlock schedule comes from the baseline run; commands are
+replayed by frame index, so later states diverge — that is the closed loop.
+
+## Root-cause diagnosis (`ab_diagnose.py`)
+
+```bash
+ai/.venv/bin/python scripts/ab_diagnose.py
+```
+
+Read-only follow-up: writes `ab_diagnosis.md/.json` (plus TSVs/trajectories in
+`scripts/ab_diag_work/`). It adds an `oracle_gtheta` arm, a DIAGNOSTIC scale
+sweep of the student correction (0/0.25/0.5/1/2), and verifies feature order,
+runtime equivalence and the confidence gate. It never changes `ab_report.md`.
+Finding: the exact oracle is worse than zero command on all three seeds, and
+no scale wins, so the cause is the command→fin mapping / actuator authority,
+not the student model or its inputs.

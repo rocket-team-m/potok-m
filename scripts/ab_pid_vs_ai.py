@@ -8,11 +8,11 @@ gravity/tilt surrogate. No sim source or config is modified: a thin Rust driver
 under scripts/ab_control/ calls the public API because the CLI's --control-file
 applies one TSV to every episode, not one per episode.
 
-The previous surrogate report is SUPERSEDED by this one.
+Final run4 (full 30 s flight) report. The earlier 12 s closed-loop report and
+the gravity/tilt surrogate report are SUPERSEDED.
 
 Usage:
     ai/.venv/bin/python scripts/ab_pid_vs_ai.py
-    ai/.venv/bin/python scripts/ab_pid_vs_ai.py --seeds 1   # primary only
 """
 
 from __future__ import annotations
@@ -27,7 +27,6 @@ from pathlib import Path
 
 import numpy as np
 import torch
-import torch.nn.functional as F
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
@@ -35,17 +34,19 @@ sys.path.insert(0, str(ROOT / "ai" / "src"))
 
 from potok_ai.data import read_validation  # noqa: E402
 from potok_ai.export import load_student_export  # noqa: E402
+from potok_ai.loopwm_lite import LiteConfig, LiteModel  # noqa: E402
 from potok_ai.physics import physics_baseline  # noqa: E402
 
 RAD_PER_NORM = 0.12  # sim/core/src/optimizer.rs:41, g_theta clamp, same mapping as the old surrogate
 DEG_PER_RAD = 180.0 / np.pi
 MAX_DEG = 10.0  # sim/core/src/control.rs:28, hard actuator limit (LOUD if exceeded)
 INTERVENTION_EPS = 1e-9
-STUDENTS = ("loopwm", "lrs")
+STUDENTS = ("loopwm", "lrs", "lite")
 PRIMARY = "loopwm"
 
-CONFIG = ROOT / "ai" / "out" / "run2" / "sim.toml"
-MODEL_DIR = ROOT / "ai" / "out" / "run2"
+CONFIG = ROOT / "ai" / "out" / "run4" / "sim.toml"
+MODEL_DIR = ROOT / "ai" / "out" / "run4"
+DATA_DIR = MODEL_DIR / "data"
 HELPER = SCRIPTS / "ab_control" / "target" / "release" / "ab-control"
 
 
@@ -53,59 +54,42 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-class CanonicalStudent:
-    """Edge-equivalent forward of the exported student (HEAD, not in-flight edits).
-
-    ai/src/potok_ai/student.py carries an uncommitted forward change made after
-    these exports were trained. This reimplements the committed step(): the same
-    one the edge runtime mirrors in student_runtime.rs.
-    """
+class StudentArm:
+    """Exported v2 stateful student, run with its trained forward (to_model())."""
 
     def __init__(self, export) -> None:
-        layers = export.layers
-        t = lambda name: torch.as_tensor(layers[name].tensor, dtype=torch.float32)
-        self.width, self.n_blocks = export.width, export.n_blocks
-        self.loops, self.decay = export.loops, export.decay
-        self.stem_w, self.stem_b = t("stem.weight"), t("stem.bias")
-        self.norm_w, self.norm_b = t("norm.weight"), t("norm.bias")
-        self.alloc = t("alloc_logits")[: self.loops].softmax(0)
-        self.head_corr_w, self.head_corr_b = t("head_corr.weight"), t("head_corr.bias")
-        self.head_conf_w, self.head_conf_b = t("head_conf.weight"), t("head_conf.bias")
-        self.bound = float(np.tanh(abs(export.g_max)))
-        self.rec_h, self.rec_x, self.proj = [], [], []
-        for b in range(self.n_blocks):
-            self.rec_h.append((t(f"blocks.{b}.rec_h.weight"), t(f"blocks.{b}.rec_h.bias")))
-            self.rec_x.append((t(f"blocks.{b}.rec_x.weight"), t(f"blocks.{b}.rec_x.bias")))
-            proj = layers[f"blocks.{b}.proj"]
-            u = torch.as_tensor(proj.u_codes.astype(np.float32) * proj.alpha_u).reshape(
-                proj.in_features, proj.rank)
-            v = torch.as_tensor(proj.v_codes.astype(np.float32) * proj.alpha_v).reshape(
-                proj.out_features, proj.rank)
-            s = torch.as_tensor(proj.scales.copy())
-            self.proj.append((u * s) @ v.T)
-        self.reset()
+        self.model = export.to_model()
 
     def reset(self) -> None:
-        self.h = [torch.zeros(self.width) for _ in range(self.n_blocks)]
+        self.model.reset_state()
 
     @torch.no_grad()
-    def step(self, frame) -> tuple[np.ndarray, float]:
-        source = F.linear(torch.as_tensor(frame, dtype=torch.float32),
-                          self.stem_w, self.stem_b)
-        total = None
-        for iteration in range(self.loops):
-            for b in range(self.n_blocks):
-                wh, bh = self.rec_h[b]
-                wx, bx = self.rec_x[b]
-                candidate = torch.tanh(F.linear(source, wx, bx) + F.linear(self.h[b], wh, bh))
-                self.h[b] = 0.8 * self.h[b] + 0.2 * candidate
-                source = F.linear(self.h[b], self.proj[b])
-            term = self.alloc[iteration] * (self.decay ** iteration) * source
-            total = term if total is None else total + term
-        z = F.layer_norm(total + source, (self.width,), self.norm_w, self.norm_b, 1e-5)
-        delta = torch.tanh(F.linear(z, self.head_corr_w, self.head_corr_b)) * self.bound
-        conf = torch.sigmoid(F.linear(z, self.head_conf_w, self.head_conf_b).squeeze(-1))
-        return delta.numpy(), float(conf)
+    def step(self, frame, active: bool = True) -> tuple[np.ndarray, float]:
+        delta, conf = self.model.step(frame)
+        return delta.detach().numpy(), float(conf)
+
+
+class LiteArm:
+    """Windowed lite export: last `window` frames, then pooled head output."""
+
+    def __init__(self, model: LiteModel) -> None:
+        self.model = model.eval()
+        self.window = model.cfg.window
+        self.frames: list[np.ndarray] = []
+
+    def reset(self) -> None:
+        self.frames = []
+
+    @torch.no_grad()
+    def step(self, frame, active: bool = True) -> tuple[np.ndarray, float]:
+        self.frames.append(np.asarray(frame[:14], dtype=np.float32))
+        if len(self.frames) < self.window or not active:
+            return np.zeros(2, dtype=np.float64), 0.0
+        window = torch.as_tensor(np.stack(self.frames[-self.window:])).unsqueeze(0)
+        cond = torch.as_tensor(np.asarray(frame[14:20], dtype=np.float32)).unsqueeze(0)
+        latent, _ = self.model.refine(window, cond)
+        output = self.model.head_from_latent(latent.mean(1))[0]
+        return output[:2].numpy().astype(np.float64), float(output[2])
 
 
 def run_helper(seed: int, indices: list[int], out_dir: Path,
@@ -164,21 +148,38 @@ def read_track(path: Path) -> dict[int, dict]:
 
 
 def student_specs() -> list[dict]:
+    """Thresholds come from run4 calibration.json: the export format has no field."""
+    files = {
+        "loopwm": MODEL_DIR / "loopwm" / "loopwm_student.bin",
+        "lrs": MODEL_DIR / "lrs" / "lrs.bin",
+        "lite": MODEL_DIR / "lite" / "lite.pt",
+    }
     specs = []
     for name in STUDENTS:
-        sub = "loopwm" if name == "loopwm" else "lrs"
-        bin_path = MODEL_DIR / sub / ("loopwm_student.bin" if name == "loopwm" else "lrs.bin")
-        cal_path = MODEL_DIR / sub / "calibration.json"
-        export = load_student_export(bin_path)
-        if export.in_features != 20:
-            raise ValueError(f"{name}: expected 20-input smart frame, got {export.in_features}")
+        path = files[name]
+        if not path.is_file():
+            raise FileNotFoundError(f"missing {path}")
+        cal_path = MODEL_DIR / name / "calibration.json"
         cal = json.loads(cal_path.read_text())
-        specs.append({
-            "name": name, "bin": str(bin_path.relative_to(ROOT)),
-            "sha256": sha256(bin_path), "g_max": export.g_max,
-            "threshold": float(cal["threshold"]),
-            "model": CanonicalStudent(export),
+        if name == "lite":
+            stored = torch.load(path, map_location="cpu", weights_only=True)
+            model = LiteModel(LiteConfig(**stored["model_config"]))
+            model.load_state_dict(stored["state_dict"], strict=False)
+            spec = {"model": LiteArm(model), "g_max": float(model.cfg.g_max),
+                    "kind": "windowed lite torch export"}
+        else:
+            export = load_student_export(path)
+            if export.in_features != 20:
+                raise ValueError(f"{name}: expected 20-input frame, got {export.in_features}")
+            spec = {"model": StudentArm(export), "g_max": export.g_max,
+                    "kind": "v2 stateful student binary export"}
+        spec.update({
+            "name": name, "bin": str(path.relative_to(ROOT)),
+            "sha256": sha256(path), "threshold": float(cal["threshold"]),
+            "calibration": str(cal_path.relative_to(ROOT)),
+            "calibration_method": cal["method"],
         })
+        specs.append(spec)
     return specs
 
 
@@ -186,9 +187,9 @@ def build_controls(baseline, spec: dict, out_dir: Path) -> dict:
     """One TSV per episode; interlock = ai_healthy AND calibrated confidence."""
     out_dir.mkdir(parents=True, exist_ok=True)
     model = spec["model"]
-    stats = {"rows": 0, "gate_open_ticks": 0, "gate_trips": 0,
-             "interventions": 0, "clipped_ticks": 0, "max_command_deg": 0.0,
-             "tracking_sq": 0.0}
+    stats = {"rows": 0, "ai_healthy_ticks": 0, "gate_open_ticks": 0,
+             "gate_trips": 0, "interventions": 0, "clipped_ticks": 0,
+             "max_command_deg": 0.0, "tracking_sq": 0.0}
     for ep in baseline.episodes:
         features = np.asarray(ep.frames[:, :14], dtype=np.float32)
         cond = np.asarray(ep.conditioning, dtype=np.float32)
@@ -198,7 +199,7 @@ def build_controls(baseline, spec: dict, out_dir: Path) -> dict:
         with torch.no_grad():
             for i in range(len(features)):
                 frame = np.concatenate((features[i], cond)).astype(np.float32)
-                delta, conf = model.step(frame)
+                delta, conf = model.step(frame, active=targets[i, 3] > 0.5)
                 deltas.append(np.asarray(delta, dtype=np.float64))
                 confs.append(float(conf))
         delta = np.asarray(deltas, dtype=np.float64)
@@ -217,6 +218,7 @@ def build_controls(baseline, spec: dict, out_dir: Path) -> dict:
 
         active = gate & (np.max(np.abs(deg), axis=1) > INTERVENTION_EPS)
         stats["rows"] += len(deg)
+        stats["ai_healthy_ticks"] += int((targets[:, 3] > 0.5).sum())
         stats["gate_open_ticks"] += int(gate.sum())
         stats["gate_trips"] += int((~gate).sum())
         stats["interventions"] += int(active.sum())
@@ -276,10 +278,10 @@ def markdown(report: dict) -> str:
     out = [
         "# PID (zero command) vs AI assistant — closed-loop OR-aligned A/B",
         "",
-        "**This report SUPERSEDES the surrogate A/B** (`237920a`, the previous "
-        "`ab_report.json/.md`). The old apogee/lateral numbers were a gravity/tilt "
-        "surrogate on recorded commands; they are void, not a smaller version of "
-        "these results.",
+        "**FINAL run4 report (full 30 s flights). It SUPERSEDES both earlier "
+        "reports**: the 12 s closed-loop A/B (commit `42df574`) and the original "
+        "gravity/tilt surrogate A/B (commit `237920a`). Those files are void, not "
+        "a smaller version of these results.",
         "",
         "Apogee and lateral RMS are now measured directly from the flown-truth "
         "`validation.trajectory` sidecar (POTOKTRJ v1, per-tick x/y/z/vx/vy/vz)",
@@ -290,22 +292,24 @@ def markdown(report: dict) -> str:
         "",
         "## Protocol",
         "",
-        "- Seed 1: the 20 OR-aligned held-out episodes (indices "
-        "16..19,36..39,56..59,76..79,96..99) across scenario_16..19, from "
-        "`ai/out/run2/sim.toml` (12 s, 50 Hz). Baseline validation is "
-        "byte-identical to `ai/out/run2/data/heldout_validation.bin`.",
+        "- Seed 1: 20 OR-aligned held-out episodes (indices "
+        "16..19,36..39,56..59,76..79,96..99), 4 scenarios, 1500 frames each, "
+        "from `ai/out/run4/sim.toml` (30 s, 50 Hz). Baseline validation is "
+        "byte-identical to `ai/out/run4/data/heldout_validation.bin`.",
         "- Seeds 2 and 3: same 20 indices/scenarios, generated with `--seed 2/3`; "
-        "the students were NOT retrained, so these are off-training generalization "
+        "the exports were NOT retrained, so these are off-training generalization "
         "checks, not a seed sweep of the training procedure.",
         "- Baseline arm: no control file, zero command on every tick.",
-        "- Assisted arm: per-tick `command = physics_baseline(frame) + student Delta`, "
-        "the same residual correction as the surrogate report. The exported weights "
-        "are run through the committed (edge-equivalent) student forward in "
-        "`scripts/ab_pid_vs_ai.py::CanonicalStudent`; the uncommitted change in "
-        "`ai/src/potok_ai/student.py` is NOT used, because these exports were "
-        "trained against the old forward. Interlock kept: a "
-        "command is emitted only where the recorded reference says `ai_healthy` and "
-        "the calibrated student confidence clears its threshold; otherwise zero.",
+        "- Assisted arm: per-tick `command = physics_baseline(frame) + model Delta`. "
+        "`loopwm`/`lrs` use the exported v2 stateful students with their trained "
+        "forward (`load_student_export(...).to_model()`). `lite` uses the exported "
+        "windowed torch model over the last 50 frames (no command before tick 50). "
+        "A command is emitted only where `ai_healthy` (AI_READY, no FAULT, phase "
+        "interlock allows) is set AND the model's confidence clears its threshold.",
+        "- Calibration: the v2 export binary has NO calibration field; thresholds "
+        "are read from each run4 `calibration.json` (loopwm "
+        f"{report['calibration']['loopwm']:.6g}, lrs {report['calibration']['lrs']:.6g}, "
+        f"lite {report['calibration']['lite']:.6g}). Nothing is hardcoded.",
         f"- Unit mapping: normalised command × {RAD_PER_NORM} rad × 180/π = degrees "
         f"(the reference optimizer's ±0.12 rad clamp, same scale as the old "
         f"surrogate). Commands beyond the seam's ±{MAX_DEG:.0f}° actuator limit are "
@@ -380,18 +384,20 @@ def markdown(report: dict) -> str:
         "the assisted command moves the vehicle, later frames differ from the "
         "baseline run — that is the point of the closed-loop comparison, but the "
         "interlock schedule stays the paired baseline one.",
-        "- Lateral RMS is over the whole 12 s flown trajectory, not just the "
-        "interlock-open tail; the old report's 401-tick restriction no longer applies "
-        "to the measurement (it still applies to when a command can be emitted).",
-        "- Seeds 2/3 use the seed-1-trained students; they test input robustness, "
+        "- Lateral RMS is over the whole 30 s flown trajectory, not just the "
+        "AI-active tail; the earlier 12 s dataset's tiny active window no longer "
+        "limits the measurement.",
+        "- Seeds 2/3 use the seed-1-trained exports; they test input robustness, "
         "not training reproducibility. No seed, scenario or episode was dropped.",
+        "- The calibration `isotonic` map itself is not exported in calibration.json; "
+        "only its threshold is available, and it is applied to the raw confidence. "
+        "This is an upper bound on how often the gate opens.",
         "- `clipped_ticks` is the seam's hard ±10° actuator bound, not a tuning knob.",
         "- Measurement floor: the sidecar stores f32 positions. One ULP is about "
-        f"{float(np.spacing(np.float32(600.0))):.2e} m at ~600 m lateral distance and "
-        f"{float(np.spacing(np.float32(1300.0))):.2e} m at ~1300 m altitude. The "
-        "lateral deltas (~4e-5 m) are below one coordinate ULP — numerically a tie; "
-        "the apogee deltas (~-0.003 m) are ~20 ULP but still physically negligible. "
-        "No win survives rounding.",
+        f"{float(np.spacing(np.float32(s1['baseline']['lateral_rms_m']))):.2e} m at the "
+        f"measured lateral scale and {float(np.spacing(np.float32(s1['baseline']['apogee_m']))):.2e} "
+        "m at the measured altitude. Compare the deltas above against that floor "
+        "before calling any difference a win.",
     ]
     return "\n".join(out)
 
@@ -410,10 +416,12 @@ def main() -> None:
     specs = student_specs()
     seed_order = sorted(args.seeds)
     report_seeds = {}
-    reference = read_validation(ROOT / "ai" / "out" / "run2" / "data"
-                                / "heldout_validation.bin")
+    reference_path = DATA_DIR / "heldout_validation.bin"
+    reference = read_validation(reference_path)
     indices = [int(e.index) for e in reference.episodes]
-    if len(indices) != 20:
+    if len(indices) != 20 or reference.header.frames_per_episode != 1500:
+        raise ValueError(f"expected 20 x 1500-frame held-out episodes, got "
+                         f"{len(indices)} x {reference.header.frames_per_episode}")
         raise ValueError(f"expected 20 held-out indices, got {len(indices)}")
     for seed in seed_order:
         work = args.work_dir / f"seed{seed}"
@@ -421,6 +429,8 @@ def main() -> None:
         printed = run_helper(seed, indices, baseline_dir, None)
         baseline = read_validation(baseline_dir / "validation.bin")
         baseline_track = read_track(baseline_dir / "validation.trajectory")
+        if seed == 1 and sha256(baseline_dir / "validation.bin") != sha256(reference_path):
+            raise RuntimeError("seed-1 baseline does not match run4 held-out data")
         for idx, (apogee, lateral) in printed.items():
             got = baseline_track[idx]
             if abs(got["apogee_m"] - apogee) > 1e-3 or abs(got["lateral_rms_m"] - lateral) > 1e-3:
@@ -451,12 +461,17 @@ def main() -> None:
     beats_lateral = primary_agg["assisted"]["lateral_rms_m"] < primary_agg["baseline"]["lateral_rms_m"]
     report = {
         "task": "closed-loop AI assist vs zero-command PID on OR-aligned held-out scenarios",
-        "supersedes": "surrogate A/B report at commit 237920a (void)",
+        "supersedes": "12 s closed-loop A/B (commit 42df574) and surrogate A/B "
+                      "(commit 237920a); both void",
         "measurement": "POTOKTRJ v1 flown-truth sidecar, not surrogate",
         "sim_source": "commit c25eabb control seam, read-only via scripts/ab_control",
         "config": str(CONFIG.relative_to(ROOT)),
+        "calibration": {s["name"]: s["threshold"] for s in specs},
+        "calibration_source": "run4 <model>/calibration.json; the v2 export binary "
+                              "has no calibration field, nothing hardcoded",
+        "frames_per_episode": reference.header.frames_per_episode,
         "seed_order": seed_order,
-        "seed_note": "seeds 2/3 use seed-1-trained students: off-training generalization, "
+        "seed_note": "seeds 2/3 use seed-1-trained exports: off-training generalization, "
                      "not a training seed sweep",
         "held_out_indices": indices,
         "conversion": {
