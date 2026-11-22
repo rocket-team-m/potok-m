@@ -333,8 +333,23 @@ fn cast3(v: Vec3) -> [f32; 3] {
 /// Names accepted in `output.features`. `pitot_q` is kept as an alias for the
 /// integer `pitot_dp` wire field (Pa).
 pub const FEATURE_NAMES: &[&str] = &[
-    "gyro_x", "gyro_y", "gyro_z", "acc_x", "acc_y", "acc_z", "mag_x", "mag_y", "mag_z", "baro_h",
-    "pitot_q", "pitot_dp", "alpha_deg", "beta_deg", "q_dyn_kpa", "a_lat_resid", "drag_est",
+    "gyro_x",
+    "gyro_y",
+    "gyro_z",
+    "acc_x",
+    "acc_y",
+    "acc_z",
+    "mag_x",
+    "mag_y",
+    "mag_z",
+    "baro_h",
+    "pitot_q",
+    "pitot_dp",
+    "alpha_deg",
+    "beta_deg",
+    "q_dyn_kpa",
+    "a_lat_resid",
+    "drag_est",
     "static_margin_cal",
 ];
 

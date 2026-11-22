@@ -167,14 +167,9 @@ impl Simulator {
                         wind.gust_active_step(step),
                         wind.shear_active(state.pos()[2]),
                     );
-                    frame.physics = PhysicsFeatures::from_state(
-                        &state,
-                        w,
-                        air,
-                        &vehicle,
-                        frame.accel,
-                    )
-                    .as_array();
+                    frame.physics =
+                        PhysicsFeatures::from_state(&state, w, air, &vehicle, frame.accel)
+                            .as_array();
                     let target = optimizer.solve(&state, w, &vehicle, phase, &frame);
                     if !frame.ai_input_valid() {
                         invalid_frames += 1;

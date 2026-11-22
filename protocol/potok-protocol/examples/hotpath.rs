@@ -161,23 +161,53 @@ fn main() {
 
     let low_req = sample_lowlat_request();
     let mut low_req_buf = [0u8; LOWLAT_REQUEST_SIZE];
-    report("lowlat request encode", LOWLAT_REQUEST_SIZE as u64, iters, reps, || {
-        let _ = black_box(encode_lowlat_request(black_box(&low_req), black_box(&mut low_req_buf)));
-    });
+    report(
+        "lowlat request encode",
+        LOWLAT_REQUEST_SIZE as u64,
+        iters,
+        reps,
+        || {
+            let _ = black_box(encode_lowlat_request(
+                black_box(&low_req),
+                black_box(&mut low_req_buf),
+            ));
+        },
+    );
     encode_lowlat_request(&low_req, &mut low_req_buf).unwrap();
-    report("lowlat request decode", LOWLAT_REQUEST_SIZE as u64, iters, reps, || {
-        let _ = black_box(decode_lowlat_request(black_box(&low_req_buf)));
-    });
+    report(
+        "lowlat request decode",
+        LOWLAT_REQUEST_SIZE as u64,
+        iters,
+        reps,
+        || {
+            let _ = black_box(decode_lowlat_request(black_box(&low_req_buf)));
+        },
+    );
 
     let low_rep = sample_lowlat_reply();
     let mut low_rep_buf = [0u8; LOWLAT_REPLY_SIZE];
-    report("lowlat reply encode", LOWLAT_REPLY_SIZE as u64, iters, reps, || {
-        let _ = black_box(encode_lowlat_reply(black_box(&low_rep), black_box(&mut low_rep_buf)));
-    });
+    report(
+        "lowlat reply encode",
+        LOWLAT_REPLY_SIZE as u64,
+        iters,
+        reps,
+        || {
+            let _ = black_box(encode_lowlat_reply(
+                black_box(&low_rep),
+                black_box(&mut low_rep_buf),
+            ));
+        },
+    );
     encode_lowlat_reply(&low_rep, &mut low_rep_buf).unwrap();
-    report("lowlat reply decode", LOWLAT_REPLY_SIZE as u64, iters, reps, || {
-        let _ = black_box(decode_lowlat_reply(black_box(&low_rep_buf)));
-    });
+    report(
+        "lowlat reply decode",
+        LOWLAT_REPLY_SIZE as u64,
+        iters,
+        reps,
+        || {
+            let _ = black_box(decode_lowlat_reply(black_box(&low_rep_buf)));
+        },
+    );
 
     let mut sink = 0u64;
     report(
@@ -186,7 +216,10 @@ fn main() {
         iters,
         reps,
         || {
-            let _ = black_box(encode_lowlat_request(black_box(&low_req), black_box(&mut low_req_buf)));
+            let _ = black_box(encode_lowlat_request(
+                black_box(&low_req),
+                black_box(&mut low_req_buf),
+            ));
             let out = black_box(decode_lowlat_request(black_box(&low_req_buf))).unwrap();
             sink = sink.wrapping_add(u64::from(out.seq) ^ u64::from(out.time_us));
         },
@@ -200,7 +233,10 @@ fn main() {
         iters,
         reps,
         || {
-            let _ = black_box(encode_lowlat_reply(black_box(&low_rep), black_box(&mut low_rep_buf)));
+            let _ = black_box(encode_lowlat_reply(
+                black_box(&low_rep),
+                black_box(&mut low_rep_buf),
+            ));
             let out = black_box(decode_lowlat_reply(black_box(&low_rep_buf))).unwrap();
             sink = sink.wrapping_add(u64::from(out.seq) ^ u64::from(out.compute_us));
         },

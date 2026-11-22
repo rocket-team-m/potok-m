@@ -41,13 +41,27 @@ fn is_request(frame: &Frame) -> bool {
 }
 
 fn version_expr(profile: &Profile, frame: &Frame) -> (String, String) {
-    let v = if is_request(frame) { profile.versions.request } else { profile.versions.reply };
-    let ty = frame.fields.iter().find(|f| f.name == "version").unwrap().ty.clone();
+    let v = if is_request(frame) {
+        profile.versions.request
+    } else {
+        profile.versions.reply
+    };
+    let ty = frame
+        .fields
+        .iter()
+        .find(|f| f.name == "version")
+        .unwrap()
+        .ty
+        .clone();
     (ty.clone(), format!("{v}{ty}"))
 }
 
 fn version_value(profile: &Profile, frame: &Frame) -> u16 {
-    if is_request(frame) { profile.versions.request } else { profile.versions.reply }
+    if is_request(frame) {
+        profile.versions.request
+    } else {
+        profile.versions.reply
+    }
 }
 
 fn used_types(spec: &Spec) -> Vec<String> {
@@ -164,11 +178,29 @@ pub fn gen_rust(spec: &Spec) -> String {
                 );
             }
             if !field.scales.is_empty() {
-                let scales = field.scales.iter().map(|v| format!("{v:?}")).collect::<Vec<_>>().join(", ");
-                let names = field.feature_names.iter().map(|n| format!("{n:?}")).collect::<Vec<_>>().join(", ");
+                let scales = field
+                    .scales
+                    .iter()
+                    .map(|v| format!("{v:?}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let names = field
+                    .feature_names
+                    .iter()
+                    .map(|n| format!("{n:?}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 let n = up(&field.name);
-                let _ = writeln!(s, "pub const {f}_{n}_SCALES: [f64; {}] = [{scales}];", field.scales.len());
-                let _ = writeln!(s, "pub const {f}_{n}_NAMES: [&str; {}] = [{names}];", field.feature_names.len());
+                let _ = writeln!(
+                    s,
+                    "pub const {f}_{n}_SCALES: [f64; {}] = [{scales}];",
+                    field.scales.len()
+                );
+                let _ = writeln!(
+                    s,
+                    "pub const {f}_{n}_NAMES: [&str; {}] = [{names}];",
+                    field.feature_names.len()
+                );
             }
             off += sz;
         }
@@ -371,10 +403,28 @@ pub fn gen_c(spec: &Spec) -> String {
             }
             if !field.scales.is_empty() {
                 let n = up(&field.name);
-                let vals = field.scales.iter().map(|v| format!("{v:?}")).collect::<Vec<_>>().join(", ");
-                let names = field.feature_names.iter().map(|x| format!("{x:?}")).collect::<Vec<_>>().join(", ");
-                let _ = writeln!(s, "static const double POTOK_{f}_{n}_SCALES[{}] = {{{vals}}};", field.scales.len());
-                let _ = writeln!(s, "static const char *const POTOK_{f}_{n}_NAMES[{}] = {{{names}}};", field.feature_names.len());
+                let vals = field
+                    .scales
+                    .iter()
+                    .map(|v| format!("{v:?}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let names = field
+                    .feature_names
+                    .iter()
+                    .map(|x| format!("{x:?}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let _ = writeln!(
+                    s,
+                    "static const double POTOK_{f}_{n}_SCALES[{}] = {{{vals}}};",
+                    field.scales.len()
+                );
+                let _ = writeln!(
+                    s,
+                    "static const char *const POTOK_{f}_{n}_NAMES[{}] = {{{names}}};",
+                    field.feature_names.len()
+                );
             }
             off += sz;
         }
@@ -763,8 +813,18 @@ pub fn gen_python(spec: &Spec) -> String {
             }
             if !field.scales.is_empty() {
                 let n = up(&field.name);
-                let vals = field.scales.iter().map(|v| format!("{v:?}")).collect::<Vec<_>>().join(", ");
-                let names = field.feature_names.iter().map(|x| format!("{x:?}")).collect::<Vec<_>>().join(", ");
+                let vals = field
+                    .scales
+                    .iter()
+                    .map(|v| format!("{v:?}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let names = field
+                    .feature_names
+                    .iter()
+                    .map(|x| format!("{x:?}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 let _ = writeln!(s, "{f}_{n}_SCALES = ({vals},)");
                 let _ = writeln!(s, "{f}_{n}_NAMES = ({names},)");
             }

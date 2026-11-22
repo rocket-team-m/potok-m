@@ -328,172 +328,191 @@ pub fn validate(spec: &Spec) -> Result<(), String> {
             format!("profile {profile_name}: frames must not be empty"),
         )?;
 
-    for frame in &profile.frames {
-        let f = frame.name.as_str();
-        ensure(!f.is_empty(), "frame name must not be empty")?;
-        ensure(
-            generated_prefixes.insert(f.to_string()),
-            format!("duplicate generated frame prefix {f} across profiles"),
-        )?;
-        ensure(!frame.fields.is_empty(), format!("frame {f} has no fields"))?;
-        ensure(frame.size > 0, format!("frame {f} size must be > 0"))?;
+        for frame in &profile.frames {
+            let f = frame.name.as_str();
+            ensure(!f.is_empty(), "frame name must not be empty")?;
+            ensure(
+                generated_prefixes.insert(f.to_string()),
+                format!("duplicate generated frame prefix {f} across profiles"),
+            )?;
+            ensure(!frame.fields.is_empty(), format!("frame {f} has no fields"))?;
+            ensure(frame.size > 0, format!("frame {f} size must be > 0"))?;
 
-        let mut names = std::collections::HashSet::new();
-        let mut crc_count = 0usize;
-        let mut offset = 0usize;
-        let nfields = frame.fields.len();
-        for (i, field) in frame.fields.iter().enumerate() {
-            ensure(
-                !field.name.is_empty(),
-                format!("frame {f} has an empty field name"),
-            )?;
-            ensure(
-                names.insert(field.name.as_str()),
-                format!("duplicate field {}.{}", f, field.name),
-            )?;
-            let sz = type_size(&field.ty).ok_or_else(|| {
-                format!(
-                    "frame {f} field {}: unsupported type {:?}",
-                    field.name, field.ty
-                )
-            })?;
-            offset += sz * field.count();
-            if field.crc {
-                crc_count += 1;
+            let mut names = std::collections::HashSet::new();
+            let mut crc_count = 0usize;
+            let mut offset = 0usize;
+            let nfields = frame.fields.len();
+            for (i, field) in frame.fields.iter().enumerate() {
                 ensure(
-                    i + 1 == nfields,
-                    format!("frame {f}: crc field must be last"),
+                    !field.name.is_empty(),
+                    format!("frame {f} has an empty field name"),
                 )?;
                 ensure(
-                    sz == 2 && field.count() == 1,
-                    format!("frame {f}: crc field must be u16"),
+                    names.insert(field.name.as_str()),
+                    format!("duplicate field {}.{}", f, field.name),
                 )?;
-                ensure(
-                    field.name == crc.field,
-                    format!("frame {f}: crc field name must match crc.field"),
-                )?;
-            }
-            if let Some(v) = field.value {
-                ensure(
-                    i == 0 && field.name == "magic",
-                    format!("frame {f}: only the first field may be a constant"),
-                )?;
-                ensure(
-                    sz == 2 && field.count() == 1,
-                    format!("frame {f}: magic must be u16"),
-                )?;
-                ensure(
-                    v == u64::from(frame.magic),
-                    format!("frame {f}: magic constant disagrees with frame magic"),
-                )?;
-            } else if field.name == "magic" {
-                return Err(format!(
-                    "frame {f}: magic field is missing its constant value"
-                ));
-            }
-            if field.crc && field.value.is_some() {
-                return Err(format!("frame {f}: crc field cannot also be a constant"));
-            }
-            if let Some(ref en) = field.r#enum {
-                ensure(
-                    p.enums.iter().any(|e| &e.name == en),
-                    format!("frame {f} field {}: unknown enum {en}", field.name),
-                )?;
-                ensure(
-                    field.ty == "u8" && field.count() == 1,
-                    format!("frame {f} field {}: enum must be u8", field.name),
-                )?;
-            }
-            if field.flags {
-                ensure(
-                    field.ty == "u8" && field.count() == 1,
-                    format!("frame {f} field {}: flags must be u8", field.name),
-                )?;
-            }
-            if field.scale.is_some() {
-                ensure(
-                    is_integer(&field.ty),
+                let sz = type_size(&field.ty).ok_or_else(|| {
                     format!(
-                        "frame {f} field {}: scale requires an integer type",
+                        "frame {f} field {}: unsupported type {:?}",
+                        field.name, field.ty
+                    )
+                })?;
+                offset += sz * field.count();
+                if field.crc {
+                    crc_count += 1;
+                    ensure(
+                        i + 1 == nfields,
+                        format!("frame {f}: crc field must be last"),
+                    )?;
+                    ensure(
+                        sz == 2 && field.count() == 1,
+                        format!("frame {f}: crc field must be u16"),
+                    )?;
+                    ensure(
+                        field.name == crc.field,
+                        format!("frame {f}: crc field name must match crc.field"),
+                    )?;
+                }
+                if let Some(v) = field.value {
+                    ensure(
+                        i == 0 && field.name == "magic",
+                        format!("frame {f}: only the first field may be a constant"),
+                    )?;
+                    ensure(
+                        sz == 2 && field.count() == 1,
+                        format!("frame {f}: magic must be u16"),
+                    )?;
+                    ensure(
+                        v == u64::from(frame.magic),
+                        format!("frame {f}: magic constant disagrees with frame magic"),
+                    )?;
+                } else if field.name == "magic" {
+                    return Err(format!(
+                        "frame {f}: magic field is missing its constant value"
+                    ));
+                }
+                if field.crc && field.value.is_some() {
+                    return Err(format!("frame {f}: crc field cannot also be a constant"));
+                }
+                if let Some(ref en) = field.r#enum {
+                    ensure(
+                        p.enums.iter().any(|e| &e.name == en),
+                        format!("frame {f} field {}: unknown enum {en}", field.name),
+                    )?;
+                    ensure(
+                        field.ty == "u8" && field.count() == 1,
+                        format!("frame {f} field {}: enum must be u8", field.name),
+                    )?;
+                }
+                if field.flags {
+                    ensure(
+                        field.ty == "u8" && field.count() == 1,
+                        format!("frame {f} field {}: flags must be u8", field.name),
+                    )?;
+                }
+                if field.scale.is_some() {
+                    ensure(
+                        is_integer(&field.ty),
+                        format!(
+                            "frame {f} field {}: scale requires an integer type",
+                            field.name
+                        ),
+                    )?;
+                }
+            }
+            ensure(
+                crc_count == 1,
+                format!("frame {f}: expected exactly one crc field, found {crc_count}"),
+            )?;
+            ensure(
+                offset == frame.size,
+                format!(
+                    "frame {f}: declared size {} but fields occupy {}",
+                    frame.size, offset
+                ),
+            )?;
+
+            let ver = frame
+                .fields
+                .iter()
+                .find(|x| x.name == "version")
+                .ok_or_else(|| format!("frame {f}: missing version field"))?;
+            ensure(
+                ver.ty == "u8" || ver.ty == "u16",
+                format!("frame {f}: version field must be u8 or u16"),
+            )?;
+            let is_request = f == "request" || f.ends_with("_request");
+            let expected_ver = if is_request {
+                profile.versions.request
+            } else {
+                profile.versions.reply
+            };
+            let max_for_ty = if ver.ty == "u8" {
+                u64::from(u8::MAX)
+            } else {
+                u64::from(u16::MAX)
+            };
+            ensure(
+                u64::from(expected_ver) <= max_for_ty,
+                format!("frame {f}: expected version out of range"),
+            )?;
+
+            for field in &frame.fields {
+                if field.scales.is_empty() && field.feature_names.is_empty() {
+                    continue;
+                }
+                ensure(
+                    field.ty == "i16" && field.count() > 1,
+                    format!(
+                        "frame {f} field {}: feature scales require an i16 array",
                         field.name
                     ),
                 )?;
-            }
-        }
-        ensure(
-            crc_count == 1,
-            format!("frame {f}: expected exactly one crc field, found {crc_count}"),
-        )?;
-        ensure(
-            offset == frame.size,
-            format!(
-                "frame {f}: declared size {} but fields occupy {}",
-                frame.size, offset
-            ),
-        )?;
-
-        let ver = frame
-            .fields
-            .iter()
-            .find(|x| x.name == "version")
-            .ok_or_else(|| format!("frame {f}: missing version field"))?;
-        ensure(
-            ver.ty == "u8" || ver.ty == "u16",
-            format!("frame {f}: version field must be u8 or u16"),
-        )?;
-        let is_request = f == "request" || f.ends_with("_request");
-        let expected_ver = if is_request {
-            profile.versions.request
-        } else {
-            profile.versions.reply
-        };
-        let max_for_ty = if ver.ty == "u8" {
-            u64::from(u8::MAX)
-        } else {
-            u64::from(u16::MAX)
-        };
-        ensure(
-            u64::from(expected_ver) <= max_for_ty,
-            format!("frame {f}: expected version out of range"),
-        )?;
-
-        for field in &frame.fields {
-            if field.scales.is_empty() && field.feature_names.is_empty() {
-                continue;
-            }
-            ensure(
-                field.ty == "i16" && field.count() > 1,
-                format!("frame {f} field {}: feature scales require an i16 array", field.name),
-            )?;
-            ensure(
-                field.scales.len() == field.count(),
-                format!("frame {f} field {}: {} scales for {} features", field.name, field.scales.len(), field.count()),
-            )?;
-            ensure(
-                field.feature_names.len() == field.count(),
-                format!("frame {f} field {}: {} names for {} features", field.name, field.feature_names.len(), field.count()),
-            )?;
-            ensure(
-                field.scale.is_none(),
-                format!("frame {f} field {}: use scales[], not scale", field.name),
-            )?;
-            ensure(
-                field.scales.iter().all(|s| s.is_finite() && *s > 0.0),
-                format!("frame {f} field {}: scales must be finite and positive", field.name),
-            )?;
-            let mut seen = std::collections::HashSet::new();
-            for name in &field.feature_names {
                 ensure(
-                    name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'),
-                    format!("frame {f} field {}: bad feature name {name:?}", field.name),
+                    field.scales.len() == field.count(),
+                    format!(
+                        "frame {f} field {}: {} scales for {} features",
+                        field.name,
+                        field.scales.len(),
+                        field.count()
+                    ),
                 )?;
                 ensure(
-                    seen.insert(name.as_str()),
-                    format!("frame {f} field {}: duplicate feature name {name}", field.name),
+                    field.feature_names.len() == field.count(),
+                    format!(
+                        "frame {f} field {}: {} names for {} features",
+                        field.name,
+                        field.feature_names.len(),
+                        field.count()
+                    ),
                 )?;
+                ensure(
+                    field.scale.is_none(),
+                    format!("frame {f} field {}: use scales[], not scale", field.name),
+                )?;
+                ensure(
+                    field.scales.iter().all(|s| s.is_finite() && *s > 0.0),
+                    format!(
+                        "frame {f} field {}: scales must be finite and positive",
+                        field.name
+                    ),
+                )?;
+                let mut seen = std::collections::HashSet::new();
+                for name in &field.feature_names {
+                    ensure(
+                        name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'),
+                        format!("frame {f} field {}: bad feature name {name:?}", field.name),
+                    )?;
+                    ensure(
+                        seen.insert(name.as_str()),
+                        format!(
+                            "frame {f} field {}: duplicate feature name {name}",
+                            field.name
+                        ),
+                    )?;
+                }
             }
         }
-    }
 
         for required in required_frames {
             ensure(
@@ -504,16 +523,31 @@ pub fn validate(spec: &Spec) -> Result<(), String> {
     }
 
     let lowlat = &p.profiles["lowlat"];
-    let request = lowlat.frames.iter().find(|f| f.name == "lowlat_request").unwrap();
-    let features = request.fields.iter().find(|f| f.name == "features").unwrap();
+    let request = lowlat
+        .frames
+        .iter()
+        .find(|f| f.name == "lowlat_request")
+        .unwrap();
+    let features = request
+        .fields
+        .iter()
+        .find(|f| f.name == "features")
+        .unwrap();
     ensure(
         features.count() == 14 && features.scales.len() == 14,
         "lowlat_request must carry exactly 14 scaled int16 features",
     )?;
-    let reply = lowlat.frames.iter().find(|f| f.name == "lowlat_reply").unwrap();
+    let reply = lowlat
+        .frames
+        .iter()
+        .find(|f| f.name == "lowlat_reply")
+        .unwrap();
     ensure(reply.size == 16, "lowlat_reply must be 16 bytes")?;
     ensure(
-        reply.fields.iter().any(|f| f.name == "compute_us" && f.ty == "u8"),
+        reply
+            .fields
+            .iter()
+            .any(|f| f.name == "compute_us" && f.ty == "u8"),
         "lowlat_reply must carry compute_us as u8",
     )?;
     Ok(())
@@ -609,12 +643,20 @@ mod tests {
 
         let text = GOOD
             .replacen("      size: 16", "      size: 14", 1)
-            .replacen("            - { name: reserved, type: u8, count: 2 }\n", "", 1);
+            .replacen(
+                "            - { name: reserved, type: u8, count: 2 }\n",
+                "",
+                1,
+            );
         let bad = parse(&text).unwrap();
-        assert!(validate(&bad).unwrap_err().contains("lowlat_reply must be 16 bytes"));
+        assert!(validate(&bad)
+            .unwrap_err()
+            .contains("lowlat_reply must be 16 bytes"));
 
         let text = GOOD.replacen("0.0001, 0.0001, 0.0001", "0.0, 0.0, 0.0", 1);
         let bad = parse(&text).unwrap();
-        assert!(validate(&bad).unwrap_err().contains("scales must be finite and positive"));
+        assert!(validate(&bad)
+            .unwrap_err()
+            .contains("scales must be finite and positive"));
     }
 }

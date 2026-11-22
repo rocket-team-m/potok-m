@@ -5,7 +5,10 @@ use std::path::{Path, PathBuf};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 
-use crate::{error::{Result, SimError}, math::episode_seed};
+use crate::{
+    error::{Result, SimError},
+    math::episode_seed,
+};
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq)]
 pub struct Range(pub f64, pub f64);
@@ -337,13 +340,43 @@ impl Config {
         )?;
         check("aero.area_m2", self.aero.area_m2, 1e-6, 1e3)?;
         check_range("aero.cd0_range", self.aero.cd0_range, 0.0, 2.0)?;
-        check_range("aero.static_margin_cal_range", self.aero.static_margin_cal_range, 0.0, 10.0)?;
+        check_range(
+            "aero.static_margin_cal_range",
+            self.aero.static_margin_cal_range,
+            0.0,
+            10.0,
+        )?;
         check_range("wind.v_10_range", self.wind.v_10_range, 0.0, 100.0)?;
-        check_range("wind.gust_amplitude_range", self.wind.gust_amplitude_range, 0.0, 100.0)?;
-        check_range("wind.shear_delta_range", self.wind.shear_delta_range, 0.0, 100.0)?;
-        check_range("wind.shear_altitude_range", self.wind.shear_altitude_range, 0.0, 1e5)?;
-        check_range("sensor.gyro_noise_range", self.sensor.gyro_noise_range, 0.0, 1.0)?;
-        check_range("sensor.accel_noise_range", self.sensor.accel_noise_range, 0.0, 100.0)?;
+        check_range(
+            "wind.gust_amplitude_range",
+            self.wind.gust_amplitude_range,
+            0.0,
+            100.0,
+        )?;
+        check_range(
+            "wind.shear_delta_range",
+            self.wind.shear_delta_range,
+            0.0,
+            100.0,
+        )?;
+        check_range(
+            "wind.shear_altitude_range",
+            self.wind.shear_altitude_range,
+            0.0,
+            1e5,
+        )?;
+        check_range(
+            "sensor.gyro_noise_range",
+            self.sensor.gyro_noise_range,
+            0.0,
+            1.0,
+        )?;
+        check_range(
+            "sensor.accel_noise_range",
+            self.sensor.accel_noise_range,
+            0.0,
+            100.0,
+        )?;
         if self.aero.cd_mach.len() < 2 || self.aero.thrust_profile.len() < 2 {
             return Err(SimError::Config(
                 "aero tables need at least two knots".into(),

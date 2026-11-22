@@ -195,7 +195,10 @@ fn validation_file_roundtrip() {
     let raw = std::fs::read(&path).unwrap();
     assert_eq!(&raw[..8], b"POTOKSIM");
     assert_eq!(u32::from_le_bytes(raw[8..12].try_into().unwrap()), VERSION);
-    assert_eq!(u32::from_le_bytes(raw[48..52].try_into().unwrap()), META_V2 as u32);
+    assert_eq!(
+        u32::from_le_bytes(raw[48..52].try_into().unwrap()),
+        META_V2 as u32
+    );
     assert!(raw[52..HEADER_SIZE].iter().all(|b| *b == 0));
     let per_episode =
         8 + META_V2 * 4 + cfg.frames_per_episode() * (cfg.feature_count() + TARGET_COUNT) * 4;

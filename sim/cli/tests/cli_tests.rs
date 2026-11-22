@@ -29,7 +29,10 @@ fn cli_split_writes_only_withheld_scenarios() {
     assert_eq!(rs.episodes.len(), 4);
     assert!(rs.episodes.iter().all(|e| e.split == Split::HeldOut));
     assert_eq!(
-        rs.episodes.iter().map(|e| e.scenario_id).collect::<Vec<_>>(),
+        rs.episodes
+            .iter()
+            .map(|e| e.scenario_id)
+            .collect::<Vec<_>>(),
         vec![16, 17, 18, 19]
     );
 

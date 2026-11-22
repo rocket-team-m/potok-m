@@ -1,6 +1,7 @@
 use potok_protocol::*;
 
-const REQ_GOLDEN: &str = "544c34127bf15365020112000100feff03000400fbff06000700f8ff09000a000b00f4ff0d000e000a2b";
+const REQ_GOLDEN: &str =
+    "544c34127bf15365020112000100feff03000400fbff06000700f8ff09000a000b00f4ff0d000e000a2b";
 const REP_GOLDEN: &str = "524c34127d0006ffc801012a0000fd1b";
 
 fn sample_request() -> LowlatRequestFrame {
@@ -87,15 +88,33 @@ fn lowlat_truncation_is_rejected() {
     let mut req = [0u8; LOWLAT_REQUEST_SIZE];
     encode_lowlat_request(&sample_request(), &mut req).unwrap();
     for n in 0..LOWLAT_REQUEST_SIZE {
-        assert_eq!(decode_lowlat_request(&req[..n]), Err(Error::TooShort { need: LOWLAT_REQUEST_SIZE, got: n }));
+        assert_eq!(
+            decode_lowlat_request(&req[..n]),
+            Err(Error::TooShort {
+                need: LOWLAT_REQUEST_SIZE,
+                got: n
+            })
+        );
         let mut out = [0u8; LOWLAT_REQUEST_SIZE];
-        assert_eq!(encode_lowlat_request(&sample_request(), &mut out[..n]), Err(Error::BufferTooSmall { need: LOWLAT_REQUEST_SIZE, got: n }));
+        assert_eq!(
+            encode_lowlat_request(&sample_request(), &mut out[..n]),
+            Err(Error::BufferTooSmall {
+                need: LOWLAT_REQUEST_SIZE,
+                got: n
+            })
+        );
     }
 
     let mut rep = [0u8; LOWLAT_REPLY_SIZE];
     encode_lowlat_reply(&sample_reply(), &mut rep).unwrap();
     for n in 0..LOWLAT_REPLY_SIZE {
-        assert_eq!(decode_lowlat_reply(&rep[..n]), Err(Error::TooShort { need: LOWLAT_REPLY_SIZE, got: n }));
+        assert_eq!(
+            decode_lowlat_reply(&rep[..n]),
+            Err(Error::TooShort {
+                need: LOWLAT_REPLY_SIZE,
+                got: n
+            })
+        );
     }
 }
 
@@ -104,12 +123,18 @@ fn lowlat_wrong_magic_crc_phase_and_version() {
     let mut buf = [0u8; LOWLAT_REQUEST_SIZE];
     encode_lowlat_request(&sample_request(), &mut buf).unwrap();
     buf[0] ^= 0xFF;
-    assert!(matches!(decode_lowlat_request(&buf), Err(Error::BadMagic { .. })));
+    assert!(matches!(
+        decode_lowlat_request(&buf),
+        Err(Error::BadMagic { .. })
+    ));
 
     let mut buf = [0u8; LOWLAT_REQUEST_SIZE];
     encode_lowlat_request(&sample_request(), &mut buf).unwrap();
     buf[LOWLAT_REQUEST_OFF_SEQ] ^= 1;
-    assert!(matches!(decode_lowlat_request(&buf), Err(Error::BadCrc { .. })));
+    assert!(matches!(
+        decode_lowlat_request(&buf),
+        Err(Error::BadCrc { .. })
+    ));
 
     let mut buf = [0u8; LOWLAT_REQUEST_SIZE];
     encode_lowlat_request(&sample_request(), &mut buf).unwrap();
@@ -123,23 +148,35 @@ fn lowlat_wrong_magic_crc_phase_and_version() {
     encode_lowlat_request(&bad, &mut buf).unwrap();
     assert_eq!(
         decode_lowlat_request(&buf),
-        Err(Error::VersionMismatch { expected: u16::from(LOWLAT_REQUEST_VERSION), got: 99 })
+        Err(Error::VersionMismatch {
+            expected: u16::from(LOWLAT_REQUEST_VERSION),
+            got: 99
+        })
     );
 
     let mut buf = [0u8; LOWLAT_REPLY_SIZE];
     encode_lowlat_reply(&sample_reply(), &mut buf).unwrap();
     buf[0] ^= 0xFF;
-    assert!(matches!(decode_lowlat_reply(&buf), Err(Error::BadMagic { .. })));
+    assert!(matches!(
+        decode_lowlat_reply(&buf),
+        Err(Error::BadMagic { .. })
+    ));
     let mut buf = [0u8; LOWLAT_REPLY_SIZE];
     encode_lowlat_reply(&sample_reply(), &mut buf).unwrap();
     buf[LOWLAT_REPLY_OFF_CONFIDENCE] ^= 1;
-    assert!(matches!(decode_lowlat_reply(&buf), Err(Error::BadCrc { .. })));
+    assert!(matches!(
+        decode_lowlat_reply(&buf),
+        Err(Error::BadCrc { .. })
+    ));
     let mut bad = sample_reply();
     bad.version = 99;
     encode_lowlat_reply(&bad, &mut buf).unwrap();
     assert_eq!(
         decode_lowlat_reply(&buf),
-        Err(Error::VersionMismatch { expected: u16::from(LOWLAT_REPLY_VERSION), got: 99 })
+        Err(Error::VersionMismatch {
+            expected: u16::from(LOWLAT_REPLY_VERSION),
+            got: 99
+        })
     );
 }
 
@@ -156,7 +193,10 @@ fn lowlat_flag_helpers() {
     assert_eq!(frame.flags, flags::MOTOR_ARMED);
     let mut buf = [0u8; LOWLAT_REQUEST_SIZE];
     encode_lowlat_request(&frame, &mut buf).unwrap();
-    assert_eq!(decode_lowlat_request(&buf).unwrap().flags, flags::MOTOR_ARMED);
+    assert_eq!(
+        decode_lowlat_request(&buf).unwrap().flags,
+        flags::MOTOR_ARMED
+    );
 }
 
 #[test]
@@ -196,7 +236,10 @@ fn lowlat_golden_bytes_match_c_and_python() {
 
     let decoded = decode_lowlat_request(&request).unwrap();
     assert_eq!(decoded, sample_request());
-    assert_eq!(LowlatRequestView::new(&request).unwrap().to_owned(), decoded);
+    assert_eq!(
+        LowlatRequestView::new(&request).unwrap().to_owned(),
+        decoded
+    );
     let mut out = [0u8; LOWLAT_REQUEST_SIZE];
     encode_lowlat_request(&decoded, &mut out).unwrap();
     assert_eq!(out.to_vec(), request);

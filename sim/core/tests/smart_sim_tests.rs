@@ -48,7 +48,10 @@ fn physics_features_are_finite_and_bounded() {
                 assert!((0.5..1.5).contains(&p[5]), "margin_cal {}", p[5]);
                 nonzero |= p[0].abs() > 1e-6 || p[1].abs() > 1e-6;
             }
-            assert!(nonzero, "physics angles must come from the state, not zeros");
+            assert!(
+                nonzero,
+                "physics angles must come from the state, not zeros"
+            );
 
             // Relation between derived features, not an invented constant:
             // drag_est = cd0 * qdyn(Pa) * area / current mass. The mass falls
@@ -92,7 +95,10 @@ fn domain_randomization_stays_within_tolerances() {
         winds.push(e.meta.v_10);
     }
     for vals in [cd0s, margins, winds] {
-        assert!(vals.iter().any(|v| *v != vals[0]), "randomization is constant");
+        assert!(
+            vals.iter().any(|v| *v != vals[0]),
+            "randomization is constant"
+        );
     }
 }
 
@@ -112,7 +118,10 @@ fn held_out_scenarios_are_distinct_and_reachable() {
     assert_eq!(train.len(), 16);
     assert_eq!(held.len(), 4);
     for sig in &held {
-        assert!(!train.contains(sig), "withheld signature {sig:?} seen in training");
+        assert!(
+            !train.contains(sig),
+            "withheld signature {sig:?} seen in training"
+        );
     }
     assert!(cells
         .iter()
@@ -125,7 +134,13 @@ fn held_out_scenarios_are_distinct_and_reachable() {
 
     let s = sim(7);
     let episodes: Vec<_> = (0..20u64).map(|i| s.run_episode(i).unwrap()).collect();
-    assert_eq!(episodes.iter().filter(|e| e.meta.split == Split::HeldOut).count(), 4);
+    assert_eq!(
+        episodes
+            .iter()
+            .filter(|e| e.meta.split == Split::HeldOut)
+            .count(),
+        4
+    );
     for e in &episodes {
         let sc = scenario(e.meta.index);
         assert_eq!(e.meta.scenario_id, sc.id);
@@ -151,8 +166,16 @@ fn nominal_trajectory_plausible_for_both_splits() {
         let e = s.run_episode(index).unwrap();
         assert_eq!(e.frames.len(), 1500);
         assert_eq!(e.nan_frames, 0);
-        assert!((500.0..6000.0).contains(&e.apogee_m), "index {index}: {}", e.apogee_m);
-        assert!((100.0..400.0).contains(&e.max_speed_mps), "index {index}: {}", e.max_speed_mps);
+        assert!(
+            (500.0..6000.0).contains(&e.apogee_m),
+            "index {index}: {}",
+            e.apogee_m
+        );
+        assert!(
+            (100.0..400.0).contains(&e.max_speed_mps),
+            "index {index}: {}",
+            e.max_speed_mps
+        );
     }
 }
 
@@ -167,8 +190,8 @@ fn validation_v2_roundtrip_carries_conditioning_and_split() {
 
     write_validation(&path, &cfg, &episodes).unwrap();
     let raw = std::fs::read(&path).unwrap();
-    let per_episode = 8 + META_V2 * 4
-        + cfg.frames_per_episode() * (cfg.feature_count() + TARGET_COUNT) * 4;
+    let per_episode =
+        8 + META_V2 * 4 + cfg.frames_per_episode() * (cfg.feature_count() + TARGET_COUNT) * 4;
     assert_eq!(raw.len(), 80 + episodes.len() * per_episode);
     let rs = read_validation(&path).unwrap();
     assert_eq!(rs.version, VERSION);
@@ -186,14 +209,21 @@ fn validation_v2_roundtrip_carries_conditioning_and_split() {
     let v1 = read_validation(&path).unwrap();
     assert_eq!(v1.version, VERSION_V1);
     assert_eq!(v1.header.meta_count as usize, META_V1);
-    assert!(v1.episodes.iter().all(|e| e.split == Split::Train && e.scenario_id == 0));
-    assert_eq!(v1.episodes[0].conditioning, Conditioning {
-        mass_kg: episodes[0].meta.conditioning.mass_kg,
-        area_m2: 0.00817,
-        cd0: 0.35,
-        static_margin_cal: (0.0765 / (2.0 * (0.00817_f64 / std::f64::consts::PI).sqrt())) as f32,
-        thrust_peak_n: 436.0,
-        gyro_noise: 0.0015,
-    });
+    assert!(v1
+        .episodes
+        .iter()
+        .all(|e| e.split == Split::Train && e.scenario_id == 0));
+    assert_eq!(
+        v1.episodes[0].conditioning,
+        Conditioning {
+            mass_kg: episodes[0].meta.conditioning.mass_kg,
+            area_m2: 0.00817,
+            cd0: 0.35,
+            static_margin_cal: (0.0765 / (2.0 * (0.00817_f64 / std::f64::consts::PI).sqrt()))
+                as f32,
+            thrust_peak_n: 436.0,
+            gyro_noise: 0.0015,
+        }
+    );
     std::fs::remove_file(&path).unwrap();
 }
