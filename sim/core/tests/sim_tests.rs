@@ -294,11 +294,11 @@ fn defaults_match_real_vehicle_ttx() {
         "burn_end {}",
         v.burn_end()
     );
-    // Upper passport impulses (2.4 / 1.2 kNs) over the 5.5 / 3.2 s burns.
+    // Motor limit 3.0 kNs: 2.0 / 1.0 kNs over the 5.5 / 3.2 s burns.
     let stage1 = v.thrust_at(3.0);
     let stage2 = v.thrust_at(7.0);
-    assert!((stage1 - 436.0).abs() < 1e-6, "stage 1 {stage1}");
-    assert!((stage2 - 375.0).abs() < 1e-6, "stage 2 {stage2}");
+    assert!((stage1 - 363.0).abs() < 1e-6, "stage 1 {stage1}");
+    assert!((stage2 - 312.5).abs() < 1e-6, "stage 2 {stage2}");
     assert!(stage1 < 550.0 && stage2 < 600.0, "below passport peaks");
     assert!(v.thrust_at(9.0).abs() < 1e-9);
 }
@@ -311,13 +311,13 @@ fn nominal_trajectory_is_plausible() {
         e.apogee_m, e.max_speed_mps
     );
     assert!(
-        (2_000.0..=4_000.0).contains(&e.apogee_m),
-        "apogee {} m outside 2-4 km",
+        (1_500.0..=2_100.0).contains(&e.apogee_m),
+        "apogee {} m outside 1.5-2.1 km",
         e.apogee_m
     );
     assert!(
-        (180.0..=260.0).contains(&e.max_speed_mps),
-        "max speed {} m/s outside 180-260",
+        (150.0..=180.0).contains(&e.max_speed_mps),
+        "max speed {} m/s outside 150-180",
         e.max_speed_mps
     );
 }
