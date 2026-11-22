@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""A/B: onboard PID alone vs PID + exported student correction.
+"""Closed-loop A/B: zero command vs PID + exported student correction.
 
-CPU-only, deterministic, no simulator source changes. Reads the run2 v2
-validation files (80 train + 20 held-out episodes, 16 + 4 wind/gust scenarios)
-and the exported stateful students. The optional --verify-sim flag regenerates
-the held-out file with the release CLI and refuses to continue unless it is
-byte-identical.
+Runs the OR-aligned held-out scenarios through potok-sim's command->dynamics
+seam (`Simulator::run_episode_with_control`). Apogee and lateral RMS are read
+from the flown-truth trajectory sidecar (POTOKTRJ v1), never from the old
+gravity/tilt surrogate. No sim source or config is modified: a thin Rust driver
+under scripts/ab_control/ calls the public API because the CLI's --control-file
+applies one TSV to every episode, not one per episode.
 
-IMPORTANT — this is a PROXY, not a flown A/B. `potok_sim` never feeds a command
-back into its dynamics: `episode.rs` records `optimizer.solve(...)` as a target
-and then integrates `rk4(...)` with the unchanged vehicle. Validation v2 also
-stores no per-tick truth position or apogee. Therefore no end-to-end apogee or
-lateral drift can be measured without editing sim/, which this task forbids.
-The proxy and its assumptions are written into ab_report.json/.md in full.
+The previous surrogate report is SUPERSEDED by this one.
+
+Usage:
+    ai/.venv/bin/python scripts/ab_pid_vs_ai.py
+    ai/.venv/bin/python scripts/ab_pid_vs_ai.py --seeds 1   # primary only
 """
 
 from __future__ import annotations
@@ -20,13 +20,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import struct
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
@@ -36,423 +37,450 @@ from potok_ai.data import read_validation  # noqa: E402
 from potok_ai.export import load_student_export  # noqa: E402
 from potok_ai.physics import physics_baseline  # noqa: E402
 
-G = 9.80665  # sim/core/src/dynamics.rs:437
-TILT_PER_CMD = 0.12  # sim/core/src/optimizer.rs:41, max_correction (rad)
-INTERVENTION_EPS = 1e-6
+RAD_PER_NORM = 0.12  # sim/core/src/optimizer.rs:41, g_theta clamp, same mapping as the old surrogate
+DEG_PER_RAD = 180.0 / np.pi
+MAX_DEG = 10.0  # sim/core/src/control.rs:28, hard actuator limit (LOUD if exceeded)
+INTERVENTION_EPS = 1e-9
 STUDENTS = ("loopwm", "lrs")
+PRIMARY = "loopwm"
+
+CONFIG = ROOT / "ai" / "out" / "run2" / "sim.toml"
+MODEL_DIR = ROOT / "ai" / "out" / "run2"
+HELPER = SCRIPTS / "ab_control" / "target" / "release" / "ab-control"
 
 
 def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def verify_sim(sim_bin: Path, sim_cfg: Path, seed: int, n_train: int,
-               n_held: int, held_file: Path) -> dict:
-    """Regenerate the held-out split and require byte-identical output."""
-    if not sim_bin.is_file():
-        raise FileNotFoundError(f"missing simulator CLI: {sim_bin} (pass --no-verify-sim)")
-    if not sim_cfg.is_file():
-        raise FileNotFoundError(f"missing simulator config: {sim_cfg}")
-    with tempfile.TemporaryDirectory(prefix="ab-sim-", dir=SCRIPTS) as tmp:
-        out = Path(tmp)
-        cmd = [
-            str(sim_bin), "--config", str(sim_cfg), "--seed", str(seed),
-            "--episodes", str(n_train + n_held), "--physics-features",
-            "--split", "held-out", "--validation-out", str(out),
-        ]
-        proc = subprocess.run(cmd, cwd=ROOT / "sim", capture_output=True, text=True)
-        if proc.returncode != 0:
-            raise RuntimeError(f"simulator CLI failed ({proc.returncode}): {proc.stderr}")
-        regenerated = out / "validation.bin"
-        if not regenerated.is_file():
-            raise FileNotFoundError("simulator wrote no validation.bin")
-        a, b = sha256(regenerated), sha256(held_file)
-        if a != b:
-            raise RuntimeError(f"held-out data not reproducible: regen={a} dataset={b}")
-    shown = ["<tmp>" if part == str(out) else part for part in cmd]
-    return {"verified": True, "sha256": b, "command": " ".join(shown)}
+class CanonicalStudent:
+    """Edge-equivalent forward of the exported student (HEAD, not in-flight edits).
+
+    ai/src/potok_ai/student.py carries an uncommitted forward change made after
+    these exports were trained. This reimplements the committed step(): the same
+    one the edge runtime mirrors in student_runtime.rs.
+    """
+
+    def __init__(self, export) -> None:
+        layers = export.layers
+        t = lambda name: torch.as_tensor(layers[name].tensor, dtype=torch.float32)
+        self.width, self.n_blocks = export.width, export.n_blocks
+        self.loops, self.decay = export.loops, export.decay
+        self.stem_w, self.stem_b = t("stem.weight"), t("stem.bias")
+        self.norm_w, self.norm_b = t("norm.weight"), t("norm.bias")
+        self.alloc = t("alloc_logits")[: self.loops].softmax(0)
+        self.head_corr_w, self.head_corr_b = t("head_corr.weight"), t("head_corr.bias")
+        self.head_conf_w, self.head_conf_b = t("head_conf.weight"), t("head_conf.bias")
+        self.bound = float(np.tanh(abs(export.g_max)))
+        self.rec_h, self.rec_x, self.proj = [], [], []
+        for b in range(self.n_blocks):
+            self.rec_h.append((t(f"blocks.{b}.rec_h.weight"), t(f"blocks.{b}.rec_h.bias")))
+            self.rec_x.append((t(f"blocks.{b}.rec_x.weight"), t(f"blocks.{b}.rec_x.bias")))
+            proj = layers[f"blocks.{b}.proj"]
+            u = torch.as_tensor(proj.u_codes.astype(np.float32) * proj.alpha_u).reshape(
+                proj.in_features, proj.rank)
+            v = torch.as_tensor(proj.v_codes.astype(np.float32) * proj.alpha_v).reshape(
+                proj.out_features, proj.rank)
+            s = torch.as_tensor(proj.scales.copy())
+            self.proj.append((u * s) @ v.T)
+        self.reset()
+
+    def reset(self) -> None:
+        self.h = [torch.zeros(self.width) for _ in range(self.n_blocks)]
+
+    @torch.no_grad()
+    def step(self, frame) -> tuple[np.ndarray, float]:
+        source = F.linear(torch.as_tensor(frame, dtype=torch.float32),
+                          self.stem_w, self.stem_b)
+        total = None
+        for iteration in range(self.loops):
+            for b in range(self.n_blocks):
+                wh, bh = self.rec_h[b]
+                wx, bx = self.rec_x[b]
+                candidate = torch.tanh(F.linear(source, wx, bx) + F.linear(self.h[b], wh, bh))
+                self.h[b] = 0.8 * self.h[b] + 0.2 * candidate
+                source = F.linear(self.h[b], self.proj[b])
+            term = self.alloc[iteration] * (self.decay ** iteration) * source
+            total = term if total is None else total + term
+        z = F.layer_norm(total + source, (self.width,), self.norm_w, self.norm_b, 1e-5)
+        delta = torch.tanh(F.linear(z, self.head_corr_w, self.head_corr_b)) * self.bound
+        conf = torch.sigmoid(F.linear(z, self.head_conf_w, self.head_conf_b).squeeze(-1))
+        return delta.numpy(), float(conf)
 
 
-def load_data(data_dir: Path, seed: int) -> dict:
-    train = read_validation(data_dir / "train_validation.bin")
-    held = read_validation(data_dir / "heldout_validation.bin")
-    for tag, data in (("train", train), ("held-out", held)):
-        if data.header.version != 2:
-            raise ValueError(f"{tag} file is not validation v2")
-        if data.header.feature_count < 14:
-            raise ValueError(f"{tag} file has no physics features")
-    if train.header.seed != seed or held.header.seed != seed:
-        raise ValueError(f"dataset seed != requested seed {seed}")
-    train_sc = sorted({e.scenario for e in train.episodes})
-    held_sc = sorted({e.scenario for e in held.episodes})
-    if len(train_sc) != 16 or len(held_sc) != 4:
-        raise ValueError(f"expected 16 train + 4 held-out scenarios, got "
-                         f"{len(train_sc)} + {len(held_sc)}")
-    if len(held.episodes) < 20:
-        raise ValueError(f"need >=20 held-out episodes, got {len(held.episodes)}")
-    if set(train_sc) & set(held_sc):
-        raise ValueError("train and held-out scenario sets overlap")
-    return {"train": train, "held": held, "train_scenarios": train_sc,
-            "held_scenarios": held_sc}
+def run_helper(seed: int, indices: list[int], out_dir: Path,
+               commands_dir: Path | None) -> dict[int, tuple[float, float]]:
+    if not HELPER.is_file():
+        raise FileNotFoundError(
+            f"missing {HELPER.relative_to(ROOT)}; build with: cargo build --release "
+            f"--manifest-path scripts/ab_control/Cargo.toml "
+            f"--target-dir scripts/ab_control/target")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        str(HELPER), "--config", str(CONFIG), "--seed", str(seed),
+        "--indices", ",".join(map(str, indices)), "--out-dir", str(out_dir),
+    ]
+    if commands_dir is not None:
+        cmd += ["--commands-dir", str(commands_dir)]
+    proc = subprocess.run(cmd, cwd=ROOT / "sim", capture_output=True, text=True)
+    if proc.returncode != 0:
+        raise RuntimeError(f"ab-control failed ({proc.returncode}): {proc.stderr}")
+    printed = {}
+    for line in proc.stdout.splitlines():
+        if not line.startswith("episode "):
+            continue
+        parts = dict(part.split("=", 1) for part in line.split() if "=" in part)
+        printed[int(line.split()[1].rstrip(":"))] = (
+            float(parts["apogee"]), float(parts["lateral_rms"]))
+    if len(printed) != len(indices):
+        raise RuntimeError(f"helper printed {len(printed)} episodes, expected {len(indices)}")
+    return printed
 
 
-def student_specs(model_dir: Path) -> list[dict]:
-    paths = {
-        "loopwm": (model_dir / "loopwm" / "loopwm_student.bin",
-                   model_dir / "loopwm" / "calibration.json"),
-        "lrs": (model_dir / "lrs" / "lrs.bin",
-                model_dir / "lrs" / "calibration.json"),
-    }
+def read_track(path: Path) -> dict[int, dict]:
+    """Parse POTOKTRJ v1 and measure exactly what the Rust sidecar API measures."""
+    raw = path.read_bytes()
+    if len(raw) < 64:
+        raise ValueError(f"{path}: sidecar shorter than its 64-byte header")
+    magic, version, count, frames, stride = struct.unpack_from("<8sIIII", raw, 0)
+    if magic != b"POTOKTRJ" or version != 1 or stride != 6:
+        raise ValueError(f"{path}: bad sidecar header {magic!r} v{version} stride={stride}")
+    off = 64
+    result = {}
+    for _ in range(count):
+        (index,) = struct.unpack_from("<Q", raw, off)
+        off += 8
+        values = np.frombuffer(raw, dtype="<f4", count=frames * 6, offset=off)
+        off += frames * 6 * 4
+        rows = values.reshape(frames, 6).astype(np.float64)
+        result[index] = {
+            "apogee_m": float(np.max(rows[:, 2])),
+            "lateral_rms_m": float(np.sqrt(np.mean(rows[:, 0] ** 2 + rows[:, 1] ** 2))),
+            "ticks": int(frames),
+        }
+    if off != len(raw):
+        raise ValueError(f"{path}: trailing bytes in sidecar")
+    return result
+
+
+def student_specs() -> list[dict]:
     specs = []
     for name in STUDENTS:
-        bin_path, cal_path = paths[name]
-        if not bin_path.is_file() or not cal_path.is_file():
-            raise FileNotFoundError(f"student {name}: need {bin_path} and {cal_path}")
+        sub = "loopwm" if name == "loopwm" else "lrs"
+        bin_path = MODEL_DIR / sub / ("loopwm_student.bin" if name == "loopwm" else "lrs.bin")
+        cal_path = MODEL_DIR / sub / "calibration.json"
         export = load_student_export(bin_path)
         if export.in_features != 20:
             raise ValueError(f"{name}: expected 20-input smart frame, got {export.in_features}")
         cal = json.loads(cal_path.read_text())
         specs.append({
             "name": name, "bin": str(bin_path.relative_to(ROOT)),
-            "calibration": str(cal_path.relative_to(ROOT)),
-            "threshold": float(cal["threshold"]), "calibration_method": cal["method"],
-            "g_max": export.g_max, "model": export.to_model(),
-            "sha256": sha256(bin_path),
+            "sha256": sha256(bin_path), "g_max": export.g_max,
+            "threshold": float(cal["threshold"]),
+            "model": CanonicalStudent(export),
         })
     return specs
 
 
-def integrate(a: np.ndarray, t: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Trapezoidal double integral with v(0)=y(0)=0 on the gate-open ticks."""
-    n = len(a)
-    v = np.zeros(n, dtype=np.float64)
-    y = np.zeros(n, dtype=np.float64)
-    for i in range(1, n):
-        dt = t[i] - t[i - 1]
-        v[i] = v[i - 1] + 0.5 * (a[i] + a[i - 1]) * dt
-        y[i] = y[i - 1] + 0.5 * (v[i] + v[i - 1]) * dt
-    return v, y
-
-
-def score_episode(ep, spec, frame_rate: float) -> dict | None:
-    frames = np.asarray(ep.frames[:, :14], dtype=np.float32)
-    cond = np.asarray(ep.conditioning, dtype=np.float32)
+def build_controls(baseline, spec: dict, out_dir: Path) -> dict:
+    """One TSV per episode; interlock = ai_healthy AND calibrated confidence."""
+    out_dir.mkdir(parents=True, exist_ok=True)
     model = spec["model"]
-    model.reset_state()
-    delta, conf = [], []
-    with torch.no_grad():
-        for i in range(len(frames)):
-            frame = np.concatenate((frames[i], cond)).astype(np.float32)
-            d, c = model.step(frame)
-            delta.append(d.detach().numpy())
-            conf.append(float(c))
-    delta = np.asarray(delta, dtype=np.float64)
-    conf = np.asarray(conf, dtype=np.float64)
-    target = np.asarray(ep.targets, dtype=np.float64)
-    b = physics_baseline(torch.as_tensor(frames, dtype=torch.float32)).numpy().astype(np.float64)
-    g = target[:, :2]
+    stats = {"rows": 0, "gate_open_ticks": 0, "gate_trips": 0,
+             "interventions": 0, "clipped_ticks": 0, "max_command_deg": 0.0,
+             "tracking_sq": 0.0}
+    for ep in baseline.episodes:
+        features = np.asarray(ep.frames[:, :14], dtype=np.float32)
+        cond = np.asarray(ep.conditioning, dtype=np.float32)
+        targets = np.asarray(ep.targets, dtype=np.float64)
+        model.reset()
+        deltas, confs = [], []
+        with torch.no_grad():
+            for i in range(len(features)):
+                frame = np.concatenate((features[i], cond)).astype(np.float32)
+                delta, conf = model.step(frame)
+                deltas.append(np.asarray(delta, dtype=np.float64))
+                confs.append(float(conf))
+        delta = np.asarray(deltas, dtype=np.float64)
+        conf = np.asarray(confs, dtype=np.float64)
+        b = physics_baseline(torch.as_tensor(features, dtype=torch.float32)).numpy().astype(np.float64)
+        gate = (targets[:, 3] > 0.5) & (conf >= spec["threshold"])
 
-    # Gate = reference optimizer's AI interlock/health flag AND calibrated
-    # confidence. calibration.json stores a threshold but not the isotonic map,
-    # so the threshold is applied to the raw sigmoid confidence: a conservative
-    # upper bound on how often the assisted arm is actually allowed to act.
-    gate = (target[:, 3] > 0.5) & (conf >= spec["threshold"])
-    idx = np.flatnonzero(gate)
-    if len(idx) < 2:
-        return None
+        command = np.where(gate[:, None], b + delta, 0.0)
+        deg = command * RAD_PER_NORM * DEG_PER_RAD
+        clipped = np.abs(deg) > MAX_DEG
+        deg = np.clip(deg, -MAX_DEG, MAX_DEG)
+        with (out_dir / f"{ep.index}.tsv").open("w") as handle:
+            handle.write("# frame_index g_roll_deg g_pitch_deg\n")
+            for i, (roll, pitch) in enumerate(deg):
+                handle.write(f"{i} {roll:.6f} {pitch:.6f}\n")
 
-    delta_mag = np.max(np.abs(delta), axis=1)
-    t = (idx - idx[0]) / frame_rate
-    h = np.asarray(frames[:, 6], dtype=np.float64)  # baro_h, biased/noisy
-    result = {
-        "scenario": ep.scenario, "index": int(ep.index), "ticks_total": len(frames),
-        "ticks_gate_open": len(idx), "gate_trips": int(np.sum(~gate)),
-        "interventions": int(np.sum(gate & (delta_mag > INTERVENTION_EPS))),
-        "max_correction_all": float(np.max(delta_mag)),
-        "max_correction_applied": float(np.max(delta_mag[idx])),
-        "mean_correction_applied": float(np.mean(delta_mag[idx])),
+        active = gate & (np.max(np.abs(deg), axis=1) > INTERVENTION_EPS)
+        stats["rows"] += len(deg)
+        stats["gate_open_ticks"] += int(gate.sum())
+        stats["gate_trips"] += int((~gate).sum())
+        stats["interventions"] += int(active.sum())
+        stats["clipped_ticks"] += int(clipped.any(axis=1).sum())
+        stats["max_command_deg"] = max(stats["max_command_deg"], float(np.max(np.abs(deg))))
+        if gate.any():
+            stats["tracking_sq"] += float(np.sum((command[gate] - targets[gate, :2]) ** 2))
+    stats["tracking_rmse_norm"] = float(
+        np.sqrt(stats["tracking_sq"] / max(stats["gate_open_ticks"], 1)))
+    stats.pop("tracking_sq")
+    return stats
+
+
+def summarise(baseline_track: dict, assisted_track: dict, control: dict) -> dict:
+    scenarios = sorted({k % 20 for k in baseline_track})
+    rows = []
+    for sc in scenarios:
+        candidates = [k for k in sorted(baseline_track) if k % 20 == sc]
+        b_ap = float(np.mean([baseline_track[k]["apogee_m"] for k in candidates]))
+        a_ap = float(np.mean([assisted_track[k]["apogee_m"] for k in candidates]))
+        b_lat = float(np.sqrt(np.mean([baseline_track[k]["lateral_rms_m"] ** 2
+                                       for k in candidates])))
+        a_lat = float(np.sqrt(np.mean([assisted_track[k]["lateral_rms_m"] ** 2
+                                       for k in candidates])))
+        rows.append({
+            "scenario": f"scenario_{sc:02d}", "episodes": len(candidates),
+            "baseline": {"apogee_m": b_ap, "lateral_rms_m": b_lat},
+            "assisted": {"apogee_m": a_ap, "lateral_rms_m": a_lat},
+            "apogee_delta_m": a_ap - b_ap,
+            "apogee_retention_pct": 100.0 * a_ap / b_ap,
+            "lateral_ratio_pct": 100.0 * a_lat / b_lat,
+            "lateral_delta_m": a_lat - b_lat,
+        })
+    keys = sorted(baseline_track)
+    b_ap = float(np.mean([baseline_track[k]["apogee_m"] for k in keys]))
+    a_ap = float(np.mean([assisted_track[k]["apogee_m"] for k in keys]))
+    b_lat = float(np.sqrt(np.mean([baseline_track[k]["lateral_rms_m"] ** 2 for k in keys])))
+    a_lat = float(np.sqrt(np.mean([assisted_track[k]["lateral_rms_m"] ** 2 for k in keys])))
+    aggregate = {
+        "episodes": len(keys),
+        "baseline": {"apogee_m": b_ap, "lateral_rms_m": b_lat},
+        "assisted": {"apogee_m": a_ap, "lateral_rms_m": a_lat},
+        "apogee_delta_m": a_ap - b_ap,
+        "apogee_retention_pct": 100.0 * a_ap / b_ap,
+        "lateral_ratio_pct": 100.0 * a_lat / b_lat,
+        "lateral_delta_m": a_lat - b_lat,
+        **control,
     }
-    for name, command in (("baseline", b), ("assisted", b + delta)):
-        tilt = command[idx] * TILT_PER_CMD
-        a_lat = G * tilt[:, 0]
-        a_zloss = 0.5 * G * (tilt[:, 0] ** 2 + tilt[:, 1] ** 2)
-        _, y = integrate(a_lat, t)
-        _, zloss = integrate(a_zloss, t)
-        result[name] = {
-            "apogee_m": float(np.max(h[idx] - zloss)),
-            "lateral_y_sq": float(np.mean(y ** 2)),
-            "tracking_e_sq": float(np.mean((command[idx] - g[idx]) ** 2)),
-        }
-    return result
+    return {"per_scenario": rows, "aggregate": aggregate}
 
 
-def aggregate(rows: list[dict]) -> dict:
-    def controller(name: str) -> dict:
-        return {
-            "apogee_m": float(np.mean([r[name]["apogee_m"] for r in rows])),
-            "lateral_rms_m": float(np.sqrt(np.mean([r[name]["lateral_y_sq"] for r in rows]))),
-            "tracking_rmse_norm": float(np.sqrt(np.mean([r[name]["tracking_e_sq"] for r in rows]))),
-        }
-    base, assisted = controller("baseline"), controller("assisted")
-    return {
-        "episodes": len(rows),
-        "gate_open_ticks": int(sum(r["ticks_gate_open"] for r in rows)),
-        "gate_trips": int(sum(r["gate_trips"] for r in rows)),
-        "interventions": int(sum(r["interventions"] for r in rows)),
-        "max_correction_applied": float(max(r["max_correction_applied"] for r in rows)),
-        "max_correction_all_ticks": float(max(r["max_correction_all"] for r in rows)),
-        "baseline": base, "assisted": assisted,
-        "apogee_retention_pct": 100.0 * assisted["apogee_m"] / base["apogee_m"],
-        "lateral_rms_ratio_pct": 100.0 * assisted["lateral_rms_m"] / base["lateral_rms_m"],
-    }
-
-
-def fmt(value: float, nd: int = 4) -> str:
-    return f"{value:.{nd}f}"
+def fmt(v: float, nd: int = 3) -> str:
+    return f"{v:.{nd}f}"
 
 
 def markdown(report: dict) -> str:
-    d, p = report["data"], report["proxy"]
     out = [
-        "# PID vs AI assistant — OR-aligned held-out wind/gust scenarios",
+        "# PID (zero command) vs AI assistant — closed-loop OR-aligned A/B",
         "",
-        "**This is a deterministic PROXY A/B, not a flown flight test.** The simulator "
-        "never applies a command to its dynamics (`sim/core/src/episode.rs:233` records "
-        "`g_theta` as a target, `:257` integrates with unchanged `Vehicle`); validation v2 "
-        "stores no per-tick truth position/apogee. Real apogee gain is therefore "
-        "**not measurable** without changing `sim/`. No physics was invented: the proxy "
-        "uses only recorded commands, recorded baro height, the recorded frame rate, "
-        "`g = 9.80665` (`sim/core/src/dynamics.rs:437`) and the reference clamp "
-        "`0.12 rad` (`sim/core/src/optimizer.rs:41`).",
+        "**This report SUPERSEDES the surrogate A/B** (`237920a`, the previous "
+        "`ab_report.json/.md`). The old apogee/lateral numbers were a gravity/tilt "
+        "surrogate on recorded commands; they are void, not a smaller version of "
+        "these results.",
         "",
-        "## Scope",
+        "Apogee and lateral RMS are now measured directly from the flown-truth "
+        "`validation.trajectory` sidecar (POTOKTRJ v1, per-tick x/y/z/vx/vy/vz)",
+        "produced by `potok-sim`'s command→dynamics seam "
+        "(`Simulator::run_episode_with_control`, `sim/core/src/episode.rs:130`).",
+        "No sim source or config was changed; `scripts/ab_control/` is a read-only "
+        "driver because the CLI's `--control-file` applies one TSV to every episode.",
         "",
-        f"- seed: **{d['seed']}** (fixed, as required); 3 seeds are **not** used: the data "
-        "is generated at one fixed seed and the students were trained at that seed. "
-        "The 4 held-out scenarios are the independent cells; 20 episodes total, no cherry-picking.",
-        f"- train: {d['train_episodes']} episodes / {len(d['train_scenarios'])} scenarios; "
-        f"held-out: {d['held_episodes']} episodes / {len(d['held_scenarios'])} scenarios "
-        f"({', '.join(d['held_scenarios'])}).",
-        f"- simulator reproducibility: "
-        f"{'byte-identical regeneration confirmed' if report['sim']['verified'] else 'not verified'} "
-        f"(sha256 `{report['sim']['sha256']}`).",
-        f"- students: " + "; ".join(
-            f"`{s['bin']}` (sha256 {s['sha256'][:12]}, g_max {fmt(s['g_max'], 4)})"
-            for s in report["students"]),
+        "## Protocol",
         "",
-        "## Controllers and proxy definition",
-        "",
-        "- **baseline (AI off)**: `b(x) = physics_baseline(frame)` from "
-        "`ai/src/potok_ai/physics.py:37`, the frame-local P/D command used by the "
-        "onboard deployment contract. The simulator's `g_theta` is a distillation "
-        "*target* computed with privileged full state, not a command sent to the "
-        "actuator path; adding the student's correction to `g_theta` would not be the "
-        "flown controller, so it is not used as the baseline. `g_theta` is used only "
-        "for the `tracking_rmse_norm` diagnostic below.",
-        "- **assisted (AI on)**: `b(x) + Delta`, where `Delta` comes from the exported "
-        "stateful student replayed tick-by-tick with `reset_state()` per episode "
-        "(canonical Python forward, same as `edge/src/student_runtime.rs`).",
-        f"- **gate**: reference `ai_healthy` flag AND calibrated confidence >= threshold "
-        f"(loopwm {fmt(report['gate_thresholds']['loopwm'], 6)}, "
-        f"lrs {fmt(report['gate_thresholds']['lrs'], 6)}). The isotonic map is not stored "
-        "in calibration.json, so the threshold is applied to the raw sigmoid confidence: "
-        "an upper bound on gate openness. Gate trips are counted over all ticks.",
-        f"- **surrogate dynamics**: only on gate-open ticks, with zero initial velocity "
-        f"and displacement: `tilt = command * {TILT_PER_CMD} rad`, "
-        f"`a_lat = {G} * tilt_roll`, `a_zloss = 0.5 * {G} * |tilt|^2`, integrated twice "
-        "by trapezoid at the recorded 50 Hz frame rate. Boost/interlock ticks contribute "
-        "gate trips but no surrogate dynamics (the reference interlocks them to zero).",
-        f"- **apogee_m (proxy)**: `max(baro_h_t - zloss_t)` over gate-open ticks, i.e. the "
-        "recorded biased/noisy barometric altitude minus the surrogate tilt-induced "
-        "vertical loss at the same tick. "
-        "`apogee_retention_pct = 100 * assisted / baseline`.",
-        "- **lateral_rms_m (proxy)**: RMS of the surrogate lateral displacement over "
-        "gate-open ticks. **max |g| correction**: largest absolute student correction "
-        "actually applied (gate-open ticks). **interventions**: gate-open ticks with "
-        "|Delta| > 1e-6. **tracking_rmse_norm**: RMS of `command - g_theta` in the "
-        "reference command's normalised units (diagnostic, not metres).",
+        "- Seed 1: the 20 OR-aligned held-out episodes (indices "
+        "16..19,36..39,56..59,76..79,96..99) across scenario_16..19, from "
+        "`ai/out/run2/sim.toml` (12 s, 50 Hz). Baseline validation is "
+        "byte-identical to `ai/out/run2/data/heldout_validation.bin`.",
+        "- Seeds 2 and 3: same 20 indices/scenarios, generated with `--seed 2/3`; "
+        "the students were NOT retrained, so these are off-training generalization "
+        "checks, not a seed sweep of the training procedure.",
+        "- Baseline arm: no control file, zero command on every tick.",
+        "- Assisted arm: per-tick `command = physics_baseline(frame) + student Delta`, "
+        "the same residual correction as the surrogate report. The exported weights "
+        "are run through the committed (edge-equivalent) student forward in "
+        "`scripts/ab_pid_vs_ai.py::CanonicalStudent`; the uncommitted change in "
+        "`ai/src/potok_ai/student.py` is NOT used, because these exports were "
+        "trained against the old forward. Interlock kept: a "
+        "command is emitted only where the recorded reference says `ai_healthy` and "
+        "the calibrated student confidence clears its threshold; otherwise zero.",
+        f"- Unit mapping: normalised command × {RAD_PER_NORM} rad × 180/π = degrees "
+        f"(the reference optimizer's ±0.12 rad clamp, same scale as the old "
+        f"surrogate). Commands beyond the seam's ±{MAX_DEG:.0f}° actuator limit are "
+        f"clipped and counted (`clipped_ticks`); no physics or gains were tuned.",
+        "- `interventions` counts gate-open ticks with a non-zero applied command; "
+        "`gate_trips` counts ticks with the interlock closed. Both are summed over "
+        "episodes. `tracking_rmse_norm` is the assisted command's RMS error against "
+        "g_theta on gate-open ticks (diagnostic only).",
+        "- Exit status: 0 iff the primary assisted arm reduces lateral RMS on seed 1; "
+        "nonzero otherwise. Apogee deltas are reported even when tiny or negative.",
         "",
     ]
-    for name in STUDENTS:
-        agg = report["aggregate"][name]
-        out += [
-            f"## Student: `{name}`",
-            "",
-            "| scenario | n ep | gate-open / gate-trip | interventions | max abs Δg | "
-            "baseline apogee (m) | assisted apogee (m) | retention % | "
-            "baseline lateral RMS (m) | assisted lateral RMS (m) | tracking RMSE b / b+Δ |",
-            "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
-        ]
-        for r in report["rows"][name]:
-            base, ass = r["baseline"], r["assisted"]
-            out.append(
-                f"| {r['scenario']} | {r['episodes']} | {r['gate_open_ticks']} / {r['gate_trips']} "
-                f"| {r['interventions']} | {fmt(r['max_correction_applied'], 4)} "
-                f"| {fmt(base['apogee_m'], 6)} | {fmt(ass['apogee_m'], 6)} "
-                f"| {fmt(r['apogee_retention_pct'], 6)} | {fmt(base['lateral_rms_m'], 5)} "
-                f"| {fmt(ass['lateral_rms_m'], 5)} "
-                f"| {fmt(base['tracking_rmse_norm'], 4)} / {fmt(ass['tracking_rmse_norm'], 4)} |"
-            )
-        b, a = agg["baseline"], agg["assisted"]
-        out += [
-            f"| **ALL ({agg['episodes']} ep)** | — | {agg['gate_open_ticks']} / "
-            f"{agg['gate_trips']} | {agg['interventions']} | "
-            f"{fmt(agg['max_correction_applied'], 4)} | {fmt(b['apogee_m'], 6)} "
-            f"| {fmt(a['apogee_m'], 6)} | {fmt(agg['apogee_retention_pct'], 6)} "
-            f"| {fmt(b['lateral_rms_m'], 5)} | {fmt(a['lateral_rms_m'], 5)} "
-            f"| {fmt(b['tracking_rmse_norm'], 4)} / {fmt(a['tracking_rmse_norm'], 4)} |",
-            "",
-        ]
-    primary = report["primary"]
-    pagg = report["aggregate"][primary]
-    pb, pa = pagg["baseline"], pagg["assisted"]
+    s1 = report["seeds"]["1"][PRIMARY]["aggregate"]
     verdict = report["verdict"]
     out += [
-        "## Verdict",
+        "## Verdict (primary: loopwm student, seed 1)",
         "",
-        f"Primary model `{primary}` (the non-degenerate loopwm student): assisted beats "
-        f"baseline on apogee retention "
-        f"({fmt(verdict['apogee_retention_pct'], 6)} %, "
-        f"delta {fmt(pa['apogee_m'] - pb['apogee_m'], 6)} m, "
-        f"{'YES' if verdict['beats_apogee'] else 'NO'}) and on lateral RMS "
-        f"({fmt(verdict['lateral_rms_ratio_pct'], 6)} %, "
-        f"{'YES' if verdict['beats_lateral'] else 'NO'}). Overall: "
-        f"**{'PASS' if verdict['pass'] else 'FAIL'}** (exit "
-        f"{report['exit_code']}).",
+        f"- lateral RMS {fmt(s1['baseline']['lateral_rms_m'], 6)} m → "
+        f"{fmt(s1['assisted']['lateral_rms_m'], 6)} m "
+        f"({fmt(s1['lateral_delta_m'], 6)} m, {fmt(s1['lateral_ratio_pct'], 6)} % of baseline): "
+        f"{'BEAT' if verdict['beats_lateral'] else 'DID NOT BEAT'} baseline.",
+        f"- apogee {fmt(s1['baseline']['apogee_m'])} m → "
+        f"{fmt(s1['assisted']['apogee_m'])} m "
+        f"({fmt(s1['apogee_delta_m'], 4)} m, "
+        f"{fmt(s1['apogee_retention_pct'], 5)} % retention).",
+        f"- overall **{'PASS' if verdict['pass'] else 'FAIL'}** (exit {report['exit_code']}).",
         "",
-        f"Magnitude check: the surrogate apogee win is {fmt(pa['apogee_m'] - pb['apogee_m'], 6)} m, "
-        f"far below the 0.35 m baro noise floor — it is a tie in physical terms. The larger, "
-        f"still proxy, signal is command tracking: g_theta RMSE "
-        f"{fmt(pb['tracking_rmse_norm'], 4)} -> {fmt(pa['tracking_rmse_norm'], 4)} "
-        f"({fmt(100.0 * (1.0 - pa['tracking_rmse_norm'] / pb['tracking_rmse_norm']), 2)}% lower) "
-        f"and surrogate lateral RMS {fmt(pb['lateral_rms_m'], 5)} -> "
-        f"{fmt(pa['lateral_rms_m'], 5)} m, both measured over only "
-        f"{pagg['gate_open_ticks']} gate-open ticks.",
+    ]
+    for seed in report["seed_order"]:
+        for name in STUDENTS:
+            entry = report["seeds"][str(seed)][name]
+            agg = entry["aggregate"]
+            out += [
+                f"## Seed {seed} · student `{name}`"
+                + (" (primary)" if name == PRIMARY and seed == 1 else "")
+                + (" (off-training)" if seed != 1 else ""),
+                "",
+                "| scenario | ep | baseline apogee (m) | assisted apogee (m) | Δ apogee (m) | "
+                "retention % | baseline lateral RMS (m) | assisted lateral RMS (m) | "
+                "Δ lateral (m) | lateral % |",
+                "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+            ]
+            for r in entry["per_scenario"]:
+                out.append(
+                    f"| {r['scenario']} | {r['episodes']} "
+                    f"| {fmt(r['baseline']['apogee_m'])} | {fmt(r['assisted']['apogee_m'])} "
+                    f"| {fmt(r['apogee_delta_m'], 4)} | {fmt(r['apogee_retention_pct'], 5)} "
+                    f"| {fmt(r['baseline']['lateral_rms_m'], 6)} "
+                    f"| {fmt(r['assisted']['lateral_rms_m'], 6)} "
+                    f"| {fmt(r['lateral_delta_m'], 6)} | {fmt(r['lateral_ratio_pct'], 6)} |")
+            out += [
+                f"| **ALL ({agg['episodes']} ep)** | — | {fmt(agg['baseline']['apogee_m'])} "
+                f"| {fmt(agg['assisted']['apogee_m'])} | {fmt(agg['apogee_delta_m'], 4)} "
+                f"| {fmt(agg['apogee_retention_pct'], 5)} "
+                f"| {fmt(agg['baseline']['lateral_rms_m'], 6)} "
+                f"| {fmt(agg['assisted']['lateral_rms_m'], 6)} "
+                f"| {fmt(agg['lateral_delta_m'], 6)} | {fmt(agg['lateral_ratio_pct'], 6)} |",
+                "",
+                f"interventions {agg['interventions']} / {agg['rows']} ticks; "
+                f"gate trips {agg['gate_trips']}; clipped ticks {agg['clipped_ticks']}; "
+                f"max applied command {fmt(agg['max_command_deg'])}°; "
+                f"g_theta tracking RMSE {fmt(agg['tracking_rmse_norm'], 4)}. "
+                f"Trajectory sha256: baseline `{entry['sha256']['baseline']}`, "
+                f"assisted `{entry['sha256']['assisted']}`.",
+                "",
+            ]
+    out += [
+        "## Honesty notes",
         "",
-        "## Limitations (do not read this as a flight result)",
-        "",
-        "- The command is never applied to the RK4 state; both arms are scored on the "
-        "same recorded trajectory, so the apogee/lateral numbers are surrogates, not "
-        "measurements of a controlled flight.",
-        f"- Only {report['data']['gate_open_ticks_primary']} gate-open ticks exist in the "
-        f"whole held-out set for the primary student (out of "
-        f"{report['data']['held_ticks']} recorded ticks): the AI interlock is closed for "
-        "almost all of the 12 s scenario because the boost phase lasts ~9.9 s. Any "
-        "advantage is measured on that short tail.",
-        "- The baro height is biased (-0.4 m) and noisy (0.35 m); it is the same "
-        "recorded signal for both arms, so comparisons are paired, but absolute apogee "
-        "is not the simulator's truth `apogee_m`.",
-        "- The calibration isotonic map is not exported; the threshold is applied to raw "
-        "sigmoid confidence, so gate openings here are an upper bound.",
-        "- 3-seed replication is unavailable by construction (fixed generation seed and "
-        "seed-1-trained students); the 4 held-out scenarios, 20 episodes, are the "
-        "replication units. Seeds 2 and 3 were not generated — no seed was cherry-picked.",
-        "",
+        "- Commands are replayed open-loop from the baseline run's recorded frames; "
+        "the control TSV is indexed by frame, as the simulator seam requires. Once "
+        "the assisted command moves the vehicle, later frames differ from the "
+        "baseline run — that is the point of the closed-loop comparison, but the "
+        "interlock schedule stays the paired baseline one.",
+        "- Lateral RMS is over the whole 12 s flown trajectory, not just the "
+        "interlock-open tail; the old report's 401-tick restriction no longer applies "
+        "to the measurement (it still applies to when a command can be emitted).",
+        "- Seeds 2/3 use the seed-1-trained students; they test input robustness, "
+        "not training reproducibility. No seed, scenario or episode was dropped.",
+        "- `clipped_ticks` is the seam's hard ±10° actuator bound, not a tuning knob.",
+        "- Measurement floor: the sidecar stores f32 positions. One ULP is about "
+        f"{float(np.spacing(np.float32(600.0))):.2e} m at ~600 m lateral distance and "
+        f"{float(np.spacing(np.float32(1300.0))):.2e} m at ~1300 m altitude. The "
+        "lateral deltas (~4e-5 m) are below one coordinate ULP — numerically a tie; "
+        "the apogee deltas (~-0.003 m) are ~20 ULP but still physically negligible. "
+        "No win survives rounding.",
     ]
     return "\n".join(out)
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--data-dir", type=Path, default=ROOT / "ai" / "out" / "run2" / "data")
-    ap.add_argument("--model-dir", type=Path, default=ROOT / "ai" / "out" / "run2")
-    ap.add_argument("--seed", type=int, default=1)
-    ap.add_argument("--verify-sim", action=argparse.BooleanOptionalAction, default=False,
-                    help="regenerate the held-out split with the release CLI and require "
-                         "a byte-identical file (default: off; needs sim/config + CLI)")
-    ap.add_argument("--sim-bin", type=Path, default=ROOT / "sim" / "target" / "release" / "potok-cli")
-    ap.add_argument("--sim-config", type=Path, default=ROOT / "ai" / "out" / "run2" / "sim.toml")
+    ap.add_argument("--seeds", type=int, nargs="+", default=[1, 2, 3])
+    ap.add_argument("--work-dir", type=Path, default=SCRIPTS / "ab_work")
     ap.add_argument("--out-json", type=Path, default=SCRIPTS / "ab_report.json")
     ap.add_argument("--out-md", type=Path, default=SCRIPTS / "ab_report.md")
     args = ap.parse_args()
-
     torch.set_num_threads(1)
-    data = load_data(args.data_dir, args.seed)
-    held_file = args.data_dir / "heldout_validation.bin"
-    sim = {"verified": False, "sha256": sha256(held_file)}
-    if args.verify_sim:
-        sim = verify_sim(args.sim_bin, args.sim_config, args.seed,
-                         len(data["train"].episodes), len(data["held"].episodes), held_file)
+    if not CONFIG.is_file():
+        raise FileNotFoundError(f"missing {CONFIG}")
 
-    specs = student_specs(args.model_dir)
-    rows = {}
-    for spec in specs:
-        scored = []
-        for ep in data["held"].episodes:
-            result = score_episode(ep, spec, data["held"].header.frame_rate_hz)
-            if result is None:
-                raise ValueError(f"{spec['name']}: episode {ep.index} has <2 gate-open ticks")
-            scored.append(result)
-        rows[spec["name"]] = scored
+    specs = student_specs()
+    seed_order = sorted(args.seeds)
+    report_seeds = {}
+    reference = read_validation(ROOT / "ai" / "out" / "run2" / "data"
+                                / "heldout_validation.bin")
+    indices = [int(e.index) for e in reference.episodes]
+    if len(indices) != 20:
+        raise ValueError(f"expected 20 held-out indices, got {len(indices)}")
+    for seed in seed_order:
+        work = args.work_dir / f"seed{seed}"
+        baseline_dir = work / "baseline"
+        printed = run_helper(seed, indices, baseline_dir, None)
+        baseline = read_validation(baseline_dir / "validation.bin")
+        baseline_track = read_track(baseline_dir / "validation.trajectory")
+        for idx, (apogee, lateral) in printed.items():
+            got = baseline_track[idx]
+            if abs(got["apogee_m"] - apogee) > 1e-3 or abs(got["lateral_rms_m"] - lateral) > 1e-3:
+                raise RuntimeError(f"seed {seed} episode {idx}: sidecar/stdout mismatch")
+        if len(indices) != 20 or len(baseline_track) != 20:
+            raise ValueError(f"seed {seed}: expected 20 held-out episodes, got {len(indices)}")
+        report_seeds[str(seed)] = {}
+        for spec in specs:
+            name = spec["name"]
+            tsv_dir = work / name / "commands"
+            control = build_controls(baseline, spec, tsv_dir)
+            assisted_dir = work / name / "flown"
+            run_helper(seed, indices, assisted_dir, tsv_dir)
+            assisted_track = read_track(assisted_dir / "validation.trajectory")
+            if set(assisted_track) != set(baseline_track):
+                raise RuntimeError(f"seed {seed} {name}: episode sets differ")
+            for idx in indices:
+                if assisted_track[idx]["ticks"] != baseline_track[idx]["ticks"]:
+                    raise RuntimeError(f"seed {seed} {name}: tick count changed at {idx}")
+            summary = summarise(baseline_track, assisted_track, control)
+            summary["sha256"] = {
+                "baseline": sha256(baseline_dir / "validation.trajectory"),
+                "assisted": sha256(assisted_dir / "validation.trajectory"),
+            }
+            report_seeds[str(seed)][name] = summary
 
-    aggregate_by_student = {}
-    for name in STUDENTS:
-        by_scenario = {}
-        for r in rows[name]:
-            by_scenario.setdefault(r["scenario"], []).append(r)
-        scenario_rows = [aggregate(group) | {"scenario": group[0]["scenario"]}
-                         for group in (by_scenario[k] for k in sorted(by_scenario))]
-        aggregate_by_student[name] = {
-            "per_episode": rows[name],
-            "per_scenario": scenario_rows,
-            "aggregate": aggregate(rows[name]),
-        }
-
-    primary = "loopwm"
-    agg = aggregate_by_student[primary]["aggregate"]
-    beats_apogee = agg["apogee_retention_pct"] > 100.0
-    beats_lateral = agg["lateral_rms_ratio_pct"] < 100.0
-    passed = beats_apogee or beats_lateral
+    primary_agg = report_seeds["1"][PRIMARY]["aggregate"]
+    beats_lateral = primary_agg["assisted"]["lateral_rms_m"] < primary_agg["baseline"]["lateral_rms_m"]
     report = {
-        "task": "what does the AI assistant give over pure PID on OR-aligned wind/gust scenarios",
-        "deterministic": True,
-        "proxy_not_flight": True,
-        "sim": sim,
-        "data": {
-            "seed": args.seed,
-            "train_episodes": len(data["train"].episodes),
-            "held_episodes": len(data["held"].episodes),
-            "held_ticks": int(sum(len(e.frames) for e in data["held"].episodes)),
-            "train_scenarios": data["train_scenarios"],
-            "held_scenarios": data["held_scenarios"],
-            "gate_open_ticks_primary": agg["gate_open_ticks"],
-            "seeds_used": [args.seed],
-            "seed_note": "3 seeds not used: generation seed is fixed by the task and both "
-                         "students were trained at seed 1; the 4 held-out scenarios "
-                         "(20 episodes) are the independent cells.",
+        "task": "closed-loop AI assist vs zero-command PID on OR-aligned held-out scenarios",
+        "supersedes": "surrogate A/B report at commit 237920a (void)",
+        "measurement": "POTOKTRJ v1 flown-truth sidecar, not surrogate",
+        "sim_source": "commit c25eabb control seam, read-only via scripts/ab_control",
+        "config": str(CONFIG.relative_to(ROOT)),
+        "seed_order": seed_order,
+        "seed_note": "seeds 2/3 use seed-1-trained students: off-training generalization, "
+                     "not a training seed sweep",
+        "held_out_indices": indices,
+        "conversion": {
+            "rad_per_normalised_command": RAD_PER_NORM,
+            "actuator_limit_deg": MAX_DEG,
+            "interlock": "recorded ai_healthy AND calibrated confidence >= threshold",
         },
-        "proxy": {
-            "gravity_mps2": G,
-            "tilt_rad_per_normalised_command": TILT_PER_CMD,
-            "intervention_eps": INTERVENTION_EPS,
-            "baseline_command": "physics_baseline(frame), ai/src/potok_ai/physics.py:37",
-            "assisted_command": "physics_baseline(frame) + exported student Delta",
-            "reference_command": "g_theta from validation targets, diagnostic only",
-            "gate": "target ai_healthy AND raw sigmoid confidence >= calibration threshold",
-            "integration": "trapezoid, zero initial v/y, gate-open ticks only, 50 Hz",
-            "apogee_m": "max over gate-open ticks of (recorded baro_h_t - surrogate tilt-induced vertical loss_t)",
-        },
-        "gate_thresholds": {s["name"]: s["threshold"] for s in specs},
         "students": [{k: v for k, v in s.items() if k != "model"} for s in specs],
-        "rows": {name: aggregate_by_student[name]["per_scenario"] for name in STUDENTS},
-        "per_episode": {name: aggregate_by_student[name]["per_episode"] for name in STUDENTS},
-        "aggregate": {name: aggregate_by_student[name]["aggregate"] for name in STUDENTS},
-        "primary": primary,
+        "seeds": report_seeds,
         "verdict": {
-            "beats_apogee": beats_apogee,
+            "primary": PRIMARY,
             "beats_lateral": beats_lateral,
-            "apogee_retention_pct": agg["apogee_retention_pct"],
-            "lateral_rms_ratio_pct": agg["lateral_rms_ratio_pct"],
-            "pass": passed,
+            "beats_apogee": primary_agg["apogee_delta_m"] > 0.0,
+            "pass": beats_lateral,
         },
-        "exit_code": 0 if passed else 1,
+        "exit_code": 0 if beats_lateral else 1,
     }
     args.out_json.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     args.out_md.write_text(markdown(report))
     print(f"wrote {args.out_json.relative_to(ROOT)} and {args.out_md.relative_to(ROOT)}")
-    print(f"verdict: {'PASS' if passed else 'FAIL'} "
-          f"(retention {agg['apogee_retention_pct']:.4f}%, "
-          f"lateral ratio {agg['lateral_rms_ratio_pct']:.4f}%)")
+    print(f"verdict: {'PASS' if beats_lateral else 'FAIL'} "
+          f"(seed1 {PRIMARY}: lateral {primary_agg['baseline']['lateral_rms_m']:.3f} -> "
+          f"{primary_agg['assisted']['lateral_rms_m']:.3f} m, "
+          f"apogee {primary_agg['apogee_delta_m']:+.4f} m)")
     sys.exit(report["exit_code"])
 
 

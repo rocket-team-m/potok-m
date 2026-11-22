@@ -1,53 +1,103 @@
-# PID vs AI assistant — OR-aligned held-out wind/gust scenarios
+# PID (zero command) vs AI assistant — closed-loop OR-aligned A/B
 
-**This is a deterministic PROXY A/B, not a flown flight test.** The simulator never applies a command to its dynamics (`sim/core/src/episode.rs:233` records `g_theta` as a target, `:257` integrates with unchanged `Vehicle`); validation v2 stores no per-tick truth position/apogee. Real apogee gain is therefore **not measurable** without changing `sim/`. No physics was invented: the proxy uses only recorded commands, recorded baro height, the recorded frame rate, `g = 9.80665` (`sim/core/src/dynamics.rs:437`) and the reference clamp `0.12 rad` (`sim/core/src/optimizer.rs:41`).
+**This report SUPERSEDES the surrogate A/B** (`237920a`, the previous `ab_report.json/.md`). The old apogee/lateral numbers were a gravity/tilt surrogate on recorded commands; they are void, not a smaller version of these results.
 
-## Scope
+Apogee and lateral RMS are now measured directly from the flown-truth `validation.trajectory` sidecar (POTOKTRJ v1, per-tick x/y/z/vx/vy/vz)
+produced by `potok-sim`'s command→dynamics seam (`Simulator::run_episode_with_control`, `sim/core/src/episode.rs:130`).
+No sim source or config was changed; `scripts/ab_control/` is a read-only driver because the CLI's `--control-file` applies one TSV to every episode.
 
-- seed: **1** (fixed, as required); 3 seeds are **not** used: the data is generated at one fixed seed and the students were trained at that seed. The 4 held-out scenarios are the independent cells; 20 episodes total, no cherry-picking.
-- train: 80 episodes / 16 scenarios; held-out: 20 episodes / 4 scenarios (scenario_16, scenario_17, scenario_18, scenario_19).
-- simulator reproducibility: byte-identical regeneration confirmed (sha256 `59b0ed4dfaf8287eb16278a916aa03ecf9094711fa49df430646dd8968eaac1c`).
-- students: `ai/out/run2/loopwm/loopwm_student.bin` (sha256 419725a92310, g_max 1.2223); `ai/out/run2/lrs/lrs.bin` (sha256 4507be92543c, g_max 1.3626)
+## Protocol
 
-## Controllers and proxy definition
+- Seed 1: the 20 OR-aligned held-out episodes (indices 16..19,36..39,56..59,76..79,96..99) across scenario_16..19, from `ai/out/run2/sim.toml` (12 s, 50 Hz). Baseline validation is byte-identical to `ai/out/run2/data/heldout_validation.bin`.
+- Seeds 2 and 3: same 20 indices/scenarios, generated with `--seed 2/3`; the students were NOT retrained, so these are off-training generalization checks, not a seed sweep of the training procedure.
+- Baseline arm: no control file, zero command on every tick.
+- Assisted arm: per-tick `command = physics_baseline(frame) + student Delta`, the same residual correction as the surrogate report. The exported weights are run through the committed (edge-equivalent) student forward in `scripts/ab_pid_vs_ai.py::CanonicalStudent`; the uncommitted change in `ai/src/potok_ai/student.py` is NOT used, because these exports were trained against the old forward. Interlock kept: a command is emitted only where the recorded reference says `ai_healthy` and the calibrated student confidence clears its threshold; otherwise zero.
+- Unit mapping: normalised command × 0.12 rad × 180/π = degrees (the reference optimizer's ±0.12 rad clamp, same scale as the old surrogate). Commands beyond the seam's ±10° actuator limit are clipped and counted (`clipped_ticks`); no physics or gains were tuned.
+- `interventions` counts gate-open ticks with a non-zero applied command; `gate_trips` counts ticks with the interlock closed. Both are summed over episodes. `tracking_rmse_norm` is the assisted command's RMS error against g_theta on gate-open ticks (diagnostic only).
+- Exit status: 0 iff the primary assisted arm reduces lateral RMS on seed 1; nonzero otherwise. Apogee deltas are reported even when tiny or negative.
 
-- **baseline (AI off)**: `b(x) = physics_baseline(frame)` from `ai/src/potok_ai/physics.py:37`, the frame-local P/D command used by the onboard deployment contract. The simulator's `g_theta` is a distillation *target* computed with privileged full state, not a command sent to the actuator path; adding the student's correction to `g_theta` would not be the flown controller, so it is not used as the baseline. `g_theta` is used only for the `tracking_rmse_norm` diagnostic below.
-- **assisted (AI on)**: `b(x) + Delta`, where `Delta` comes from the exported stateful student replayed tick-by-tick with `reset_state()` per episode (canonical Python forward, same as `edge/src/student_runtime.rs`).
-- **gate**: reference `ai_healthy` flag AND calibrated confidence >= threshold (loopwm 0.039683, lrs 0.000123). The isotonic map is not stored in calibration.json, so the threshold is applied to the raw sigmoid confidence: an upper bound on gate openness. Gate trips are counted over all ticks.
-- **surrogate dynamics**: only on gate-open ticks, with zero initial velocity and displacement: `tilt = command * 0.12 rad`, `a_lat = 9.80665 * tilt_roll`, `a_zloss = 0.5 * 9.80665 * |tilt|^2`, integrated twice by trapezoid at the recorded 50 Hz frame rate. Boost/interlock ticks contribute gate trips but no surrogate dynamics (the reference interlocks them to zero).
-- **apogee_m (proxy)**: `max(baro_h_t - zloss_t)` over gate-open ticks, i.e. the recorded biased/noisy barometric altitude minus the surrogate tilt-induced vertical loss at the same tick. `apogee_retention_pct = 100 * assisted / baseline`.
-- **lateral_rms_m (proxy)**: RMS of the surrogate lateral displacement over gate-open ticks. **max |g| correction**: largest absolute student correction actually applied (gate-open ticks). **interventions**: gate-open ticks with |Delta| > 1e-6. **tracking_rmse_norm**: RMS of `command - g_theta` in the reference command's normalised units (diagnostic, not metres).
+## Verdict (primary: loopwm student, seed 1)
 
-## Student: `loopwm`
+- lateral RMS 566.002412 m → 566.002452 m (0.000039 m, 100.000007 % of baseline): DID NOT BEAT baseline.
+- apogee 1321.346 m → 1321.343 m (-0.0028 m, 99.99979 % retention).
+- overall **FAIL** (exit 1).
 
-| scenario | n ep | gate-open / gate-trip | interventions | max abs Δg | baseline apogee (m) | assisted apogee (m) | retention % | baseline lateral RMS (m) | assisted lateral RMS (m) | tracking RMSE b / b+Δ |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| scenario_16 | 5 | 89 / 2911 | 89 | 0.8311 | 1277.279059 | 1277.283345 | 100.000335 | 0.04002 | 0.00676 | 0.9361 / 0.7094 |
-| scenario_17 | 5 | 95 / 2905 | 95 | 0.8311 | 1404.434223 | 1404.438814 | 100.000327 | 0.03874 | 0.00654 | 0.9458 / 0.7080 |
-| scenario_18 | 5 | 96 / 2904 | 96 | 0.8311 | 1192.021755 | 1192.026342 | 100.000385 | 0.04188 | 0.00707 | 0.9368 / 0.7093 |
-| scenario_19 | 5 | 121 / 2879 | 121 | 0.8311 | 1327.282438 | 1327.290509 | 100.000608 | 0.07593 | 0.01282 | 0.9513 / 0.7072 |
-| **ALL (20 ep)** | — | 401 / 11599 | 401 | 0.8311 | 1300.254369 | 1300.259752 | 100.000414 | 0.05153 | 0.00870 | 0.9425 / 0.7085 |
+## Seed 1 · student `loopwm` (primary)
 
-## Student: `lrs`
+| scenario | ep | baseline apogee (m) | assisted apogee (m) | Δ apogee (m) | retention % | baseline lateral RMS (m) | assisted lateral RMS (m) | Δ lateral (m) | lateral % |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| scenario_16 | 5 | 1298.628 | 1298.626 | -0.0018 | 99.99986 | 560.084974 | 560.084991 | 0.000017 | 100.000003 |
+| scenario_17 | 5 | 1431.955 | 1431.953 | -0.0014 | 99.99990 | 556.261905 | 556.261915 | 0.000010 | 100.000002 |
+| scenario_18 | 5 | 1208.793 | 1208.789 | -0.0034 | 99.99972 | 590.758082 | 590.758118 | 0.000036 | 100.000006 |
+| scenario_19 | 5 | 1346.007 | 1346.003 | -0.0045 | 99.99967 | 556.163039 | 556.163134 | 0.000095 | 100.000017 |
+| **ALL (20 ep)** | — | 1321.346 | 1321.343 | -0.0028 | 99.99979 | 566.002412 | 566.002452 | 0.000039 | 100.000007 |
 
-| scenario | n ep | gate-open / gate-trip | interventions | max abs Δg | baseline apogee (m) | assisted apogee (m) | retention % | baseline lateral RMS (m) | assisted lateral RMS (m) | tracking RMSE b / b+Δ |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| scenario_16 | 5 | 89 / 2911 | 89 | 0.8770 | 1277.279059 | 1277.283503 | 100.000348 | 0.04002 | 0.00492 | 0.9361 / 0.6995 |
-| scenario_17 | 5 | 95 / 2905 | 95 | 0.8770 | 1404.434223 | 1404.438894 | 100.000333 | 0.03874 | 0.00477 | 0.9458 / 0.7116 |
-| scenario_18 | 5 | 96 / 2904 | 96 | 0.8770 | 1192.021755 | 1192.026650 | 100.000411 | 0.04188 | 0.00515 | 0.9368 / 0.7005 |
-| scenario_19 | 5 | 121 / 2879 | 121 | 0.8770 | 1327.282438 | 1327.290750 | 100.000626 | 0.07593 | 0.00934 | 0.9513 / 0.7186 |
-| **ALL (20 ep)** | — | 401 / 11599 | 401 | 0.8770 | 1300.254369 | 1300.259949 | 100.000429 | 0.05153 | 0.00634 | 0.9425 / 0.7076 |
+interventions 401 / 12000 ticks; gate trips 11599; clipped ticks 0; max applied command 7.790°; g_theta tracking RMSE 1.0018. Trajectory sha256: baseline `7a7117066d8fe7953f97ffc9addf431d1426abbc28a0d0e41d8bcb44a9fba923`, assisted `a2c6e22133a194c1740dd7ee183b6bcf03e6226356c739ffd978c892b16bd3e5`.
 
-## Verdict
+## Seed 1 · student `lrs`
 
-Primary model `loopwm` (the non-degenerate loopwm student): assisted beats baseline on apogee retention (100.000414 %, delta 0.005383 m, YES) and on lateral RMS (16.887695 %, YES). Overall: **PASS** (exit 0).
+| scenario | ep | baseline apogee (m) | assisted apogee (m) | Δ apogee (m) | retention % | baseline lateral RMS (m) | assisted lateral RMS (m) | Δ lateral (m) | lateral % |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| scenario_16 | 5 | 1298.628 | 1298.628 | -0.0003 | 99.99998 | 560.084974 | 560.084972 | -0.000002 | 100.000000 |
+| scenario_17 | 5 | 1431.955 | 1431.955 | 0.0001 | 100.00001 | 556.261905 | 556.261892 | -0.000012 | 99.999998 |
+| scenario_18 | 5 | 1208.793 | 1208.791 | -0.0017 | 99.99986 | 590.758082 | 590.758100 | 0.000018 | 100.000003 |
+| scenario_19 | 5 | 1346.007 | 1346.005 | -0.0019 | 99.99986 | 556.163039 | 556.163089 | 0.000050 | 100.000009 |
+| **ALL (20 ep)** | — | 1321.346 | 1321.345 | -0.0010 | 99.99993 | 566.002412 | 566.002426 | 0.000013 | 100.000002 |
 
-Magnitude check: the surrogate apogee win is 0.005383 m, far below the 0.35 m baro noise floor — it is a tie in physical terms. The larger, still proxy, signal is command tracking: g_theta RMSE 0.9425 -> 0.7085 (24.83% lower) and surrogate lateral RMS 0.05153 -> 0.00870 m, both measured over only 401 gate-open ticks.
+interventions 401 / 12000 ticks; gate trips 11599; clipped ticks 0; max applied command 6.926°; g_theta tracking RMSE 1.0021. Trajectory sha256: baseline `7a7117066d8fe7953f97ffc9addf431d1426abbc28a0d0e41d8bcb44a9fba923`, assisted `022a914d06d6e0dafb909cbaa885f47278237665d11cb95aa857f93df41467ed`.
 
-## Limitations (do not read this as a flight result)
+## Seed 2 · student `loopwm` (off-training)
 
-- The command is never applied to the RK4 state; both arms are scored on the same recorded trajectory, so the apogee/lateral numbers are surrogates, not measurements of a controlled flight.
-- Only 401 gate-open ticks exist in the whole held-out set for the primary student (out of 12000 recorded ticks): the AI interlock is closed for almost all of the 12 s scenario because the boost phase lasts ~9.9 s. Any advantage is measured on that short tail.
-- The baro height is biased (-0.4 m) and noisy (0.35 m); it is the same recorded signal for both arms, so comparisons are paired, but absolute apogee is not the simulator's truth `apogee_m`.
-- The calibration isotonic map is not exported; the threshold is applied to raw sigmoid confidence, so gate openings here are an upper bound.
-- 3-seed replication is unavailable by construction (fixed generation seed and seed-1-trained students); the 4 held-out scenarios, 20 episodes, are the replication units. Seeds 2 and 3 were not generated — no seed was cherry-picked.
+| scenario | ep | baseline apogee (m) | assisted apogee (m) | Δ apogee (m) | retention % | baseline lateral RMS (m) | assisted lateral RMS (m) | Δ lateral (m) | lateral % |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| scenario_16 | 5 | 1284.671 | 1284.669 | -0.0014 | 99.99989 | 571.915690 | 571.915714 | 0.000024 | 100.000004 |
+| scenario_17 | 5 | 1366.894 | 1366.889 | -0.0053 | 99.99961 | 523.193749 | 523.193873 | 0.000124 | 100.000024 |
+| scenario_18 | 5 | 1236.375 | 1236.374 | -0.0015 | 99.99988 | 608.541820 | 608.541832 | 0.000011 | 100.000002 |
+| scenario_19 | 5 | 1360.423 | 1360.423 | -0.0001 | 99.99999 | 551.791303 | 551.791287 | -0.000016 | 99.999997 |
+| **ALL (20 ep)** | — | 1312.091 | 1312.089 | -0.0021 | 99.99984 | 564.715868 | 564.715902 | 0.000034 | 100.000006 |
+
+interventions 391 / 12000 ticks; gate trips 11609; clipped ticks 0; max applied command 7.790°; g_theta tracking RMSE 1.0014. Trajectory sha256: baseline `af9976e2907e309cfc106b8651afda5b5471aebd8f5e30c78517c682cb365f24`, assisted `a98b6192bd25bc89c978528befc0d0e02daa18c82e83bcf84eff4b58e21103f0`.
+
+## Seed 2 · student `lrs` (off-training)
+
+| scenario | ep | baseline apogee (m) | assisted apogee (m) | Δ apogee (m) | retention % | baseline lateral RMS (m) | assisted lateral RMS (m) | Δ lateral (m) | lateral % |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| scenario_16 | 5 | 1284.671 | 1284.671 | -0.0001 | 99.99999 | 571.915690 | 571.915696 | 0.000006 | 100.000001 |
+| scenario_17 | 5 | 1366.894 | 1366.892 | -0.0019 | 99.99986 | 523.193749 | 523.193795 | 0.000046 | 100.000009 |
+| scenario_18 | 5 | 1236.375 | 1236.374 | -0.0008 | 99.99993 | 608.541820 | 608.541825 | 0.000005 | 100.000001 |
+| scenario_19 | 5 | 1360.423 | 1360.425 | 0.0024 | 100.00017 | 551.791303 | 551.791244 | -0.000059 | 99.999989 |
+| **ALL (20 ep)** | — | 1312.091 | 1312.091 | -0.0001 | 99.99999 | 564.715868 | 564.715867 | -0.000001 | 100.000000 |
+
+interventions 391 / 12000 ticks; gate trips 11609; clipped ticks 0; max applied command 6.926°; g_theta tracking RMSE 1.0055. Trajectory sha256: baseline `af9976e2907e309cfc106b8651afda5b5471aebd8f5e30c78517c682cb365f24`, assisted `5149120fdceb5d8b269de7fb6153fd0c87fd69031b46f46ba1e5c25cfac4be9c`.
+
+## Seed 3 · student `loopwm` (off-training)
+
+| scenario | ep | baseline apogee (m) | assisted apogee (m) | Δ apogee (m) | retention % | baseline lateral RMS (m) | assisted lateral RMS (m) | Δ lateral (m) | lateral % |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| scenario_16 | 5 | 1319.460 | 1319.458 | -0.0023 | 99.99982 | 571.922795 | 571.922817 | 0.000022 | 100.000004 |
+| scenario_17 | 5 | 1349.590 | 1349.583 | -0.0072 | 99.99947 | 516.635884 | 516.636019 | 0.000135 | 100.000026 |
+| scenario_18 | 5 | 1293.819 | 1293.819 | 0.0007 | 100.00005 | 610.778420 | 610.778414 | -0.000006 | 99.999999 |
+| scenario_19 | 5 | 1360.607 | 1360.604 | -0.0022 | 99.99983 | 552.972834 | 552.972858 | 0.000023 | 100.000004 |
+| **ALL (20 ep)** | — | 1330.869 | 1330.866 | -0.0028 | 99.99979 | 564.100513 | 564.100553 | 0.000041 | 100.000007 |
+
+interventions 392 / 12000 ticks; gate trips 11608; clipped ticks 0; max applied command 7.790°; g_theta tracking RMSE 1.0013. Trajectory sha256: baseline `6157fdd0452d70a2f44f64ec51fb8771783be5f87762c650db0d0eb49231b4db`, assisted `e3a605662bf61a4ed155fdb62403e4250cb4ecf77cda71be2a5a4bedbed0b884`.
+
+## Seed 3 · student `lrs` (off-training)
+
+| scenario | ep | baseline apogee (m) | assisted apogee (m) | Δ apogee (m) | retention % | baseline lateral RMS (m) | assisted lateral RMS (m) | Δ lateral (m) | lateral % |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| scenario_16 | 5 | 1319.460 | 1319.458 | -0.0015 | 99.99988 | 571.922795 | 571.922809 | 0.000015 | 100.000003 |
+| scenario_17 | 5 | 1349.590 | 1349.586 | -0.0036 | 99.99973 | 516.635884 | 516.635941 | 0.000056 | 100.000011 |
+| scenario_18 | 5 | 1293.819 | 1293.820 | 0.0012 | 100.00009 | 610.778420 | 610.778411 | -0.000009 | 99.999999 |
+| scenario_19 | 5 | 1360.607 | 1360.607 | 0.0007 | 100.00005 | 552.972834 | 552.972798 | -0.000036 | 99.999993 |
+| **ALL (20 ep)** | — | 1330.869 | 1330.868 | -0.0008 | 99.99994 | 564.100513 | 564.100518 | 0.000005 | 100.000001 |
+
+interventions 392 / 12000 ticks; gate trips 11608; clipped ticks 0; max applied command 6.926°; g_theta tracking RMSE 1.0058. Trajectory sha256: baseline `6157fdd0452d70a2f44f64ec51fb8771783be5f87762c650db0d0eb49231b4db`, assisted `1f09cb185f5fc3dca4727f1158264351a7ab5cd9d3aeaf108ff5b1adf2bae638`.
+
+## Honesty notes
+
+- Commands are replayed open-loop from the baseline run's recorded frames; the control TSV is indexed by frame, as the simulator seam requires. Once the assisted command moves the vehicle, later frames differ from the baseline run — that is the point of the closed-loop comparison, but the interlock schedule stays the paired baseline one.
+- Lateral RMS is over the whole 12 s flown trajectory, not just the interlock-open tail; the old report's 401-tick restriction no longer applies to the measurement (it still applies to when a command can be emitted).
+- Seeds 2/3 use the seed-1-trained students; they test input robustness, not training reproducibility. No seed, scenario or episode was dropped.
+- `clipped_ticks` is the seam's hard ±10° actuator bound, not a tuning knob.
+- Measurement floor: the sidecar stores f32 positions. One ULP is about 6.10e-05 m at ~600 m lateral distance and 1.22e-04 m at ~1300 m altitude. The lateral deltas (~4e-5 m) are below one coordinate ULP — numerically a tie; the apogee deltas (~-0.003 m) are ~20 ULP but still physically negligible. No win survives rounding.

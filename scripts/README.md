@@ -44,38 +44,45 @@ but the ECE gate does not (the head is trained toward confidence 0.95 while its
 command error is ~1). That is an engine finding, not a harness defect; the
 script reports it as FAIL and exits 1 until the engine closes it.
 
-## PID vs AI assistant (`ab_pid_vs_ai.py`)
+## PID vs AI assistant (`ab_pid_vs_ai.py`) — CLOSED-LOOP, supersedes the surrogate
 
-Concrete answer to "what does the AI give over pure PID on the same OR-aligned
-wind/gust scenarios?" — CPU only, deterministic, no simulator source changes.
+The earlier surrogate A/B (commit `237920a`) is **void**: it measured a
+tilt/gravity proxy on recorded commands, because the simulator had no
+command→dynamics seam. `sim` now has one (`c25eabb`), and this script measures
+apogee and lateral RMS from the flown-truth POTOKTRJ v1 sidecar instead.
 
 ```bash
-ai/.venv/bin/python scripts/ab_pid_vs_ai.py --verify-sim
+cargo build --release --manifest-path scripts/ab_control/Cargo.toml \
+  --target-dir scripts/ab_control/target
+ai/.venv/bin/python scripts/ab_pid_vs_ai.py
 ```
 
-`--verify-sim` regenerates the held-out split with
-`sim/target/release/potok-cli --physics-features --seed 1` and refuses to run
-unless it is byte-identical to `ai/out/run2/data/heldout_validation.bin`.
-Without the flag the checked-in v2 files are used as-is. Writes
-`ab_report.json` (per-episode, per-scenario and aggregate numbers, verdict,
-proxy definition) and `ab_report.md` (the honest table). Exit `0` if the
-primary assisted arm beats baseline on apogee retention **or** lateral RMS,
-`1` otherwise; numbers are written before exiting either way.
+`scripts/ab_control/` is a ~100-line Rust driver that only READS `sim/` through
+its public API (`run_episode_with_control`). The CLI's `--control-file` applies
+one TSV to every episode in a run, so per-episode control needs the API. No sim
+source/config is touched; artifacts land in `scripts/ab_work/`.
 
-Scope: 80 train / 20 held-out episodes, 16 / 4 scenarios, seed 1 fixed. Three
-seeds are not used — generation and both students are seed 1; the 4 held-out
-scenarios are the independent cells. Both exported students are scored
-(`loopwm_student.bin` primary, `lrs.bin` secondary) on the same episode stream:
-baseline = `physics_baseline(frame)` (AI off), assisted = baseline + exported
-`Delta`. `g_theta` is a distillation target, not an actuator command, so it is
-used only as a tracking-RMSE diagnostic.
+Scope: 20 OR-aligned held-out episodes / 4 scenarios (indices
+16..19,36..39,56..59,76..79,96..99), 12 s, 50 Hz. Baseline = zero command.
+Assisted = `physics_baseline(frame) + student Delta` in degrees (×0.12 rad,
+then ×180/π), emitted only where the interlock allows (401/12000 ticks on seed
+1). Both exported students are scored (`loopwm` primary, `lrs` secondary).
+The student forward is reimplemented locally from the trained/exported weights
+because an uncommitted change in `ai/src/potok_ai/student.py` is not valid for
+these exports; it reproduces the old report's tracking RMSE exactly.
 
-**The result is a proxy, not a flown A/B.** `potok_sim` records `g_theta` but
-never feeds any command back into RK4 (`sim/core/src/episode.rs:233,257`), and
-validation v2 stores no per-tick truth position. Apogee/lateral numbers come
-from a documented tilt/gravity surrogate applied to recorded commands over the
-AI-allowed ticks only (401 of 12 000; the interlock is closed during the ~9.9 s
-boost). Current aggregate (loopwm): apogee retention 100.000414 % (+0.0054 m,
-below the 0.35 m baro noise — a tie), surrogate lateral RMS 0.05153 -> 0.00870
-m (-83.1 %), `g_theta` tracking RMSE 0.9425 -> 0.7085 (-24.8 %). Do not read
-this as measured flight performance; see the report's limitations.
+Seeds 1, 2, 3: the simulator supports them, so all three are run. Seeds 2/3 use
+the seed-1-trained students and are labelled off-training generalization, not
+a training seed sweep.
+
+Writes `ab_report.json` (per-scenario, aggregate, per-seed, sidecar sha256) and
+`ab_report.md`. Exit `0` iff the primary assisted arm reduces lateral RMS on
+seed 1, `1` otherwise; numbers are written before exiting either way.
+
+Current result (seed 1, loopwm): lateral RMS 566.002412 → 566.002452 m
+(+3.9e-5 m, 100.000007 % — below the f32 coordinate ULP at ~600 m, a tie);
+apogee 1321.346 → 1321.343 m (-0.0028 m). All three seeds and both students
+are essentially tied or slightly worse; the script exits 1. The reason is that
+the interlock only opens in the last ~0.4 s of a 12 s flight, so the assist has
+almost no time to act. Do not read this as the controller being generally
+useless — it is untested over a long AI-active window.
