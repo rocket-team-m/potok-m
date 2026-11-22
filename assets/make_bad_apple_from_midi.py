@@ -15,7 +15,8 @@ import mido
 import numpy as np
 
 RATE = 48_000
-MAX_SECONDS = 218.0
+START_SECONDS = 27.0
+MAX_SECONDS = 218.0 - START_SECONDS
 TRACKS = ("Synth1", "Vocals")
 MIDI = Path(__file__).with_name("BadApple.mid")
 OUT = Path(__file__).with_name("badapple_buzzer.wav")
@@ -52,7 +53,10 @@ def render() -> np.ndarray:
     out = np.zeros(int(MAX_SECONDS * RATE), dtype=np.float32)
     active: dict[int, tuple[float, float]] = {}
 
-    for time, note, is_on in events(MIDI):
+    for raw_time, note, is_on in events(MIDI):
+        time = raw_time - START_SECONDS
+        if time < 0.0:
+            continue
         if time >= MAX_SECONDS:
             break
         index = int(time * RATE)
