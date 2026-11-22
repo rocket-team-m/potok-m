@@ -82,8 +82,6 @@ struct MetricsJson {
     #[serde(default)]
     ece: Option<f64>,
     #[serde(default)]
-    seed: Option<u32>,
-    #[serde(default)]
     params: Option<u64>,
 }
 
