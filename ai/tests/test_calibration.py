@@ -1,11 +1,14 @@
 """Held-out logit calibration, isotonic fallback and the spread regularizer."""
 
+import json
+
 import numpy as np
 import pytest
 import torch
 
 from potok_ai.calibration import (
     MAX_SPREAD_WEIGHT,
+    apply_calibration,
     confidence_spread_loss,
     confidence_target,
     conformal_calibrate,
@@ -73,6 +76,67 @@ def test_constant_saturated_logits_fall_back_to_isotonic():
     assert result.method == "isotonic"
     assert result.ece <= 0.05
     assert result.loops <= 3
+
+
+def test_isotonic_calibration_json_round_trip(tmp_path):
+    """The exported map must reproduce the in-memory isotonic fit exactly.
+
+    No logit array is persisted under `ai/out/`, so this uses a deterministic
+    synthetic held-out distribution -- not a production measurement. Four logit
+    levels with mis-scaled empirical correctness force the isotonic path and a
+    multi-bin step map.
+    """
+    logits = np.repeat(np.array([-20.0, -4.0, 4.0, 20.0]), 40)
+    correct = np.concatenate([
+        np.r_[np.ones(count), np.zeros(40 - count)] for count in (12, 20, 28, 36)
+    ])
+    error = np.where(correct > 0, 0.01, 0.5)
+
+    result = conformal_calibrate(logits, error, tol=0.1, target_ece=0.05, max_loops=3)
+    assert result.method == "isotonic"
+    assert result.bins is not None and result.values is not None
+
+    path = tmp_path / "calibration.json"
+    path.write_text(json.dumps(result.as_dict(), indent=2) + "\n")
+    payload = json.loads(path.read_text())
+
+    assert payload["method"] == "isotonic"
+    assert payload["threshold"] == pytest.approx(result.threshold)
+    bins = np.asarray(payload["bins"])
+    values = np.asarray(payload["values"])
+    assert bins.size == values.size == 4
+    assert np.all(np.diff(bins) > 0) and bins[0] > 0.0 and bins[-1] <= 1.0
+    assert np.all((values >= 0.0) & (values <= 1.0))
+
+    expected = isotonic_calibration(sigmoid(logits), correct)
+    assert apply_calibration(payload, logits) == pytest.approx(expected, abs=1e-12)
+
+    # The edge reader also accepts n+1 edges (leading lower edge), so confirm
+    # that shape round-trips to the same step map.
+    extended = dict(payload, bins=[0.0, *payload["bins"]])
+    assert apply_calibration(extended, logits) == pytest.approx(expected, abs=1e-12)
+
+
+def test_temperature_calibration_json_stays_backward_compatible(tmp_path):
+    """Temperature files keep their old keys and their sigmoid(z/T) behaviour."""
+    rng = np.random.default_rng(7)
+    probability = rng.uniform(0.05, 0.95, 600)
+    correct = (rng.random(600) < probability).astype(float)
+    logits = _logit(probability)
+    error = np.where(correct > 0, 0.01, 0.5)
+
+    result = conformal_calibrate(logits, error, tol=0.1, target_ece=0.05, max_loops=3)
+    assert result.method == "temperature"
+
+    path = tmp_path / "calibration.json"
+    path.write_text(json.dumps(result.as_dict(), indent=2) + "\n")
+    payload = json.loads(path.read_text())
+
+    assert "bins" not in payload and "values" not in payload
+    assert payload["temperature"] == pytest.approx(result.temperature)
+    assert apply_calibration(payload, logits) == pytest.approx(
+        sigmoid(logits / result.temperature), abs=1e-12
+    )
 
 
 def test_calibration_rejects_bad_inputs():
