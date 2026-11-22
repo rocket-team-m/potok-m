@@ -7,8 +7,8 @@ Date: 2026-11-22. CPU-only work; no GPU jobs, no pushes.
 | command | result |
 |---|---|
 | `uv sync` | Resolved 20 packages; installed `torch==2.15.0+cpu` from `download.pytorch.org/whl/cpu`. No CUDA wheels. |
-| `uv run pytest -q` | `26 passed in 2.96s` initially; `37 passed in 4.89s` after the student work; `44 passed in 5.45s` after the smart work; `51 passed in 6.24s` after the LoopWM work; `61 passed in 10.32s` after the engine work |
-| `uv run ruff check src tests` | `All checks passed!` (after the smart, LoopWM and engine work) |
+| `uv run pytest -q` | `26 passed in 2.96s` initially; `37 passed in 4.89s` after the student work; `44 passed in 5.45s` after the smart work; `51 passed in 6.24s` after the LoopWM work; `61 passed in 10.32s` after the engine work; `78 passed in 11.86s` after the ideal-loop work |
+| `uv run ruff check src tests` | `All checks passed!` (after the smart, LoopWM, engine and ideal-loop work) |
 | `PYTHONPATH=src uv run python -m potok_ai.train_smart --data <v2 file> --out /tmp/opencode/smart.pt --epochs 1 --window 12 --batch 2 --limit 4 --eval-limit 4 --width 16 --rank 8` | prints three scenario RMSE rows, `ratio=0.7034 limit=1.25 generalises=yes`, teacher + export paths; CPU only |
 | `uv run python benchmark.py --stage train --steps 10` | `params=87875 ms_per_step=68.02 frames_per_s=5881` (width 128, rank 64, batch 8, seq 50) |
 | `uv run python benchmark.py --stage forward --steps 10` | `params=87875 ms_per_step=31.80 frames_per_s=12579` |
@@ -261,6 +261,46 @@ rejection, and one tiny CPU step in each stage.
   weights/teacher isolation, analytic MAC band, JSON schema and table, one tiny
   CPU end-to-end per family, `eval` stage, deterministic seeding. Verification:
   `uv run pytest -q` -> `61 passed`; `uv run ruff check src tests` -> clean.
+
+## Ideal loop — training side (SPEC_ENGINE_IDEAL.md §4-§5)
+
+- `physics.py` is the single source of truth for the residual baseline: a P term
+  on `alpha_deg`/`beta_deg` plus a tanh-bounded D term on `a_lat_resid`,
+  clipped to [-1, 1]; a window model reads it at the final frame. All three
+  families train and evaluate the **command** `b(x) + Delta`, so the network
+  learns the residual `target - b(x)`. `--residual/--no-residual` defaults on;
+  disabling it restores the old absolute-command loss. Tiny CPU smoke:
+  residual `rmse_train=0.209017` vs absolute `0.272069` (seed 5, 2 epochs) —
+  the flag changes training, not just the config hash. The baseline lives in
+  Python only; `edge/` must apply the same formula at deployment, which was
+  not touched.
+- `curriculum.py`: stage names `calm -> gust -> shear -> sensor_fault`, scenario
+  stage = `scenario_id % 4` (a stable placeholder until v2 metadata carries the
+  wind-cell semantics). Eligibility is cumulative by `epoch // epochs_per_stage`;
+  the per-epoch shuffle is seeded by `(seed, epoch)` with stdlib `random`, never
+  the global RNG. Wired into the engine's shared loop and into the legacy
+  `train_loopwm` path; `--curriculum/--no-curriculum` defaults on. Training now
+  excludes the held-out scenarios (it previously fed all of them in).
+- `calibration.py`: split-conformal calibration on held-out episodes. A sample
+  is correct when its command error <= `--calib-tol` (default 0.1). Temperature
+  scaling is searched in at most 3 passes (`raw_ece` and achieved `ece` are both
+  reported); the adaptive-compute threshold is the `ece_target` quantile of the
+  calibrated confidence, not 0.5. `--calibrate` writes `calibration.json`
+  (threshold, ece, raw_ece, coverage, temperature, loops, n, target_ece, model,
+  seed, config_hash). On the toy distribution the ECE target 0.05 is met; on the
+  tiny 2-epoch CPU smoke the model's confidence is trained toward a constant
+  0.95, so the honest reading is `ece=0.42` after calibration (raw `0.76`) and
+  the gate is **not** passed — no claim is made that it is.
+- `metrics.json` keeps the seven SPEC_ENGINE fields and appends `mae`,
+  `max_error`, `ece`, `seed`, `config_hash` (sha256 of the sorted config, 16
+  hex chars). MAE/max error come from held-out command errors; ECE is the raw
+  value unless `--calibrate` is set, in which case it matches `calibration.json`.
+- New tests: `test_residual.py` (baseline algebra, clipping, zero-residual
+  identity, gradient descent to the reference), `test_curriculum.py` (stage
+  order, seeded determinism, cumulative inclusion, pacing), `test_calibration.py`
+  (ECE, toy target, hard loop cap, input validation), two engine wiring tests
+  plus the extended schema/calibration end-to-end test. `sim/`, `edge/` and
+  `docs/` were not touched.
 
 ## Skipped
 

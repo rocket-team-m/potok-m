@@ -13,6 +13,7 @@ scores it.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass
@@ -24,6 +25,16 @@ from torch import nn
 from torch.nn import functional as F
 from torch.optim import AdamW
 
+from .calibration import (
+    DEFAULT_MAX_LOOPS,
+    DEFAULT_TARGET_ECE,
+    DEFAULT_TOL,
+    conformal_calibrate,
+    correctness,
+    expected_calibration_error,
+)
+from .curriculum import STAGES as CURRICULUM_STAGES
+from .curriculum import Curriculum
 from .data import (
     SMART_COND_FEATURES,
     SMART_FEATURES,
@@ -35,6 +46,7 @@ from .export import export_student, load_student_export
 from .loopwm import LoopWM, LoopWMConfig
 from .loopwm_lite import LiteConfig, LiteModel
 from .loopwm_lite import analytical_mac as lite_analytical_mac
+from .physics import final_command, physics_baseline
 from .student import StatefulTCN, smart_student_config
 from .train_loopwm import run as run_loopwm
 from .train_smart import _batches, generalisation_ratio, normalized_correction_loss
@@ -42,7 +54,10 @@ from .train_smart import evaluate as window_evaluate
 
 MODELS = ("lrs", "loopwm-lite", "loopwm")
 STAGES = ("train", "distill", "eval")
-METRIC_FIELDS = ("model", "rmse_train", "rmse_held_out", "ratio", "params", "mac", "bytes")
+METRIC_FIELDS = (
+    "model", "rmse_train", "rmse_held_out", "ratio", "params", "mac", "bytes",
+    "mae", "max_error", "ece", "seed", "config_hash",
+)
 
 
 @dataclass
@@ -74,6 +89,11 @@ class TrainConfig:
     attn_rank: int = 8
     lite_iters: int = 2
     lite_threshold: float = 1e-2
+    residual: bool = True
+    curriculum: bool = True
+    calibrate: bool = False
+    ece_target: float = DEFAULT_TARGET_ECE
+    calib_tol: float = DEFAULT_TOL
 
     @classmethod
     def from_args(cls, args: argparse.Namespace) -> TrainConfig:
@@ -101,12 +121,18 @@ class TrainConfig:
             max_iters=self.max_iters,
             exit_threshold=self.exit_threshold,
             latent_weight=self.latent_weight,
+            residual=self.residual,
+            curriculum=self.curriculum,
         )
 
 
 @dataclass
 class Metrics:
-    """The one report format written to ``out/metrics.json``."""
+    """The one report format written to ``out/metrics.json``.
+
+    The seven SPEC_ENGINE fields are unchanged; the tail comes from the ideal
+    loop's held-out report (SPEC_ENGINE_IDEAL.md §5).
+    """
 
     model: str
     rmse_train: float
@@ -115,6 +141,11 @@ class Metrics:
     params: int
     mac: int
     bytes: int
+    mae: float = 0.0
+    max_error: float = 0.0
+    ece: float = 0.0
+    seed: int = 1
+    config_hash: str = ""
 
     def as_dict(self) -> dict:
         return {field: getattr(self, field) for field in METRIC_FIELDS}
@@ -143,8 +174,17 @@ def _held_out(groups: dict) -> set[str]:
     return held
 
 
+def config_hash(cfg: TrainConfig) -> str:
+    """Short hash of the training config; the output directory is not a knob."""
+    fields = asdict(cfg)
+    fields.pop("out", None)
+    body = json.dumps(fields, sort_keys=True, default=str)
+    return hashlib.sha256(body.encode()).hexdigest()[:16]
+
+
 def _split_metrics(model: str, rmse: dict, held_out: set[str], params: int, mac: int,
-                   size: int) -> Metrics:
+                   size: int, *, mae: float = 0.0, max_error: float = 0.0,
+                   ece: float = 0.0, seed: int = 1, hash_value: str = "") -> Metrics:
     train = [value for name, value in rmse.items() if name not in held_out]
     held = [value for name, value in rmse.items() if name in held_out]
     return Metrics(
@@ -155,6 +195,43 @@ def _split_metrics(model: str, rmse: dict, held_out: set[str], params: int, mac:
         params=int(params),
         mac=int(mac),
         bytes=int(size),
+        mae=float(mae),
+        max_error=float(max_error),
+        ece=float(ece),
+        seed=int(seed),
+        config_hash=hash_value,
+    )
+
+
+def build_metrics(model: str, cfg: TrainConfig, rmse: dict, held_out: set[str],
+                  params: int, mac: int, size: int,
+                  confidence: np.ndarray, error: np.ndarray) -> Metrics:
+    """Fold held-out predictions into the report, calibrating on request."""
+    conf = np.asarray(confidence, dtype=np.float64).ravel()
+    err = np.asarray(error, dtype=np.float64).ravel()
+    if conf.size == 0 or err.size != conf.size:
+        raise ValueError("held-out predictions must be non-empty and paired")
+
+    raw_ece = expected_calibration_error(conf, correctness(err, cfg.calib_tol))
+    calibrated_ece = raw_ece
+    if cfg.calibrate:
+        result = conformal_calibrate(
+            conf, err, tol=cfg.calib_tol, target_ece=cfg.ece_target,
+            max_loops=DEFAULT_MAX_LOOPS,
+        )
+        calibrated_ece = result.ece
+        payload = result.as_dict()
+        payload.update(model=model, seed=cfg.seed, config_hash=config_hash(cfg))
+        cfg.out.mkdir(parents=True, exist_ok=True)
+        (cfg.out / "calibration.json").write_text(json.dumps(payload, indent=2) + "\n")
+
+    return _split_metrics(
+        model, rmse, held_out, params, mac, size,
+        mae=float(np.abs(err).mean()),
+        max_error=float(err.max()),
+        ece=calibrated_ece,
+        seed=cfg.seed,
+        hash_value=config_hash(cfg),
     )
 
 
@@ -188,24 +265,46 @@ class ModelAdapter(ABC):
     @abstractmethod
     def mac(self, cfg: TrainConfig) -> int: ...
 
+    @abstractmethod
+    def held_out_predictions(self, model: nn.Module, groups: dict, cfg: TrainConfig,
+                             device: torch.device) -> tuple[np.ndarray, np.ndarray]:
+        """Return (confidence, command error) arrays over held-out episodes."""
+
     def count_params(self, model: nn.Module) -> int:
         return sum(parameter.numel() for parameter in model.parameters())
+
+    @staticmethod
+    def _curriculum(cfg: TrainConfig) -> Curriculum | None:
+        if not cfg.curriculum:
+            return None
+        return Curriculum(
+            seed=cfg.seed, epochs_per_stage=max(1, cfg.epochs // len(CURRICULUM_STAGES))
+        )
 
     def run(self, cfg: TrainConfig) -> Metrics:
         """Train, evaluate, export and report -- shared by lrs and loopwm-lite."""
         seed_everything(cfg.seed)
         device = torch.device(cfg.device)
-        episodes = load_episodes(cfg.data)
-        groups = group_by_scenario(episodes)
+        groups = group_by_scenario(load_episodes(cfg.data))
         held_out = _held_out(groups)
+        train_episodes = [
+            episode
+            for name, group in groups.items()
+            if name not in held_out
+            for episode in group
+        ]
+        curriculum = self._curriculum(cfg)
         model = self.build(cfg, device)
         optimizer = AdamW(model.parameters(), lr=cfg.lr)
-        for _ in range(cfg.epochs):
-            for batch in self.batches(episodes, cfg):
+        for epoch in range(cfg.epochs):
+            chosen = curriculum.select(train_episodes, epoch) if curriculum else train_episodes
+            if not chosen:
+                continue
+            for batch in self.batches(chosen, cfg):
                 self.train_step(model, batch, optimizer, cfg)
         rmse = self.evaluate(model, groups, cfg, device)
         path = self.export(model, cfg)
-        return self._metrics(model, cfg, rmse, held_out, path)
+        return self._report(model, cfg, groups, held_out, rmse, path, device)
 
     def evaluate_only(self, cfg: TrainConfig) -> Metrics:
         device = torch.device(cfg.device)
@@ -215,13 +314,16 @@ class ModelAdapter(ABC):
         path = self.export_path(cfg)
         if not path.exists():
             raise ValueError(f"no export at {path}; run the train stage first")
-        return self._metrics(model, cfg, self.evaluate(model, groups, cfg, device),
-                             held_out, path)
+        rmse = self.evaluate(model, groups, cfg, device)
+        return self._report(model, cfg, groups, held_out, rmse, path, device)
 
-    def _metrics(self, model: nn.Module, cfg: TrainConfig, rmse: dict, held_out: set[str],
-                 path: Path) -> Metrics:
-        return _split_metrics(self.name, rmse, held_out, self.count_params(model),
-                              self.mac(cfg), path.stat().st_size)
+    def _report(self, model: nn.Module, cfg: TrainConfig, groups: dict, held_out: set[str],
+                rmse: dict, path: Path, device: torch.device) -> Metrics:
+        confidence, error = self.held_out_predictions(model, groups, cfg, device)
+        return build_metrics(
+            self.name, cfg, rmse, held_out, self.count_params(model), self.mac(cfg),
+            path.stat().st_size, confidence, error,
+        )
 
 
 def seed_everything(seed: int) -> None:
@@ -238,6 +340,27 @@ def _smart_frames(episode) -> tuple[np.ndarray, np.ndarray | None]:
     with_cond = np.concatenate([frames, np.tile(conditioning, (len(frames), 1))], axis=1)
     targets = None if episode.targets is None else np.asarray(episode.targets, dtype=np.float32)
     return with_cond, targets
+
+
+def _window_held_out_predictions(model: nn.Module, groups: dict, cfg: TrainConfig,
+                                 device: torch.device) -> tuple[np.ndarray, np.ndarray]:
+    """Confidence and command error for the window families (lite and LoopWM)."""
+    model.eval()
+    confidences, errors = [], []
+    with torch.no_grad():
+        for name, episodes in groups.items():
+            if not any(episode.held_out for episode in episodes):
+                continue
+            dataset = SmartWindowDataset(episodes, window=cfg.window, limit=cfg.eval_limit)
+            if not dataset.samples:
+                raise ValueError(f"scenario {name} has no evaluation windows")
+            for windows, conditions, targets in _batches(dataset, cfg.batch):
+                output = model(windows, conditions)
+                baseline = physics_baseline(windows[:, -1, :])
+                command = final_command(output[:, :2], baseline, cfg.residual)
+                errors.extend((command - targets).abs().max(dim=1).values.tolist())
+                confidences.extend(output[:, 2].tolist())
+    return np.asarray(confidences), np.asarray(errors)
 
 
 class LRSAdapter(ModelAdapter):
@@ -297,10 +420,44 @@ class LRSAdapter(ModelAdapter):
                         reference = torch.as_tensor(
                             targets[tick, :2], dtype=torch.float32, device=device
                         )
-                        squared += float((corrections - reference).square().sum())
+                        features = torch.as_tensor(
+                            frame[:SMART_FEATURES], dtype=torch.float32, device=device
+                        )
+                        command = final_command(corrections, physics_baseline(features), cfg.residual)
+                        squared += float((command - reference).square().sum())
                         count += 2
                 result[name] = (squared / count) ** 0.5
         return result
+
+    def held_out_predictions(self, model: StatefulTCN, groups: dict, cfg: TrainConfig,
+                             device: torch.device) -> tuple[np.ndarray, np.ndarray]:
+        model.eval()
+        confidences, errors = [], []
+        with torch.no_grad():
+            for name, episodes in groups.items():
+                if not any(episode.held_out for episode in episodes):
+                    continue
+                for episode in episodes:
+                    frames, targets = _smart_frames(episode)
+                    if targets is None:
+                        raise ValueError(f"scenario {name} has no reference corrections")
+                    model.reset_state()
+                    for tick, frame in enumerate(frames):
+                        corrections, confidence = model.step(frame)
+                        if tick + 1 < cfg.window:
+                            continue
+                        reference = torch.as_tensor(
+                            targets[tick, :2], dtype=torch.float32, device=device
+                        )
+                        features = torch.as_tensor(
+                            frame[:SMART_FEATURES], dtype=torch.float32, device=device
+                        )
+                        command = final_command(
+                            corrections, physics_baseline(features), cfg.residual
+                        )
+                        errors.append(float((command - reference).abs().max()))
+                        confidences.append(float(confidence))
+        return np.asarray(confidences), np.asarray(errors)
 
     def export_path(self, cfg: TrainConfig) -> Path:
         return cfg.out / "lrs.bin"
@@ -366,7 +523,10 @@ class LiteAdapter(ModelAdapter):
         latent, _ = model.refine(windows, conditions)
         pooled = latent.mean(dim=1)
         prediction = model.head_from_latent(pooled)
-        correction = normalized_correction_loss(prediction[:, :2], targets)
+        command = final_command(
+            prediction[:, :2], physics_baseline(windows[:, -1, :]), cfg.residual
+        )
+        correction = normalized_correction_loss(command, targets)
         teacher_targets = model.teacher_targets(windows, conditions)
         predictions = model.latent_predictions(pooled)
         latent_loss = torch.stack(
@@ -383,6 +543,10 @@ class LiteAdapter(ModelAdapter):
     def evaluate(self, model: LiteModel, groups: dict, cfg: TrainConfig,
                  device: torch.device) -> dict[str, float]:
         return window_evaluate(model, groups, cfg.legacy_args(cfg.out / "unused.pt"), device)
+
+    def held_out_predictions(self, model: LiteModel, groups: dict, cfg: TrainConfig,
+                             device: torch.device) -> tuple[np.ndarray, np.ndarray]:
+        return _window_held_out_predictions(model, groups, cfg, device)
 
     def export_path(self, cfg: TrainConfig) -> Path:
         return cfg.out / "lite.pt"
@@ -468,7 +632,9 @@ class LoopWMAdapter(ModelAdapter):
             self._target_encoder = EMATeacher(model.encoder, model.cfg.ema_momentum)
         windows, conditions, targets = batch
         latent, _ = model.refine(windows, conditions)
-        main = normalized_correction_loss(model.head_from_latent(latent)[:, :2], targets)
+        output = model.head_from_latent(latent)
+        command = final_command(output[:, :2], physics_baseline(windows[:, -1, :]), cfg.residual)
+        main = normalized_correction_loss(command, targets)
         latent_loss = model.latent_prediction_loss(
             windows, conditions, self._target_encoder, latent=latent
         )
@@ -482,6 +648,10 @@ class LoopWMAdapter(ModelAdapter):
     def evaluate(self, model: LoopWM, groups: dict, cfg: TrainConfig,
                  device: torch.device) -> dict[str, float]:
         return window_evaluate(model, groups, cfg.legacy_args(cfg.out / "unused.pt"), device)
+
+    def held_out_predictions(self, model: LoopWM, groups: dict, cfg: TrainConfig,
+                             device: torch.device) -> tuple[np.ndarray, np.ndarray]:
+        return _window_held_out_predictions(model, groups, cfg, device)
 
     def export_path(self, cfg: TrainConfig) -> Path:
         return cfg.out / "loopwm.pt"
@@ -511,15 +681,16 @@ class LoopWMAdapter(ModelAdapter):
         """Dispatch to the existing train_loopwm (and its train_smart helpers)."""
         seed_everything(cfg.seed)
         result = run_loopwm(cfg.legacy_args(self.export_path(cfg)))
-        model = self.build(cfg, torch.device(cfg.device))
+        device = torch.device(cfg.device)
+        model = self.load(cfg, device)  # the trained teacher the legacy path saved
+        groups = group_by_scenario(load_episodes(cfg.data))
+        confidence, error = self.held_out_predictions(model, groups, cfg, device)
         student_bin = self.export_path(cfg).with_name("loopwm_student.bin")
-        return _split_metrics(
-            self.name,
-            result["rmse"],
-            set(result["held_out"]),
-            self.count_params(model),
-            self.mac(cfg),
+        return build_metrics(
+            self.name, cfg, result["rmse"], set(result["held_out"]),
+            self.count_params(model), self.mac(cfg),
             student_bin.stat().st_size if student_bin.exists() else 0,
+            confidence, error,
         )
 
 
@@ -572,6 +743,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--attn-rank", type=int, default=8)
     parser.add_argument("--lite-iters", type=int, default=2)
     parser.add_argument("--lite-threshold", type=float, default=1e-2)
+    parser.add_argument(
+        "--residual", action=argparse.BooleanOptionalAction, default=True,
+        help="predict a correction on top of the physics baseline (default: on)",
+    )
+    parser.add_argument(
+        "--curriculum", action=argparse.BooleanOptionalAction, default=True,
+        help="stage scenarios calm -> gust -> shear -> sensor_fault (default: on)",
+    )
+    parser.add_argument(
+        "--calibrate", action="store_true",
+        help="calibrate held-out confidence and write calibration.json",
+    )
+    parser.add_argument("--ece-target", type=float, default=DEFAULT_TARGET_ECE)
+    parser.add_argument("--calib-tol", type=float, default=DEFAULT_TOL)
     return parser
 
 

@@ -189,3 +189,74 @@ def test_deterministic_seeding(tmp_path):
         states.append(stored["state_dict"])
     assert all(torch.equal(states[0][key], states[1][key]) for key in states[0])
     assert any(not torch.equal(states[0][key], states[2][key]) for key in states[0])
+
+
+def test_ideal_loop_flag_defaults():
+    parser = engine.build_parser()
+    base = ["--model", "lrs", "--data", "d", "--out", "o"]
+    cfg = engine.TrainConfig.from_args(parser.parse_args(base))
+    assert cfg.residual is True and cfg.curriculum is True and cfg.calibrate is False
+    changed = engine.TrainConfig.from_args(
+        parser.parse_args(base + ["--no-residual", "--no-curriculum", "--calibrate"])
+    )
+    assert changed.residual is False and changed.curriculum is False and changed.calibrate is True
+    assert engine.config_hash(cfg) != engine.config_hash(changed)
+
+
+def test_curriculum_drives_each_epoch(tmp_path, monkeypatch):
+    data = _data(tmp_path)
+    seen = []
+    real = engine.Curriculum
+
+    class Spy(real):
+        def select(self, episodes, epoch):
+            seen.append(epoch)
+            return super().select(episodes, epoch)
+
+    monkeypatch.setattr(engine, "Curriculum", Spy)
+    engine.main(_argv("loopwm-lite", data, tmp_path / "staged", "--epochs", "4"))
+    assert seen == [0, 1, 2, 3]
+
+    seen.clear()
+    engine.main(
+        _argv("loopwm-lite", data, tmp_path / "flat", "--epochs", "4", "--no-curriculum")
+    )
+    assert seen == []
+
+
+def test_legacy_loopwm_path_uses_curriculum(tmp_path, monkeypatch):
+    from potok_ai import train_loopwm
+
+    data = _data(tmp_path)
+    seen = []
+    real = train_loopwm.Curriculum
+
+    class Spy(real):
+        def select(self, episodes, epoch):
+            seen.append(epoch)
+            return super().select(episodes, epoch)
+
+    monkeypatch.setattr(train_loopwm, "Curriculum", Spy)
+    engine.main(_argv("loopwm", data, tmp_path / "legacy-staged", "--epochs", "4"))
+    assert seen == [0, 1, 2, 3]
+
+
+def test_metrics_extended_schema_and_calibration(tmp_path):
+    for field in ("mae", "max_error", "ece", "seed", "config_hash"):
+        assert field in engine.METRIC_FIELDS
+
+    data, out = _data(tmp_path), tmp_path / "calibrated"
+    engine.main(_argv("loopwm-lite", data, out, "--calibrate"))
+    report = json.loads((out / "metrics.json").read_text())
+    assert tuple(report) == engine.METRIC_FIELDS
+    assert report["seed"] == 1 and len(report["config_hash"]) == 16
+    assert np.isfinite(report["mae"]) and report["mae"] >= 0
+    assert report["max_error"] >= report["mae"]
+    assert 0.0 <= report["ece"] <= 1.0
+
+    calibration = json.loads((out / "calibration.json").read_text())
+    assert calibration["ece"] == pytest.approx(report["ece"])
+    assert 1 <= calibration["loops"] <= 3
+    assert 0.0 <= calibration["threshold"] <= 1.0
+    assert calibration["config_hash"] == report["config_hash"]
+    assert calibration["n"] > 0

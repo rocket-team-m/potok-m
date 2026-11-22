@@ -26,6 +26,7 @@ from .data import SMART_FEATURES, SmartWindowDataset, group_by_scenario, load_ep
 from .export import export_student
 from .jepa import JEPAPredictor, mask_windows
 from .model import SmartConfig, SmartTeacher
+from .physics import final_command, physics_baseline
 from .student import StatefulTCN, smart_student_config
 
 GENERALISATION_LIMIT = 1.25
@@ -166,6 +167,7 @@ def evaluate(
     model: SmartTeacher, groups: dict[str, list], args: argparse.Namespace, device: torch.device
 ) -> dict[str, float]:
     """Return raw-scale RMSE for the two corrections, per wind/gust scenario."""
+    residual = getattr(args, "residual", False)
     result: dict[str, float] = {}
     model.eval()
     with torch.no_grad():
@@ -175,9 +177,12 @@ def evaluate(
                 raise ValueError(f"scenario {name} has no evaluation windows")
             squared, count = 0.0, 0
             for windows, conditions, targets in _batches(dataset, args.batch):
-                prediction = model(windows, conditions)[:, :2]
-                squared += float((prediction - targets).square().sum())
-                count += prediction.numel()
+                output = model(windows, conditions)
+                command = final_command(
+                    output[:, :2], physics_baseline(windows[:, -1, :]), residual
+                )
+                squared += float((command - targets).square().sum())
+                count += command.numel()
             result[name] = (squared / count) ** 0.5
     return result
 

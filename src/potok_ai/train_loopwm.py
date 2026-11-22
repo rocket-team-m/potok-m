@@ -18,10 +18,12 @@ from pathlib import Path
 import torch
 from torch.optim import AdamW
 
+from .curriculum import STAGES, Curriculum
 from .data import SmartWindowDataset, group_by_scenario, load_episodes
 from .export import export_student
 from .jepa import EMATeacher
 from .loopwm import LoopWM, LoopWMConfig
+from .physics import final_command, physics_baseline
 from .train_smart import (
     GENERALISATION_LIMIT,
     _batches,
@@ -66,17 +68,27 @@ def train_teacher(episodes, args: argparse.Namespace, device: torch.device) -> L
     model = LoopWM(config).to(device)
     target_encoder = EMATeacher(model.encoder, config.ema_momentum)
     optimizer = AdamW(model.parameters(), lr=args.lr)
-    dataset = SmartWindowDataset(episodes, window=args.window, limit=args.limit)
-    if not dataset.samples:
-        raise ValueError("no training windows in the non-held-out scenarios")
+    residual = getattr(args, "residual", False)
+    curriculum = (
+        Curriculum(seed=args.seed, epochs_per_stage=max(1, args.epochs // len(STAGES)))
+        if getattr(args, "curriculum", False)
+        else None
+    )
 
     model.train()
-    for _ in range(args.epochs):
+    for epoch in range(args.epochs):
+        chosen = curriculum.select(episodes, epoch) if curriculum else episodes
+        dataset = SmartWindowDataset(chosen, window=args.window, limit=args.limit)
+        if not dataset.samples:
+            continue
         for windows, conditions, targets in _batches(dataset, args.batch):
             latent, _ = model.refine(windows, conditions)
-            prediction = model.head_from_latent(latent)[:, :2]
+            output = model.head_from_latent(latent)
+            command = final_command(
+                output[:, :2], physics_baseline(windows[:, -1, :]), residual
+            )
             # `targets` are the privileged reference corrections (true wind).
-            main = normalized_correction_loss(prediction, targets)
+            main = normalized_correction_loss(command, targets)
             latent_loss = model.latent_prediction_loss(
                 windows, conditions, target_encoder, latent=latent
             )
