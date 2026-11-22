@@ -314,3 +314,87 @@ within 1%" note above was not reproducible on this code state.
 (the single parity gate above). All 33 pre-existing tests (4 CLI + 16 sim
 + 6 smart-sim + 7 ideal-loop) remain green; the 3 other new tests
 (fixture sanity, drag law, Cd diagnostic) pass.
+
+## Command → dynamics feedback seam (22.11.2026)
+
+The A/B agent's finding was real: `episode.rs` recorded `g_theta` as a target
+and integrated `rk4` with an unchanged `Vehicle`, so no controller could move
+the vehicle. The seam below closes that loop. All changes are inside `sim/`.
+
+### What was added
+
+- `core/src/control.rs`: `ControlFile` parser and `validate_command`.
+  - **Exact limit: each axis is finite and within ±10.0 degrees**
+    (`MAX_CONTROL_DEG`). A larger or non-finite value is a LOUD
+    `SimError::Control` — no clamp, no skip. 10 deg covers the reference
+    optimizer's `max_correction = 0.12 rad` (6.88 deg) with margin.
+  - TSV is `frame_index g_roll_deg g_pitch_deg`, whitespace separated;
+    `#` comments, blank lines and one optional `frame_index ...` header are
+    ignored. Indices must be exactly `0..frames_per_episode` in order.
+    Wrong field count, non-numeric/duplicate/gapped/out-of-range index,
+    wrong row count (too few **or** too many) and bad/out-of-range commands
+    are all LOUD errors naming the line and the cause.
+- `core/src/episode.rs`: `Simulator::run_episode_with_control(index,
+  &dyn Fn(&Frame) -> (f64, f64))`. `run_episode` is now a thin wrapper with
+  `None`, so the legacy path is untouched. The closure is called **once per
+  50 Hz tick** with the frame just measured; the returned pair is held for
+  `steps_per_frame = 10` integration steps (default dt 0.002 s, fps 50) until
+  the next tick. With `sim.sensors = false` a temporary frame is built for
+  the controller but nothing is exported.
+- `core/src/dynamics.rs`: `Vehicle.control_deg: [f64; 2]` and the fin moment
+  in `derivative`. **Exact authority: `FIN_CONTROL_AUTHORITY = 0.02` per
+  radian**, so `moment[0] += C·qdyn·A·D·(π/180)·roll_deg` (body-X / roll) and
+  `moment[1] += ...·pitch_deg` (body-Y / pitch), with `D = 2√(A/π)`.
+  It is a placeholder coefficient of the same class as the existing aero
+  placeholders — **not tuned to favour AI**. The whole block is gated on a
+  non-zero command, so the zero path is bit-for-bit the historical one.
+  Fin authority scales with dynamic pressure, so it acts on coast/descent
+  and vanishes with the atmosphere; the thrust gimbal was rejected because
+  `Phase::ai_allowed()` already forbids corrections during powered flight,
+  where all the thrust is.
+- `cli/src/main.rs`: `--control-file <PATH>` (LOUD refusal with `--tui`).
+  Control runs are serial by design, print per-episode `apogee=` and
+  `lateral_rms=`, and are otherwise identical to normal headless runs.
+  The canonical `validation.bin` layout is **unchanged**, so `ai/data.py`
+  needs no update.
+- `core/src/trajectory.rs` + `Episode.trajectory`: per-tick flown truth
+  (`x, y, z, vx, vy, vz`, world frame) written to a sidecar beside the
+  validation file: `validation.bin` → `validation.trajectory`.
+  **Exact layout:** little-endian 64-byte header (`POTOKTRJ`, version 1,
+  episode_count u32, frames_per_episode u32, stride u32 = 6, 40 reserved),
+  then per episode a u64 index and `frames × 6` f32. At defaults that is
+  1500 ticks × 24 B = 36 000 B per episode. `apogee_m()` and
+  `lateral_rms_m()` are provided so both arms are measured from the flown
+  trajectory, not from a surrogate. Note `Episode.apogee_m` is sampled at
+  every integration step, while sidecar apogee is sampled at 50 Hz; they
+  agree to the tick resolution, not bit-for-bit.
+
+### Verification
+
+```
+cargo check --workspace --offline   -> Finished, no warnings
+cargo fmt --all -- --check          -> clean
+cargo test  --workspace --offline   -> 46 passed, 0 failed
+  (37 pre-existing green + 7 new core/control_tests + 2 new CLI tests)
+```
+
+New gates:
+
+- `zero_control_is_bit_identical_to_legacy`: frames, features, targets,
+  terminal truth, flown truth, apogee bits and all counters match.
+- `constant_control_moves_the_flown_trajectory`: at max roll command,
+  lateral RMS 4.606 m → 6.988 m (Δ 2.382 m); apogee 3185.378 → 3185.374 m.
+  Lateral drift, not apogee, is the measured effect at this airframe.
+- `opposite_commands_move_the_vehicle_in_opposite_directions`: final x
+  −3.865 m (+pitch) vs +15.623 m (−pitch), Δ 19.488 m.
+- `command_limits_are_loud`, `control_file_validation_is_loud_on_bad_index_length_and_range`,
+  `control_file_drives_the_same_trajectory_as_a_constant_closure`,
+  `trajectory_sidecar_roundtrip_carries_flown_truth`,
+  `cli_control_file_drives_dynamics_and_writes_truth_sidecar`,
+  `cli_control_file_errors_are_loud`.
+
+Skipped, deliberately: no parallel control runner (serial is fast enough at
+~115 ep/s and removes a race); no change to validation v2 or the AI reader;
+no physics tuning beyond declaring the fin authority needed for the seam;
+no control policy baked into dynamics — the controller sees `Frame.phase`
+and decides itself whether to command during boost.

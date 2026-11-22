@@ -69,6 +69,13 @@ impl Phase {
     }
 }
 
+/// Placeholder fin control authority per radian of commanded deflection.
+/// This is a new physical assumption for the control seam, not a tuned knob:
+/// it is the same order as the other placeholder aero coefficients and is
+/// applied symmetrically to both axes. It is only read when a command is
+/// non-zero, so the legacy (zero-command) path is bit-for-bit unchanged.
+pub const FIN_CONTROL_AUTHORITY: f64 = 0.02;
+
 #[derive(Debug, Clone)]
 pub struct Vehicle {
     pub dry_mass: f64,
@@ -90,6 +97,9 @@ pub struct Vehicle {
     /// An out-of-grid query inside `derivative` is recorded here and returned
     /// as a `SimError::AeroOutOfGrid` by the episode loop. No silent clamp.
     pub card_fault: Cell<Option<CardFault>>,
+    /// Per-step fin command `[roll, pitch]` in body-frame degrees. Set by the
+    /// episode loop from the control closure; zero on the legacy path.
+    pub control_deg: [f64; 2],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -138,6 +148,7 @@ impl Vehicle {
                 cm_delta: 0.0,
             },
             card_fault: Cell::new(None),
+            control_deg: [0.0; 2],
         }
     }
 
@@ -419,6 +430,18 @@ pub fn derivative(t: f64, s: &State, wind: Vec3, atm: &Atmosphere, v: &Vehicle) 
         let cm = cm_delta * qdyn * v.aero.area_m2 * diameter;
         moment[0] += cm * v.thrust_dir[0];
         moment[1] += cm * v.thrust_dir[1];
+    }
+    // Commanded fin moment: the actual control->dynamics seam. Scaled with
+    // dynamic pressure like the other aero moments, so it acts on the coast
+    // and descent segments and dies with the atmosphere. Body-X moment is
+    // roll, body-Y moment is pitch (see `roll`/`pitch` in optimizer.rs).
+    // Gated on a non-zero command to keep the zero path exactly identical.
+    if v.control_deg[0] != 0.0 || v.control_deg[1] != 0.0 {
+        let diameter = 2.0 * (v.aero.area_m2 / std::f64::consts::PI).sqrt();
+        let fin_scale =
+            FIN_CONTROL_AUTHORITY * qdyn * v.aero.area_m2 * diameter * std::f64::consts::PI / 180.0;
+        moment[0] += fin_scale * v.control_deg[0];
+        moment[1] += fin_scale * v.control_deg[1];
     }
 
     // Launch-rail constraint: before liftoff the rail carries the weight, so

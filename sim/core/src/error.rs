@@ -23,4 +23,8 @@ pub enum SimError {
         lo: f64,
         hi: f64,
     },
+    #[error("control input error: {0}")]
+    Control(String),
+    #[error("trajectory sidecar error: {0}")]
+    Trajectory(String),
 }

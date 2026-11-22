@@ -7,8 +7,10 @@ use potok_cli::tui;
 use thiserror::Error;
 
 use potok_sim::{
+    control::ControlFile,
     episode::Episode,
     scenario::{scenario, Split},
+    trajectory::{apogee_m, lateral_rms_m, sidecar_path, write_trajectory},
     validation::{write_validation, FILE_NAME},
     Config, OutputMode, Simulator, PHYSICS_FEATURES,
 };
@@ -40,6 +42,10 @@ struct Args {
     /// Append the six physics features to the eight default channels (14 total).
     #[arg(long)]
     physics_features: bool,
+    /// TSV control file: frame_index, g_roll_deg, g_pitch_deg (one row per tick).
+    /// Commands reach the vehicle dynamics through the fin-control seam.
+    #[arg(long, value_name = "PATH")]
+    control_file: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
@@ -57,6 +63,8 @@ enum CliError {
     Terminal(String),
     #[error("no episodes requested")]
     NoEpisodes,
+    #[error("--control-file requires headless generation (drop --tui)")]
+    ControlTui,
 }
 
 fn main() {
@@ -89,10 +97,19 @@ fn run(args: Args) -> Result<(), CliError> {
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| "<built-in defaults>".into());
     let sim = Simulator::new(cfg.clone())?;
+    let control = match &args.control_file {
+        Some(p) => Some(ControlFile::from_path(p, cfg.frames_per_episode())?),
+        None => None,
+    };
+    if args.tui && control.is_some() {
+        return Err(CliError::ControlTui);
+    }
 
     let wants_validation = args.validation_out.is_some()
         || matches!(cfg.output.mode, OutputMode::Validation | OutputMode::Both);
-    let episodes = if args.tui {
+    let episodes = if let Some(control) = &control {
+        headless_with_control(&sim, &cfg, &config_path, args.episodes, control)
+    } else if args.tui {
         tui::run_interactive(&sim, args.episodes, &config_path).map_err(CliError::Terminal)?
     } else if !args.serial && wants_validation {
         parallel(&sim, args.episodes)
@@ -158,6 +175,51 @@ fn headless(sim: &Simulator, cfg: &Config, config_path: &str, count: usize) -> V
     episodes
 }
 
+/// Control runs are serial: the command table is indexed by frame sequence,
+/// and one episode at a time keeps the flown truth and the A/B comparison
+/// trivially reproducible. No parallel/control race is possible.
+fn headless_with_control(
+    sim: &Simulator,
+    cfg: &Config,
+    config_path: &str,
+    count: usize,
+    control: &ControlFile,
+) -> Vec<Episode> {
+    let mut episodes = Vec::new();
+    let mut errors = 0usize;
+    println!(
+        "control: rows={} mode=serial seed={} episodes={} config={config_path}",
+        control.len(),
+        cfg.run.seed,
+        count
+    );
+    for i in 0..count as u64 {
+        match sim.run_episode_with_control(i, &|f| {
+            control
+                .for_frame(f)
+                .expect("control file covers every frame")
+        }) {
+            Ok(e) => {
+                println!(
+                    "episode {:>4}: frames={} apogee={:.1}m lateral_rms={:.1}m max_speed={:.1}m/s",
+                    e.meta.index,
+                    e.frames.len(),
+                    apogee_m(&e.trajectory),
+                    lateral_rms_m(&e.trajectory),
+                    e.max_speed_mps,
+                );
+                episodes.push(e);
+            }
+            Err(e) => {
+                errors += 1;
+                eprintln!("episode error: {e}");
+            }
+        }
+    }
+    println!("total: episodes={} errors={errors}", episodes.len());
+    episodes
+}
+
 fn parallel(sim: &Simulator, count: usize) -> Vec<Episode> {
     let mut total_frames = 0usize;
     let mut errors = 0usize;
@@ -201,6 +263,9 @@ fn write_if_requested(args: &Args, cfg: &Config, episodes: &[Episode]) -> Result
         let out = dir.join(FILE_NAME);
         write_validation(&out, cfg, episodes)?;
         println!("validation: {}", out.display());
+        let traj = sidecar_path(&out);
+        write_trajectory(&traj, cfg, episodes)?;
+        println!("trajectory: {}", traj.display());
     }
     Ok(())
 }
