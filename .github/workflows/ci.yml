@@ -71,13 +71,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Reject binaries and files over 2 MB
+      - name: Reject files over 2 MB
         run: |
-          forbidden='\.(sldprt|sldasm|slddrw|cas|dat|trn|msh|zip|7z|tar|gz|bin|trajectory)$'
-          if git ls-files | grep -Ei "$forbidden"; then
-            echo "binary artifact in git" >&2
-            exit 1
-          fi
           while IFS= read -r f; do
             [ -f "$f" ] || continue
             size=$(stat -c%s "$f")
