@@ -360,7 +360,7 @@ fn bounds_cover_every_exported_channel_and_stay_finite() {
             .collect::<Vec<_>>()
     );
     let names: Vec<&str> = m.bounds.targets.iter().map(|r| r.name.as_str()).collect();
-    assert_eq!(names, TARGET_NAMES.iter().copied().collect::<Vec<_>>());
+    assert_eq!(names, TARGET_NAMES.to_vec());
     assert_eq!(
         names,
         default_target_names()
@@ -369,10 +369,7 @@ fn bounds_cover_every_exported_channel_and_stay_finite() {
             .collect::<Vec<_>>()
     );
     let names: Vec<&str> = m.bounds.truth.iter().map(|r| r.name.as_str()).collect();
-    assert_eq!(
-        names,
-        TRUTH_V3_TICK_NAMES.iter().copied().collect::<Vec<_>>()
-    );
+    assert_eq!(names, TRUTH_V3_TICK_NAMES.to_vec());
     assert_eq!(
         names,
         default_truth_names()
