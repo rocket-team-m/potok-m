@@ -1,3 +1,5 @@
+#![cfg_attr(not(feature = "std"), no_std)]
+
 //! Potok-M UART protocol: byte-exact encode/decode of the frames in `uart.yaml`.
 //!
 //! The wire types, offsets, magics, enum and flags are generated; this crate
@@ -53,6 +55,7 @@ impl core::fmt::Display for Error {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for Error {}
 
 /// CRC lookup table built from the YAML polynomial at compile time.
@@ -721,7 +724,17 @@ fn clamp_i16(v: f64) -> i16 {
     } else if v <= -32768.0 {
         -32768
     } else {
-        v.round() as i16
+        // Manual rounding: core has no f64::round in no_std.
+        let trunc = v as i64;
+        let frac = v - trunc as f64;
+        let rounded = if frac >= 0.5 {
+            trunc + 1
+        } else if frac <= -0.5 {
+            trunc - 1
+        } else {
+            trunc
+        };
+        rounded as i16
     }
 }
 

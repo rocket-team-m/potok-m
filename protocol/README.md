@@ -13,7 +13,7 @@ addition of `lowlat`.
 
 ### compat profile
 
-#### Request (AI → STM32), 56 bytes, magic `0x504D`
+#### Request (STM32 → AI), 56 bytes, magic `0x504D`
 
 | offset | field | type | note |
 |---:|---|---|---|
@@ -38,7 +38,7 @@ The numeric codes are the wire contract and are unchanged by the rename;
 Flags (bit index): `0` GPS_FIX, `1` IMU_OK, `2` BARO_OK, `3` PITOT_OK,
 `4` AI_READY, `5` CALIBRATED, `6` MOTOR_ARMED, `7` FAULT.
 
-#### Reply (STM32 → AI), 14 bytes, magic `0x5250`
+#### Reply (AI → STM32), 14 bytes, magic `0x5250`
 
 | offset | field | type | note |
 |---:|---|---|---|
