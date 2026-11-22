@@ -138,12 +138,14 @@ struct CsvTable {
 
 impl CsvTable {
     fn parse(path: &Path) -> Result<Self, LoadError> {
-        let text = fs::read_to_string(path).map_err(|e| {
-            LoadError(format!("cannot read {}: {e}", path.display()))
-        })?;
+        let text = fs::read_to_string(path)
+            .map_err(|e| LoadError(format!("cannot read {}: {e}", path.display())))?;
         let mut lines = text.lines().filter(|l| !l.trim().is_empty());
         let header = lines.next().ok_or_else(|| {
-            LoadError(format!("{} is empty; expected a CSV header", path.display()))
+            LoadError(format!(
+                "{} is empty; expected a CSV header",
+                path.display()
+            ))
         })?;
         let headers: Vec<String> = header
             .split(',')
@@ -157,7 +159,11 @@ impl CsvTable {
         let rows = lines
             .map(|l| l.split(',').map(|s| s.trim().to_string()).collect())
             .collect();
-        Ok(Self { headers, lookup, rows })
+        Ok(Self {
+            headers,
+            lookup,
+            rows,
+        })
     }
 
     fn has(&self, name: &str) -> bool {
@@ -175,15 +181,16 @@ impl CsvTable {
         let raw = self.cell(row, name).ok_or_else(|| {
             LoadError(format!("CSV column '{name}' missing in {:?}", self.headers))
         })?;
-        raw.parse::<f64>().map_err(|_| {
-            LoadError(format!("invalid number '{raw}' in CSV column '{name}'"))
-        })
+        raw.parse::<f64>()
+            .map_err(|_| LoadError(format!("invalid number '{raw}' in CSV column '{name}'")))
     }
 
     fn uint(&self, row: &[String], name: &str) -> Result<u32, LoadError> {
         let v = self.num(row, name)?;
         if v < 0.0 || v.fract() != 0.0 || v > u32::MAX as f64 {
-            return Err(LoadError(format!("invalid unsigned integer in column '{name}': {v}")));
+            return Err(LoadError(format!(
+                "invalid unsigned integer in column '{name}': {v}"
+            )));
         }
         Ok(v as u32)
     }
@@ -192,9 +199,8 @@ impl CsvTable {
 fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, LoadError> {
     let text = fs::read_to_string(path)
         .map_err(|e| LoadError(format!("cannot read {}: {e}", path.display())))?;
-    serde_json::from_str(&text).map_err(|e| {
-        LoadError(format!("invalid JSON in {}: {e}", path.display()))
-    })
+    serde_json::from_str(&text)
+        .map_err(|e| LoadError(format!("invalid JSON in {}: {e}", path.display())))
 }
 
 fn check_finite(v: f64, what: &str, path: &Path) -> Result<f64, LoadError> {
@@ -360,7 +366,13 @@ pub fn load_run(run: &Path, seed: u32) -> Result<RunData, LoadError> {
     }
     let root_metrics = run.join("metrics.json");
     if root_metrics.is_file() && !files.iter().any(|(_, p)| *p == root_metrics) {
-        files.push((run.file_name().unwrap_or_default().to_string_lossy().to_string(), root_metrics));
+        files.push((
+            run.file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string(),
+            root_metrics,
+        ));
     }
     files.sort_by(|a, b| a.0.cmp(&b.0));
     files.dedup_by(|a, b| a.1 == b.1);
@@ -434,8 +446,16 @@ pub fn load_run(run: &Path, seed: u32) -> Result<RunData, LoadError> {
                     ratio
                 },
                 ece: if last.ece > 0.0 { last.ece } else { ece },
-                raw_ece: if last.raw_ece > 0.0 { last.raw_ece } else { raw_ece },
-                coverage: if last.coverage > 0.0 { last.coverage } else { coverage },
+                raw_ece: if last.raw_ece > 0.0 {
+                    last.raw_ece
+                } else {
+                    raw_ece
+                },
+                coverage: if last.coverage > 0.0 {
+                    last.coverage
+                } else {
+                    coverage
+                },
                 n,
                 params: m.params.unwrap_or(0),
                 method,

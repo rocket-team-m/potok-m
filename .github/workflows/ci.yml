@@ -41,6 +41,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      - run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev pkg-config
       - run: cargo fmt --all --manifest-path tui/Cargo.toml -- --check
       - run: cargo clippy --all-targets --manifest-path tui/Cargo.toml
       - run: cargo test --all-targets --manifest-path tui/Cargo.toml
@@ -51,6 +52,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
+      - run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev pkg-config
       - name: Render deterministic plots
         run: |
           cargo run --release --manifest-path tui/Cargo.toml -- \

@@ -61,7 +61,10 @@ impl App {
 
 pub fn render(frame: &mut Frame, app: &App) {
     let area = frame.area();
-    frame.render_widget(Block::default().style(Style::default().bg(c(palette::BASE)).fg(c(palette::TEXT))), area);
+    frame.render_widget(
+        Block::default().style(Style::default().bg(c(palette::BASE)).fg(c(palette::TEXT))),
+        area,
+    );
 
     if let Some(error) = &app.error {
         render_error(frame, area, error);
@@ -106,7 +109,9 @@ fn panel(title: &str) -> Block<'_> {
         .border_style(Style::default().fg(c(palette::GRID)))
         .title(Span::styled(
             format!(" {title} "),
-            Style::default().fg(c(palette::MUTED)).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(c(palette::MUTED))
+                .add_modifier(Modifier::BOLD),
         ))
         .style(Style::default().bg(c(palette::BASE)).fg(c(palette::TEXT)))
 }
@@ -118,7 +123,9 @@ fn render_error(frame: &mut Frame, area: Rect, message: &str) {
     let lines = vec![
         Line::from(Span::styled(
             "cannot display a run",
-            Style::default().fg(c(palette::FAIL)).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(c(palette::FAIL))
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(message.to_string()),
         Line::from(Span::styled(
@@ -141,7 +148,11 @@ fn render_status(frame: &mut Frame, area: Rect, app: &App, run: &RunData) {
         Span::styled(
             if run.demo { "DEMO" } else { "RUN" },
             Style::default()
-                .fg(if run.demo { c(palette::HELD) } else { c(palette::PASS) })
+                .fg(if run.demo {
+                    c(palette::HELD)
+                } else {
+                    c(palette::PASS)
+                })
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled("  ", Style::default()),
@@ -202,15 +213,14 @@ fn render_chart(frame: &mut Frame, area: Rect, app: &App, run: &RunData) {
         .iter()
         .map(|p| (p.epoch as f64, p.rmse_held_out))
         .collect();
-    let (ymin, ymax, has_data) = float_bounds(
-        train
-            .iter()
-            .chain(held.iter())
-            .map(|(_, y)| *y),
-    );
+    let (ymin, ymax, has_data) = float_bounds(train.iter().chain(held.iter()).map(|(_, y)| *y));
     let xhi = model.series.last().map(|p| p.epoch as f64).unwrap_or(1.0);
     let xlo = model.series.first().map(|p| p.epoch as f64).unwrap_or(0.0);
-    let (xmin, xmax) = if xhi > xlo { (xlo, xhi) } else { ((xlo - 1.0).max(0.0), xhi + 1.0) };
+    let (xmin, xmax) = if xhi > xlo {
+        (xlo, xhi)
+    } else {
+        ((xlo - 1.0).max(0.0), xhi + 1.0)
+    };
 
     let mut datasets = vec![
         Dataset::default()
@@ -275,9 +285,16 @@ fn render_chart(frame: &mut Frame, area: Rect, app: &App, run: &RunData) {
 }
 
 fn gate_line(label: &str, value: f64, op: &str, limit: f64, ok: bool) -> Line<'static> {
-    let (verdict, color) = if ok { ("PASS", palette::PASS) } else { ("FAIL", palette::FAIL) };
+    let (verdict, color) = if ok {
+        ("PASS", palette::PASS)
+    } else {
+        ("FAIL", palette::FAIL)
+    };
     Line::from(vec![
-        Span::styled(format!("{label:<9}"), Style::default().fg(c(palette::MUTED))),
+        Span::styled(
+            format!("{label:<9}"),
+            Style::default().fg(c(palette::MUTED)),
+        ),
         Span::styled(format!("{value:.3} {op} {limit:.2}"), Style::default()),
         Span::styled("  ", Style::default()),
         Span::styled(
@@ -292,7 +309,13 @@ fn render_gates(frame: &mut Frame, area: Rect, app: &App, run: &RunData) {
     let mut lines = vec![
         gate_line("ratio", model.ratio, "<=", RATIO_LIMIT, model.ratio_ok()),
         gate_line("ece", model.ece, "<=", ECE_LIMIT, model.ece_ok()),
-        gate_line("coverage", model.coverage, ">=", COVERAGE_TARGET, model.coverage_ok()),
+        gate_line(
+            "coverage",
+            model.coverage,
+            ">=",
+            COVERAGE_TARGET,
+            model.coverage_ok(),
+        ),
         Line::from(""),
         Line::from(vec![
             Span::styled("raw ece   ", Style::default().fg(c(palette::MUTED))),
@@ -309,14 +332,20 @@ fn render_gates(frame: &mut Frame, area: Rect, app: &App, run: &RunData) {
         Line::from(""),
         Line::from(Span::styled(
             "models (tab)",
-            Style::default().fg(c(palette::MUTED)).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(c(palette::MUTED))
+                .add_modifier(Modifier::BOLD),
         )),
     ];
     for (i, m) in run.models.iter().enumerate() {
         let active = i == app.model_idx;
         lines.push(Line::from(Span::styled(
             format!("{} {}", if active { ">" } else { " " }, m.name),
-            Style::default().fg(if active { c(palette::TRAIN) } else { c(palette::MUTED) }),
+            Style::default().fg(if active {
+                c(palette::TRAIN)
+            } else {
+                c(palette::MUTED)
+            }),
         )));
     }
     let block = panel("gates");

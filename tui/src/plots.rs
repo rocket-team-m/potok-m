@@ -42,21 +42,26 @@ pub struct AbBar {
 pub fn load_ab(path: &Path) -> Result<AbReport, String> {
     let text = fs::read_to_string(path)
         .map_err(|e| format!("cannot read A/B report {}: {e}", path.display()))?;
-    serde_json::from_str(&text)
-        .map_err(|e| format!("invalid A/B report {}: {e}", path.display()))
+    serde_json::from_str(&text).map_err(|e| format!("invalid A/B report {}: {e}", path.display()))
 }
 
 /// baseline / assisted / oracle for one seed and one student model.
 pub fn ab_bars(report: &AbReport, seed: &str, model: &str) -> Result<Vec<AbBar>, String> {
     let arms = report.seeds.get(seed).ok_or_else(|| {
-        format!("A/B report has no seed {seed}; available: {:?}", report.seeds.keys().collect::<Vec<_>>())
+        format!(
+            "A/B report has no seed {seed}; available: {:?}",
+            report.seeds.keys().collect::<Vec<_>>()
+        )
     })?;
     let student = arms.get(model).ok_or_else(|| {
-        format!("A/B report seed {seed} has no model '{model}'; available: {:?}", arms.keys().collect::<Vec<_>>())
+        format!(
+            "A/B report seed {seed} has no model '{model}'; available: {:?}",
+            arms.keys().collect::<Vec<_>>()
+        )
     })?;
-    let oracle = arms.get("oracle_gtheta").ok_or_else(|| {
-        format!("A/B report seed {seed} has no 'oracle_gtheta' arm")
-    })?;
+    let oracle = arms
+        .get("oracle_gtheta")
+        .ok_or_else(|| format!("A/B report seed {seed} has no 'oracle_gtheta' arm"))?;
     let check = |v: f64, what: &str| {
         if v.is_finite() {
             Ok(v)
@@ -67,19 +72,28 @@ pub fn ab_bars(report: &AbReport, seed: &str, model: &str) -> Result<Vec<AbBar>,
     Ok(vec![
         AbBar {
             label: "baseline",
-            lateral: check(student.aggregate.baseline.lateral_rms_m, "baseline lateral_rms_m")?,
+            lateral: check(
+                student.aggregate.baseline.lateral_rms_m,
+                "baseline lateral_rms_m",
+            )?,
             apogee: check(student.aggregate.baseline.apogee_m, "baseline apogee_m")?,
             color: palette::MUTED,
         },
         AbBar {
             label: "assisted",
-            lateral: check(student.aggregate.assisted.lateral_rms_m, "assisted lateral_rms_m")?,
+            lateral: check(
+                student.aggregate.assisted.lateral_rms_m,
+                "assisted lateral_rms_m",
+            )?,
             apogee: check(student.aggregate.assisted.apogee_m, "assisted apogee_m")?,
             color: palette::TRAIN,
         },
         AbBar {
             label: "oracle",
-            lateral: check(oracle.aggregate.assisted.lateral_rms_m, "oracle lateral_rms_m")?,
+            lateral: check(
+                oracle.aggregate.assisted.lateral_rms_m,
+                "oracle lateral_rms_m",
+            )?,
             apogee: check(oracle.aggregate.assisted.apogee_m, "oracle apogee_m")?,
             color: palette::HELD,
         },
@@ -124,11 +138,19 @@ fn range(lo: f64, hi: f64, pad: f64) -> (f64, f64) {
     }
 }
 
-fn footer(root: &DrawingArea<SVGBackend<'_>, Shift>, height: u32, lines: &[String]) -> Result<(), String> {
+fn footer(
+    root: &DrawingArea<SVGBackend<'_>, Shift>,
+    height: u32,
+    lines: &[String],
+) -> Result<(), String> {
     let mut y = height as i32 - 14;
     for line in lines.iter().rev() {
-        root.draw(&Text::new(line.clone(), (20, y), text(11.0, palette::MUTED)))
-            .map_err(|e| format!("cannot draw footer: {e}"))?;
+        root.draw(&Text::new(
+            line.clone(),
+            (20, y),
+            text(11.0, palette::MUTED),
+        ))
+        .map_err(|e| format!("cannot draw footer: {e}"))?;
         y -= 16;
     }
     Ok(())
@@ -154,10 +176,18 @@ fn curve_svg(
         let root = SVGBackend::with_string(&mut buf, (w, h)).into_drawing_area();
         root.fill(&rgb(palette::BASE))
             .map_err(|e| format!("cannot fill report background: {e}"))?;
-        root.draw(&Text::new(title.to_string(), (20, 12), text(17.0, palette::TEXT)))
-            .map_err(|e| format!("cannot draw report title: {e}"))?;
-        root.draw(&Text::new(subtitle.to_string(), (20, 36), text(11.0, palette::MUTED)))
-            .map_err(|e| format!("cannot draw report subtitle: {e}"))?;
+        root.draw(&Text::new(
+            title.to_string(),
+            (20, 12),
+            text(17.0, palette::TEXT),
+        ))
+        .map_err(|e| format!("cannot draw report title: {e}"))?;
+        root.draw(&Text::new(
+            subtitle.to_string(),
+            (20, 36),
+            text(11.0, palette::MUTED),
+        ))
+        .map_err(|e| format!("cannot draw report subtitle: {e}"))?;
 
         let xs: Vec<f64> = epochs.iter().map(|e| *e as f64).collect();
         let x0 = xs.iter().copied().fold(f64::INFINITY, f64::min);
@@ -249,9 +279,16 @@ fn curve_svg(
     Ok(buf)
 }
 
-pub fn render_plots(run: &RunData, model_idx: usize, ab: Option<(&AbReport, &str, &str)>) -> Result<Plots, String> {
+pub fn render_plots(
+    run: &RunData,
+    model_idx: usize,
+    ab: Option<(&AbReport, &str, &str)>,
+) -> Result<Plots, String> {
     let model = run.models.get(model_idx).ok_or_else(|| {
-        format!("no model at index {model_idx}; run has {} models", run.models.len())
+        format!(
+            "no model at index {model_idx}; run has {} models",
+            run.models.len()
+        )
     })?;
     if model.series.is_empty() {
         return Err(format!("model '{}' has no epochs to plot", model.name));
@@ -314,7 +351,11 @@ pub fn render_plots(run: &RunData, model_idx: usize, ab: Option<(&AbReport, &str
         None => None,
     };
 
-    Ok(Plots { rmse_svg, ece_svg, ab_svg })
+    Ok(Plots {
+        rmse_svg,
+        ece_svg,
+        ab_svg,
+    })
 }
 
 fn ab_svg(bars: &[AbBar], seed: &str, model: &str) -> Result<String, String> {
@@ -324,8 +365,12 @@ fn ab_svg(bars: &[AbBar], seed: &str, model: &str) -> Result<String, String> {
         let root = SVGBackend::with_string(&mut buf, (w, h)).into_drawing_area();
         root.fill(&rgb(palette::BASE))
             .map_err(|e| format!("cannot fill A/B background: {e}"))?;
-        root.draw(&Text::new("A/B comparison".to_string(), (20, 12), text(17.0, palette::TEXT)))
-            .map_err(|e| format!("cannot draw A/B title: {e}"))?;
+        root.draw(&Text::new(
+            "A/B comparison".to_string(),
+            (20, 12),
+            text(17.0, palette::TEXT),
+        ))
+        .map_err(|e| format!("cannot draw A/B title: {e}"))?;
         root.draw(&Text::new(
             format!("seed {seed} - {model} - flown-truth trajectory sidecar"),
             (20, 36),
@@ -366,7 +411,11 @@ fn ab_panel(
     y_fmt: fn(f64) -> String,
 ) -> Result<(), String> {
     let ymax = values.iter().copied().fold(0.0f64, f64::max) * 1.12;
-    let ymax = if ymax.is_finite() && ymax > 0.0 { ymax } else { 1.0 };
+    let ymax = if ymax.is_finite() && ymax > 0.0 {
+        ymax
+    } else {
+        1.0
+    };
     let mut chart = ChartBuilder::on(area)
         .caption(title, text(13.0, palette::TEXT))
         .margin_left(8)

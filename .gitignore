@@ -42,3 +42,5 @@ target/
 # Scratch A/B artifacts
 /ab_work/
 /ab_diag_work/
+
+/ab_work/
