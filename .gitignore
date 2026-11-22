@@ -44,3 +44,6 @@ target/
 /ab_diag_work/
 
 /ab_work/
+
+/out/*/data/*.bin
+/out/*/data/*.trajectory
