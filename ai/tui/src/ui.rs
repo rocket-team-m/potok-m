@@ -264,7 +264,6 @@ fn render_chart(frame: &mut Frame, area: Rect, app: &App, run: &RunData) {
         )
         .y_axis(
             Axis::default()
-                .title("rmse")
                 .style(Style::default().fg(c(palette::GRID)))
                 .bounds([ymin, ymax])
                 .labels(ylabels),

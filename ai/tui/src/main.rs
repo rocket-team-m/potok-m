@@ -1,7 +1,4 @@
-mod data;
-mod palette;
-mod plots;
-mod ui;
+use potok_train_tui::{data, plots, ui};
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use std::path::{Path, PathBuf};
