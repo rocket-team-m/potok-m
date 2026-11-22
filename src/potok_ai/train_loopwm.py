@@ -16,8 +16,10 @@ import argparse
 from pathlib import Path
 
 import torch
+from torch.nn import functional as F
 from torch.optim import AdamW
 
+from .calibration import confidence_spread_loss, confidence_target
 from .curriculum import STAGES, Curriculum
 from .data import SmartWindowDataset, group_by_scenario, load_episodes
 from .export import export_student
@@ -83,7 +85,8 @@ def train_teacher(episodes, args: argparse.Namespace, device: torch.device) -> L
             continue
         for windows, conditions, targets in _batches(dataset, args.batch):
             latent, _ = model.refine(windows, conditions)
-            output = model.head_from_latent(latent)
+            raw = model.head_logits(latent)
+            output = model.head_output(raw)
             command = final_command(
                 output[:, :2], physics_baseline(windows[:, -1, :]), residual
             )
@@ -92,7 +95,12 @@ def train_teacher(episodes, args: argparse.Namespace, device: torch.device) -> L
             latent_loss = model.latent_prediction_loss(
                 windows, conditions, target_encoder, latent=latent
             )
-            loss = main + config.latent_weight * latent_loss
+            error = (command - targets).abs().max(dim=1).values.detach()
+            confidence = F.mse_loss(raw[:, 2], confidence_target(error))
+            loss = (
+                main + config.latent_weight * latent_loss + 0.1 * confidence
+                + confidence_spread_loss(raw[:, 2], error)
+            )
             optimizer.zero_grad(set_to_none=False)
             loss.backward()
             optimizer.step()

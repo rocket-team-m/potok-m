@@ -204,12 +204,19 @@ class LiteModel(nn.Module):
             if h in self.cfg.horizons
         }
 
-    def head_from_latent(self, pooled: torch.Tensor) -> torch.Tensor:
-        """Bounded corrections plus confidence from the pooled latent summary."""
-        raw = torch.cat([self.head_corr(pooled), self.head_conf(pooled)], dim=-1)
+    def head_logits(self, pooled: torch.Tensor) -> torch.Tensor:
+        """Raw [roll, pitch, confidence] logits of the pooled latent."""
+        return torch.cat([self.head_corr(pooled), self.head_conf(pooled)], dim=-1)
+
+    def head_output(self, raw: torch.Tensor) -> torch.Tensor:
+        """Bounded corrections plus confidence from the raw head logits."""
         corrections = torch.tanh(raw[:, :2]) * self.cfg.g_max
         confidence = torch.sigmoid(raw[:, 2:3])
         return torch.cat([corrections, confidence], dim=-1)
+
+    def head_from_latent(self, pooled: torch.Tensor) -> torch.Tensor:
+        """Bounded corrections plus confidence from the pooled latent summary."""
+        return self.head_output(self.head_logits(pooled))
 
     def forward(self, window: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
         latent, _ = self.refine(window, cond)
