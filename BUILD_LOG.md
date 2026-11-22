@@ -1,402 +1,477 @@
-# BUILD_LOG — potok-edge
+# BUILD_LOG — ai / Поток-М
 
-## 2026-11-22 — initial implementation
+Date: 2026-11-22. CPU-only work; no GPU jobs, no pushes.
 
-- **Decision: pure Rust, no burn.** The task allows burn+ndarray "if
-  practical" and a pure-Rust fixed-size implementation otherwise. This model
-  is fixed-shape (50x8 window, 5 blocks, small C/D), has no autograd and no
-  training, and the hot loop must be one multiply-add per weight from
-  pre-dequantized f32 buffers. Adding the burn/cubecl dependency tree would
-  cost minutes of compile time per clean build, complicate Raspberry Pi
-  cross-compilation, and put a generic tensor API between the code and the
-  exact arithmetic order we need. No burn dependency was added, so no claim
-  is made that burn was tried and failed on this toolchain — it was rejected
-  by design. The public API (`Model` -> `Runtime` -> `ReplyFrame`) is the same
-  either way.
-- Dependencies: `sha2 0.10` for the file checksum and `serialport 4` for UART.
-  CLI parsing is hand-rolled; no clap.
-- The protocol crate under `protocol/` is owned by another agent and is not
-  ready. The frame layout from `protocol/uart.yaml` is reimplemented locally
-  in `src/frame.rs` behind the `FrameLayout` trait; the only production
-  dependency on the concrete layout is one line in `src/bin/infer.rs`.
-- Test fixture is generated in Rust (`src/fixture.rs`); no binary artifact is
-  checked in. `make-fixture` writes the same bytes for manual testing.
-- Protocol version mismatch disables the assistant on the *first* frame
-  (`handle_request` -> `Runtime::disable_now`); the three-strike rule applies
-  to CRC/seq/timeouts only.
+## Commands and results
 
-## 2026-11-22 — flop/copy optimization pass
+| command | result |
+|---|---|
+| `uv sync` | Resolved 20 packages; installed `torch==2.15.0+cpu` from `download.pytorch.org/whl/cpu`. No CUDA wheels. |
+| `uv run pytest -q` | `26 passed in 2.96s` initially; `37 passed in 4.89s` after the student work; `44 passed in 5.45s` after the smart work; `51 passed in 6.24s` after the LoopWM work; `61 passed in 10.32s` after the engine work; `78 passed in 11.86s` after the ideal-loop work; `85 passed in 10.18s` after the logit-calibration work |
+| `uv run ruff check src tests` | `All checks passed!` (after the smart, LoopWM, engine, ideal-loop and logit-calibration work) |
+| `PYTHONPATH=src uv run python -m potok_ai.train_smart --data <v2 file> --out /tmp/opencode/smart.pt --epochs 1 --window 12 --batch 2 --limit 4 --eval-limit 4 --width 16 --rank 8` | prints three scenario RMSE rows, `ratio=0.7034 limit=1.25 generalises=yes`, teacher + export paths; CPU only |
+| `uv run python benchmark.py --stage train --steps 10` | `params=87875 ms_per_step=68.02 frames_per_s=5881` (width 128, rank 64, batch 8, seq 50) |
+| `uv run python benchmark.py --stage forward --steps 10` | `params=87875 ms_per_step=31.80 frames_per_s=12579` |
+| `PYTHONPATH=src uv run python -m potok_ai.train --help` | CLI exposes both stages, `--opt`, `--ns-steps`, `--limit` |
+| `PYTHONPATH=src uv run python -m potok_ai.engine --help` | CLI exposes `--model {lrs,loopwm-lite,loopwm}`, `--stage {train,distill,eval}`, `--data`, `--out`, `--epochs`, `--seed`, `--device` |
+| `PYTHONPATH=src uv run python -m potok_ai.engine --model loopwm-lite --stage train --data <v2 file> --out /tmp/opencode/engine_lite --epochs 1 --seed 3 --device cpu --window 12 --batch 2 --limit 4 --eval-limit 4 --width 16 --lite-width 64 --attn-rank 8` | printed the one metrics table: `rmse_train=0.7375 rmse_held_out=0.7218 ratio=0.9787 params=34819 mac=207296 bytes=150095`; the `eval` stage on the same `--out` reproduced the same RMSE, params and MAC |
 
-Changes, all inside `edge/`:
+Tests cover: forward shape/bounds, 5-block layout and dilations, TSCT param count,
+seed determinism, causality, ternary codes and STE gradient flow, ternary anneal,
+FWHT round-trip and 4-bit gradient, EMA teacher update, mask spans, JEPA loss and
+gradients, KoLeo, NS spectrum compression, Muon+ loss decrease, AdamW fallback,
+ColRow, episode binary round-trip and raw fallback, export/load and tamper
+rejection, and one tiny CPU step in each stage.
 
-1. **Ternary dequantization already happens once at load** (`Model::from_bytes`
-   reconstructs dense f32 `W1 = U1 diag(s1) V1^T`, `W2 = U2 diag(s2) V2^T` and
-   the depthwise kernels). The hot loop never touches a code byte.
-2. **Fused per-timestep pass.** The five blocks now run one pass over the 50
-   timesteps: for timestep `t`, norm1 -> causal depthwise conv + SiLU +
-   residual -> norm2 -> TSCT up + SiLU + down + residual. The causal conv only
-   needs norm1 rows `t-K..=t`, already final, so the fusion is exact.
-3. **Smaller preallocated scratch.** `norm2` shrank from `T*C` to `C` and `up`
-   from `T*D` to `D`; they are consumed in the same timestep. Scratch went
-   5,600 -> 3,312 bytes on the fixture; `x` and `norm1` stay `T*C` because the
-   conv needs causal history. No buffer is allocated in `on_request`.
-4. **Bounds-check elimination.** Every inner dot receives pre-sliced rows
-   (`&w[i*C..(i+1)*C]`) and iterates `zip`/`dot`, so no per-element index
-   arithmetic remains in the matmul-like loops.
-5. **NEON on aarch64, scalar fallback elsewhere** (`src/simd.rs`). `dot()`
-   dispatches to a `#[target_feature(enable = "neon")]` implementation with a
-   runtime `is_aarch64_feature_detected!` guard; four lanes per `vmulq_f32`,
-   ordered lane sum, scalar tail. Other targets use the strictly ordered
-   `dot_scalar`.
+## Decisions
 
-### Verification
+- **torch 2.15.0** is the current PyPI latest (verified via PyPI JSON); "3.15" does
+  not exist. Plain `uv sync` resolves CPU wheels through an explicit index. The
+  `cu134` index is declared in `pyproject.toml`; for GPU, point the `torch` source
+  at `pytorch-cu134`. No `--extra gpu`: uv requires an explicitly selected extra
+  for conflicting PyTorch sources, which would break the required plain `uv sync`.
+  CUDA wheels were never installed.
+- **Muon+ is the default** (`--opt muon`): momentum `M = μM + (1−μ)G`, Jordan
+  Newton–Schulz quintic `(3.4445, −4.775, 2.0315)`, ColRow = `norm_row(norm_col(X))`
+  (Muon+ Eq. 7, `eps` inside the sqrt), scale `max(1, m/n)^0.5`, 5 NS steps.
+  Coefficients come from `dormouse/docs/papers/muon-plus.md` (row D6: exact match
+  to `NS_COEFFS` from Jordan's `muon.py`); the scale is the documented D3 deviation
+  from the paper's `√(m/n)`. The `max(1, ...)` form and 1-D AdamW routing are the
+  paper's own hybrid (`Muon+` §3.1), not a fallback optimizer. Plain AdamW exists
+  only as `--opt adamw` for comparison. The PolarExpress cubic
+  `(1.875, −1.25, 0.375)` was also found in that repo (burn-spectral TSCT
+  retraction, row D5) and is exposed as `POLAR_EXPRESS_COEFFS` / `MuonPlus(coeffs=…)`;
+  it is not the default because rows D5/D6 identify it as a different polynomial
+  than Muon+'s.
+- **Fast-JEPA (arXiv:2611.25927)**: one linear probe maps masked student latents to
+  the teacher latents of the *complete* window shifted by 3 frames (≈0.2–0.4 s at
+  50 Hz) in a single forward. No recursive rollout, no candidate search, no
+  planning code. KoLeo on the final latent keeps representations from collapsing.
+- **Fusion / flops**: each TSCT pointwise map folds `(U·s) @ Vᵀ` into one effective
+  weight and a single `F.linear`, so the block launches one GEMM instead of two.
+  The depthwise causal conv stays separate: PyTorch has no asymmetric causal
+  padding, and folding it into the pointwise map would multiply parameters by the
+  kernel width — that trade is not worth it at width 128 (add when profiling says
+  conv launches dominate).
+- **Hadamard activations** use a fast Walsh–Hadamard transform: `d·log₂d` butterfly
+  work with no stored matrix (better than "precompute the matrix"), self-inverse,
+  4-bit symmetric levels −7..7 with a per-row scale and straight-through gradient.
+- **CPU smoke path**: the tiny dataset is materialised once and the inner loop only
+  slices tensor views; gradients are zeroed in place (`set_to_none=False`) so
+  buffers are reused; one CPU thread; `--limit` caps windows.
+- **Export** (`export.py`): version header, layer descriptors, ternary int8 codes,
+  scales, fp32 tensors, SHA256 trailer; the loader verifies the checksum and
+  refuses tampered files. The format is documented in the module docstring.
+- **`filter/`** is unfinished parallel work: left untouched and excluded from
+  ruff via `pyproject.toml`.
 
-- `cargo test`: 17 tests pass, no warnings. `cargo check`: clean.
-- In-crate control: `src/baseline.rs` is a deliberately naive implementation
-  (separate passes, per-frame allocation, indexed scalar loops, no fusion).
-  `tests/optimized_test.rs` compares raw outputs over 40 windows and
-  `bench --compare` over 2,000 and 5,000 frames: **max |diff| = 0.0,
-  bit-identical on every frame** on x86_64. NEON changes only the summation
-  tree, so the aarch64 assertion is bounded error (`1e-4*(1+|ref|)`), not
-  bit identity. `simd::tests::dot_fast_matches_scalar_within_bound` pins that
-  bound; it runs on the Pi at test time.
-- The NEON intrinsics were **compile-checked for aarch64** with
-  `rustup run stable rustc --target aarch64-linux-android --crate-type lib`
-  (rustc 1.99.0) — exit 0. They were **not executed**: this box is x86_64 and
-  there is no Pi here. Do not claim measured Pi latency until `cargo test`
-  and `bench --compare` are run on the target.
-- The 2,000-frame output checksum stayed `0x61a80` before and after the
-  optimization; the 5,000-frame checksum is `0xf4240`.
+## Canonical export format (v2) and cross-check fixture
 
-### Before / after (release, x86_64 dev box, 2000 frames unless noted)
+- `ai/FORMAT.md` is the authority for the exact byte layout: header carries the
+  full architecture (dilations, kernel, bounds), layer records carry ternary
+  codes + scales or fp32 tensors, SHA256 covers all bytes except the 32-byte
+  digest trailer. Version was bumped to 2 so a reader cannot mistake the old
+  header for the self-describing one.
+- Two export bugs were found while building the fixture: the stored U/V were
+  `alpha*codes` cast to int8 instead of the codes themselves, and a layer loop
+  shadowed the header's `in_features`/`out_features`. Both are fixed; a new test
+  asserts the reloaded model reproduces the original forward bit-for-bit.
+- Fixtures: `tests/fixtures/tiny_model.bin` (seed 1234, width 16, rank 8,
+  untrained) and `tests/fixtures/tiny_expected.npy` for the fixed 50x8 window.
+  `tests/fixtures/generate.py` regenerates them; `tests/test_fixture.py` reloads
+  and asserts exact equality.
+- **The `edge/` reader should read `ai/tests/fixtures/tiny_model.bin` and compare
+  its three float32 outputs to `ai/tests/fixtures/tiny_expected.npy`** before
+  attempting any larger model. No files outside `ai/` were modified.
 
-| metric | before | after (optimized) | naive control, same binary |
-|---|---|---|---|
-| p50 latency | 137 us | 96-116 us across 4 runs | 112-125 us |
-| p99 latency | 183 us | 149-220 us | 169-237 us |
-| resident model+buffers | 14,028 B (printed 13 KiB) | 11,740 B (11 KiB) | allocates per frame |
-| output fingerprint (2000 frames) | 0x61a80 | 0x61a80 | identical |
+## Simulator validation reader
 
-The p99 spread is host noise (shared dev box), not a signal: three consecutive
-5,000-frame runs gave optimized p99 219.6 / 149.7 / 149.4 us and naive p99
-168.9 / 236.7 / 172.3 us. The trustworthy deltas are the p50 (~137 -> ~96-116
-us) and the memory (-16.3%). `bench --compare` measures both paths in the
-same process, so the control numbers are directly comparable with the
-optimized ones; the "before" column is the earlier unoptimized release
-binary on the same fixture.
+- `data.py` now reads `POTOKSIM` `validation.bin` exactly per `sim/README.md`:
+  80 bytes of header fields (magic, version, seed, counts, frame timing,
+  reserved), then per-episode `u64` index + 9 metadata f32 + `frames × features`
+  f32 + `frames × 4` target f32. `Episode` carries index and metadata; targets
+  keep all four columns, and `WindowDataset` uses the first two (g_roll, g_pitch)
+  for distillation.
+- The README's "76 bytes" disagrees with its own field table (48 + 32 = 80) and
+  with the Rust writer (80 bytes; its `header_size()` says 84). The Python reader
+  follows the documented fields and real bytes; the disagreement is recorded in
+  `ai/FORMAT.md` and needs an owner decision in `sim/` — no files there were
+  touched.
+- The old `POTOK1\0\0` and bare-float32 readers remain as fallbacks for synthetic
+  fixtures. `tests/test_sim_validation.py` packs a handcrafted validation file
+  and checks header, shapes, index, metadata, and target values; all existing
+  tests stay green.
 
-Command: `cargo run --release --bin bench -- --model MODEL.bin --frames 2000 --compare`
+## Stateful student (SPEC_STUDENT.md v1)
 
-## Canonical v2 support (supersedes the earlier integration-risk note)
+- `src/potok_ai/student.py` — `StatefulTCN` (defaults: 2 blocks, width 64,
+  rank 16, 10-value frame = 8 sensors + phase + flags), one frame per `step`,
+  persistent `h` per block. Each block is `tanh(W_h h + W_x x)` followed by a
+  ternary `TSCTLinear` reused from `model.py`. A tick applies the shared blocks
+  1..3 times, mixing loop outputs with `0.8^i` and a learned softmax allocation
+  (`alloc_logits`, AttnRes-style). Head: `g_max·tanh(linear(h))` (two bounded
+  corrections, `g_max = tanh(raw)` with `raw` exported) and
+  `sigmoid(linear_conf(h))`. `reset_state()`, `step(frame)`, `warmup(window)`;
+  all parameters are seeded from a local `torch.Generator`, so global RNG state
+  cannot affect the model. The incoming state is cloned before use: writing it
+  back in place otherwise invalidates tensors saved by autograd (caught by the
+  tiny distillation test).
+- `src/potok_ai/distill_student.py` — CLI with `--teacher-checkpoint --data
+  --out --epochs --seed --device cpu` (plus `--window --loops --lr
+  --conf-weight --conf-temp --limit`). Loads the teacher from a torch checkpoint
+  or a v2 export, scores every 50-frame window, and trains the student at the
+  window's last frame: MSE to `g_teacher` plus MSE of confidence to
+  `exp(-|g_teacher - g_student| / conf_temp)`. State resets at each episode and
+  on a phase-code change (column 8 if present); invalid flags skip the update.
+  Writes a torch checkpoint to `--out` and the binary export to `out.with_suffix(".bin")`.
+- `export.py` — `export_student()` / `load_student_export()` and
+  `ExportedStudent.to_model()`. Header: magic, version 2, `model_kind = 2`,
+  then in_features/width/out_features/rank/n_blocks/n_loops/decay/g_max/flags/
+  n_layers, the same layer records and SHA256 trailer as the teacher format.
+  The teacher's existing header is untouched (kind 1 is still implied by the
+  absence of a `model_kind` field — changing it would break the fixture and the
+  `edge/` reader); student files are rejected by the teacher loader's kind
+  check and vice versa. Exported U/V are effective ternary codes × alpha, so
+  `to_model()` builds with `ternary=False` for a bit-comparable forward.
+- New `tests/test_student.py`: state reset, seed determinism under two different
+  global seeds, 1500-step bounded drift (|h| ≤ 1, finite bounded outputs),
+  export/load round-trip plus tamper and wrong-kind rejection, one tiny CPU
+  distillation step (checkpoint + export written), and phase-change reset.
+- Verification: `uv run pytest -q` → `37 passed`; `uv run ruff check src tests`
+  → clean. `PYTHONPATH=src uv run python -m potok_ai.distill_student --help`
+  exposes the CLI. CPU only; no GPU jobs, no pushes, no files outside `ai/`.
 
-The earlier note warned that `ai/src/potok_ai/export.py` emits `POTOKM1\0`
-named-layer files with dilations, LayerNorm-after-conv and a tanh head while
-this crate only read self-contained `POTM` files. **RESOLVED**: `ai/FORMAT.md`
-v2 is now the canonical spec, implemented in `src/format_v2.rs`, and
-`Runtime::load` dispatches on the magic bytes. The old POTM reader stays only
-for the Rust fixture and the naive baseline; it does not block v2 loading.
+## Smart teacher / scenario holdout (SPEC_SMART.md v1, commit 8894951)
 
-Two defects were found by the cross-check and fixed before it went green:
+- `model.py` adds `SmartConfig` / `SmartTeacher`: a 50x14 window through a
+  causal TCN (4 layers, width 128, TSCT rank 64, dilations 1/2/4/8), FiLM
+  conditioning from the 6 vehicle numbers, two **weight-shared** passes over
+  the same block stack, and AttnRes-style softmax allocation over the two loop
+  outputs with a learned query and content keys. Head = two bounded corrections
+  plus confidence. Width must be a power of two for the existing Hadamard
+  activation quantiser.
+- **FiLM, not a global token**: the conditioning is constant over a flight, so
+  an MLP to per-channel `(gamma, beta)` reaches every frame directly; a token
+  at frame 0 could be attenuated by the residual stack. Documented on
+  `SmartTeacher`.
+- **Loss**: correction MSE divided by the target's per-column std (a constant
+  predictor scores ~1, so it cannot win), plus JEPA 0.05 and MTP K=3 0.02 as
+  spec constants in `SmartConfig`. JEPA reuses `mask_windows`/`JEPAPredictor`
+  with a locally deep-copied EMA of the teacher; MTP predicts the next 3 frames
+  at every in-window position from the shared latent (one teacher forward per
+  step is reused for correction, JEPA source and MTP source).
+- **Data / split**: `data.py` reads the v2 `POTOKSIM` file that the simulator
+  owner's `write_validation` actually emits: 80-byte header with `meta_count=17`
+  in reserved bytes 48..52, then per episode `u64 index` + 17 f32 (legacy 9,
+  6 conditioning, scenario id, split flag), then 14 features and 4 targets.
+  `group_by_scenario` groups by `"scenario_<id>"`; v1 (8 features, 9 metadata)
+  files still read with a zero conditioning vector but cannot train the smart
+  CLI, which needs 14 features and an explicit held-out scenario. No vehicle
+  names or per-vehicle splits exist: all episodes are randomized Potok-M.
+  The Python reader was aligned with the Rust writer's bytes after that writer
+  landed; the invented interim layout was dropped.
+- `train_smart.py` CLI: `--data DIR_OR_FILE --epochs --seed --device cpu --out`
+  plus sizing/limit overrides. It prints RMSE for the two corrections per
+  scenario and `ratio = mean(held-out RMSE) / mean(train RMSE)` with the 1.25
+  acceptance limit. Distillation trains a `StatefulTCN` from a 20-value frame
+  (14 physics features + 6 conditioning) against the teacher with a small
+  (0.1) weight on the simulation target; it exports v2 `model_kind=2` via the
+  unchanged binary layout. `export.py` and `FORMAT.md` document 10 (legacy)
+  vs 20 (smart) `in_features`. Edge is a separate owner.
+- `tests/test_smart.py` covers the v2 reader and scenario split, loop forward
+  shape/bounds, AttnRes weights summing to one, conditioning changing the
+  output, std-normalised loss, per-scenario RMSE and ratio, a 20-feature
+  student export/load round-trip, and one tiny CPU end-to-end step.
 
-1. **TSCT orientation.** `F.linear(x, W)` is `x @ W^T` with `W = (U*s) @ V^T`,
-   so `W[out, in] = U[out,k]*s[k]*V[in,k]`: the `U` index is the linear output
-   and the `V` index is the input. The first attempt transposed them (0.10
-   absolute output error).
-2. **Fused convolution read a partially updated residual.** The dilated
-   depthwise conv must read the block's *input* at earlier timesteps, not the
-   residual stream after this block's writes to those timesteps. A preallocated
-   `block_in: [T*C]` row cache fixes it (0.043 absolute error before).
+## Privileged LoopWM teacher (SPEC_SMART.md, arXiv:2606.18208 idea)
 
-### Fixture cross-check (x86_64, debug)
+- `src/potok_ai/loopwm.py` — `LoopWMConfig` / `LoopWM`: one causal latent encoder
+  (3-tap left-padded conv, width 128 by default), FiLM conditioning from the six
+  vehicle numbers, and **one** `LoopBlock` (pre-norm causal self-attention + FFN)
+  reused on every refinement pass. `refine()` adds the block's *increment* to the
+  latent and exits when `mean ||increment||` drops below `exit_threshold`, hard
+  capped at `max_iters = 6`; `RefineInfo` reports the iteration count and update
+  trace. The readout emits two bounded corrections plus confidence from the last
+  frame. The privileged simulator correction (true wind) is never a forward
+  input — it only enters the training loss. No raw-sensor reconstruction: JEPA
+  heads predict the EMA encoder's latents 3/6/10 frames ahead, MSE weighted 0.05.
+  `exit_threshold` is a tunable knob (default `1e-3` is conservative: a fresh
+  width-128 model's update norms are ~3.7-4.1, so all six passes run; raise it
+  on real data when trading passes for latency is wanted).
+- `train_loopwm.py` CLI (`--data --epochs --seed --device cpu --out`, plus sizing
+  overrides): splits by v2 scenario metadata, trains on the non-held-out cells,
+  prints RMSE per scenario and the held-out/train ratio, distils the LoopWM
+  outputs into the unchanged 20-input `StatefulTCN` (reusing
+  `train_smart.distil_student`), and exports v2 `model_kind=2`. It reuses the
+  smart pipeline's scenario/eval/ratio helpers; `SmartTeacher` and
+  `train_smart.py` are untouched, so both CLIs run side by side.
+- Tiny CPU CLI smoke (synthetic v2 file, width 16, 2 epochs) printed three
+  scenario RMSE rows, `ratio=0.8566 limit=1.25 generalises=yes`, teacher and
+  export paths. `tests/test_loopwm.py` adds shared-weight iterative refinement
+  (forward hook counts 6 calls through the single block), adaptive exit and cap,
+  latent target/prediction shapes, conditioning sensitivity, privileged-target
+  isolation, held-out ratio, and a tiny end-to-end train/distil/export step.
+- Verification: `uv run pytest -q` → `51 passed`; `uv run ruff check src tests`
+  → clean. CPU only; no GPU jobs, no pushes, no files outside `ai/`.
 
-`ai/tests/fixtures/tiny_model.bin`, window
-`(arange(400,f32).reshape(1,50,8)-200)/100`:
+## Unified training engine (SPEC_ENGINE.md v1, commit fd5d2dc)
 
-| output | Rust | `tiny_expected.npy` | abs err |
-|---|---:|---:|---:|
-| g_pitch | -0.42798725 | -0.42798716 | 8.9e-8 |
-| g_yaw | 0.15875198 | 0.15875186 | 1.2e-7 |
-| confidence | 0.52251510 | 0.52251510 | 0 |
+- `src/potok_ai/engine.py` — one CLI (`python -m potok_ai.engine`), one
+  `TrainConfig` and one metrics report. `--model lrs|loopwm-lite|loopwm`,
+  `--stage train|distill|eval`, `--data FILE`, `--out DIR`, `--epochs`, `--seed`,
+  `--device cpu` plus sizing/limit overrides. `out/metrics.json` carries exactly
+  the seven SPEC fields: `model, rmse_train, rmse_held_out, ratio, params, mac,
+  bytes`; the same values are printed as one table. `rmse_train` /
+  `rmse_held_out` are means over the v2 `scenario_<id>` groups, `ratio` reuses
+  `train_smart.generalisation_ratio`, `bytes` is the real export size on disk.
+- **Dispatch**: `loopwm` calls the existing `train_loopwm.run` (and its
+  `train_smart` helpers) unchanged; `lrs` and `loopwm-lite` go through the
+  shared adapter loop. Every adapter implements `build`, `train_step`,
+  `evaluate`, `export`, `load`, `mac`, `count_params`. `distill` is the same
+  pipeline as `train` — all three families already learn from a teacher, so
+  there is no second training path. `eval` loads an export and scores it
+  without training.
+- **LRS adapter**: wraps `StatefulTCN` / `smart_student_config` (20-value
+  frames = 14 features + 6 conditioning), one optimizer step per tick after
+  the window, export via `export_student` (`out/lrs.bin`), load via
+  `load_student_export().to_model()`. `train_smart.py` and `train_loopwm.py`
+  were not changed.
+- `src/potok_ai/loopwm_lite.py` — Perceiver encoder (50x14 -> 16 tokens, width
+  64) via rank-8 cross-attention; ONE parameter-shared `LiteBlock` applied at
+  most twice with adaptive exit on the mean latent-update norm (hard cap 2,
+  `exit_threshold` configurable); heads for the full LoopWM's 3/6-frame latents
+  plus a bounded 2-value correction and confidence. No raw reconstruction:
+  latent targets are detached outputs of the teacher's own latent heads, the
+  reference correction is loss-only and never a forward input. The teacher is
+  kept out of the module tree (`object.__setattr__`), so it is never optimised
+  or exported; `target_proj` is training-only and excluded from both the
+  export and the reported parameter count.
+- **MAC**: `analytical_mac()` counts every projection, attention score/sum and
+  FFN matmul for one window inference: default 50 frames, 16 tokens, width 64,
+  rank 8, two passes = **289 984 MAC (~0.29 M)**, inside SPEC_ENGINE.md's
+  0.2-0.4 M band. Full-width attention here would be ~0.8 M; the rank-bottleneck
+  attention and FFN are the deliberate latency trade. `loopwm_mac()` gives the
+  privileged teacher's analytic count with the same convention.
+- **Determinism**: one `seed_everything()` for all families (torch + numpy +
+  one CPU thread). `StatefulTCN` also seeds its own local generator from
+  `--seed`. Tests run seeds 7/7/9 and assert bit-equal exports for repeats and
+  different weights for a changed seed.
+- `tests/test_engine.py` (10 new tests): CLI help via subprocess, adapter
+  registry and `train_loopwm` dispatch (monkeypatched), lite shape/exit/shared
+  weights/teacher isolation, analytic MAC band, JSON schema and table, one tiny
+  CPU end-to-end per family, `eval` stage, deterministic seeding. Verification:
+  `uv run pytest -q` -> `61 passed`; `uv run ruff check src tests` -> clean.
 
-Documented tolerance: **1e-6 absolute** (~8 ULP at this magnitude); measured
-max error 1.2e-7, about one ULP. The differences come from fp32 accumulation
-order between Rust and PyTorch's CPU kernels, not from different math.
-`tests/v2_fixture_test.rs` parses the `.npy` header directly (no numpy
-dependency), verifies the checksum refusal and checks that the service
-runtime loads v2 and mutes on a forbidden phase.
+## Ideal loop — training side (SPEC_ENGINE_IDEAL.md §4-§5)
 
-`cargo test`: 19/19 pass, no warnings. `cargo check`: clean. All files read
-from `ai/` were read-only; nothing outside `edge/` was modified.
+- `physics.py` is the single source of truth for the residual baseline: a P term
+  on `alpha_deg`/`beta_deg` plus a tanh-bounded D term on `a_lat_resid`,
+  clipped to [-1, 1]; a window model reads it at the final frame. All three
+  families train and evaluate the **command** `b(x) + Delta`, so the network
+  learns the residual `target - b(x)`. `--residual/--no-residual` defaults on;
+  disabling it restores the old absolute-command loss. Tiny CPU smoke:
+  residual `rmse_train=0.209017` vs absolute `0.272069` (seed 5, 2 epochs) —
+  the flag changes training, not just the config hash. The baseline lives in
+  Python only; `edge/` must apply the same formula at deployment, which was
+  not touched.
+- `curriculum.py`: stage names `calm -> gust -> shear -> sensor_fault`, scenario
+  stage = `scenario_id % 4` (a stable placeholder until v2 metadata carries the
+  wind-cell semantics). Eligibility is cumulative by `epoch // epochs_per_stage`;
+  the per-epoch shuffle is seeded by `(seed, epoch)` with stdlib `random`, never
+  the global RNG. Wired into the engine's shared loop and into the legacy
+  `train_loopwm` path; `--curriculum/--no-curriculum` defaults on. Training now
+  excludes the held-out scenarios (it previously fed all of them in).
+- `calibration.py`: split-conformal calibration on held-out episodes. A sample
+  is correct when its command error <= `--calib-tol` (default 0.1). Temperature
+  scaling is searched in at most 3 passes (`raw_ece` and achieved `ece` are both
+  reported); the adaptive-compute threshold is the `ece_target` quantile of the
+  calibrated confidence, not 0.5. `--calibrate` writes `calibration.json`
+  (threshold, ece, raw_ece, coverage, temperature, loops, n, target_ece, model,
+  seed, config_hash). On the toy distribution the ECE target 0.05 is met; on the
+  tiny 2-epoch CPU smoke the model's confidence is trained toward a constant
+  0.95, so the honest reading is `ece=0.42` after calibration (raw `0.76`) and
+  the gate is **not** passed — no claim is made that it is.
+- `metrics.json` keeps the seven SPEC_ENGINE fields and appends `mae`,
+  `max_error`, `ece`, `seed`, `config_hash` (sha256 of the sorted config, 16
+  hex chars). MAE/max error come from held-out command errors; ECE is the raw
+  value unless `--calibrate` is set, in which case it matches `calibration.json`.
+- New tests: `test_residual.py` (baseline algebra, clipping, zero-residual
+  identity, gradient descent to the reference), `test_curriculum.py` (stage
+  order, seeded determinism, cumulative inclusion, pacing), `test_calibration.py`
+  (ECE, toy target, hard loop cap, input validation), two engine wiring tests
+  plus the extended schema/calibration end-to-end test. `sim/`, `edge/` and
+  `docs/` were not touched.
 
-## 2026-11-22 — stateful student and speculative dispatch
+## Confidence root cause: logits + isotonic (follow-up)
 
-Added `src/student_runtime.rs` (v2 `model_kind=2` reader, dequantized TSCT
-factors, per-frame state, warmup), `src/speculative.rs` (`SpeculativeRuntime`
-holding the existing windowed teacher **and** the student), `src/bin/bench_spec.rs`
-(p50/p99 for all three dispatch paths), and `tests/speculative_test.rs`
-(12 tests) plus `tests/real_models_spec_test.rs` (3 tests, skips when the data
-volume is not mounted). Wired through `src/lib.rs`, `src/runtime.rs`
-(`infer_window`, `max_correction`), `src/uart.rs` (`handle_spec_request`) and
-`src/frame.rs` (`PHASE_BURN` alias). No files outside `edge/` were modified.
+- The confidence head's **pre-sigmoid logit** is now the calibration input.
+  `StatefulTCN.step()` stores it and `confidence_logit()` exposes it;
+  `LoopWM.head_logits`/`head_output` and `LiteModel.head_logits`/`head_output`
+  split the raw 3-logit head from the bounded display outputs. The binary
+  export is unchanged: `head_conf.weight` / `head_conf.bias` were already fp32
+  layer records, and `ExportedStudent.confidence_logit(z)` computes the same
+  scalar as `dot(weight, z) + bias`. All old readers keep working; sigmoid is
+  still the final runtime step.
+- **Required Rust reader change (NOT made; `edge/` untouched).**
+  `edge/src/student_runtime.rs:615-616` already computes the logit as
+  `let conf = dot(&head_conf_w[..w], &z) + head_conf_b[0];` and immediately
+  sigmoid`es it into `out[2]`. To use calibration, keep `conf` in a field (or
+  return it from `infer`), read `calibration.json`, apply `sigmoid(conf /
+  temperature)` when `method == "temperature"` or the isotonic bin map when
+  `method == "isotonic"`, and compare the result against `threshold` for
+  adaptive compute instead of the fixed `0.7` in `speculative.rs`. **No binary
+  format or checksum change is needed.** The `edge/` reader currently emits the
+  uncalibrated sigmoid, so its confidence does not yet match Python's calibrated
+  value.
+- `calibration.py` now fits temperature first (3-pass cap) and falls back to
+  pool-adjacent-violators isotonic when a saturated head makes temperature
+  ineffective; `method`, `raw_ece`, `temperature_ece`, `ece`, `threshold`,
+  `coverage` and `n` are all written to `calibration.json`. On the toy constant
+  logit case raw ECE 0.30 (all-correct fraction 0.8 vs confidence 0.5) drops to
+  0.00 via isotonic. ECE is measured **in-sample on the held-out set**, so `n`
+  is part of the report; with `n = 4` that number is not independent evidence.
+- Root cause on the training side: the head no longer regresses toward a
+  constant 0.95. `confidence_target(error) = exp(-error/tol)` supervises it
+  toward empirical correctness, and `confidence_spread_loss` adds a reward for
+  spread on uncertain cells with a hard cap of **0.05** (0.1 weight on the MSE
+  target is unchanged). Wired into all three families and the legacy LoopWM
+  teacher. LRS now takes one optimizer step per episode so its spread reward
+  has a real tick batch.
+- **Smoke result (honest): ECE = 0.000000 for all three models** in 1 epoch
+  (`python3 scripts/smoke_engine.py --out /tmp/opencode/ideal-smoke-report`,
+  seed 1, 20 sim episodes, `--calibrate`; report outside the repo). The gate is
+  met, but this pass is **degenerate**: inspecting `calibration.json` gives
+  `coverage = 0.0`, i.e. every held-out command error exceeds `tol = 0.1`
+  (MAE 0.74-1.32), so isotonic maps every sample to confidence ~0 and ECE is
+  trivially zero. The previous constant-0.95 reading was 0.28-0.53.
+- Evidence for a *non-degenerate* pass on the synthetic CPU fixture
+  (`loopwm-lite`, width 32, seed 1, 16 train windows): 1 epoch / `n=4` →
+  coverage 0.00, raw ECE 0.575, ECE 0.000 (isotonic); 5 epochs / `n=20` →
+  coverage 0.00, raw 0.236, ECE 0.009 (temperature); 15 epochs / `n=20` →
+  coverage 0.00, raw 0.142, ECE 0.001; **40 epochs / `n=20` → coverage 0.25,
+  raw 0.075, ECE 0.013**. So a non-degenerate ECE <= 0.05 with a confident
+  subset first appears around **40 epochs and >=20 held-out windows** on that
+  fixture; the 1-epoch smoke's zero is a calibration of an always-wrong model,
+  not a quality claim. The gate numbers were not changed.
+- Pre-existing, not fixed here: reloading a **student** export is not bit-exact
+  (`blocks.0.proj.U` is stored as effective codes; a fresh student's forward
+  differs by ~0.007 in the corrections). The export accessor for the raw
+  confidence weights is exact (they are plain fp32), and the eval stage
+  calibrates the exported model's own logits; a fidelity fix belongs in the
+  export owner's lane.
+- New tests: `tests/test_confidence_logits.py` (step/export/window logit access)
+  and the logit/isotonic/spread cases in `tests/test_calibration.py`. No files
+  outside `ai/` were modified.
 
-### Format mismatch found against the real export — FIXED
+## Real training on OR-aligned simulator data (2026-11-22, seed 1, run 2)
 
-The first reader was written from SPEC_STUDENT.md alone, using a 40-byte
-header (`width, blocks, loops, decay, g_max, n_records`) and a private fixture.
-The real `ai/src/potok_ai/export.py::export_student` file uses the canonical
-v2 header extended with `model_kind`: **56 bytes** —
-`in_features, width, out_features, rank, n_blocks, loops, decay, g_max, flags,
-n_layers` — and 20 layer records (`blocks.{b}.proj` TSCT,
-`blocks.{b}.rec_h/rec_x`, `stem`, `norm`, `alloc_logits`, `g_max`,
-`head_corr`, `head_conf`). The per-frame input is **10** floats (8 sensors +
-phase + flags), not 8. The Python forward also has a stem projection, a
-LayerNorm before the head, learned `alloc_logits` softmax, **outer** loop over
-iterations with **inner** block chain, and scales corrections by
-`tanh(|g_max|)` from the `g_max` tensor. The reader and the in-crate fixture
-writer were rewritten to this exact layout; `ai/` was not touched. TSCT
-dequantization keeps the canonical square-map convention
-(`W[out,in] = U[out,k]·alpha_u·s[k]·V[in,k]·alpha_v`) already used by the
-teacher reader. LayerNorm uses the **biased** variance (divide by n): the first
-attempt used n−1 and read 0.9 % low against the Python model. Real-export
-cross-check on a fixed 10-float frame: Rust
-`[0.07282478, -0.02531921, 0.9089091]` vs Python
-`[0.07282476, -0.02531959, 0.90890908]` — max error **5.3e-7**, asserted at
-1e-6 in `real_models_spec_test.rs`.
+CPU-only (`torch 2.15.0+cpu`, one thread per process), no pushes, no source files
+outside `ai/` and `scripts/` modified. Artifacts: `ai/out/run2/` (raw exports per
+model, consolidated `*.metrics.json` / `*.calibration.json`, `REPORT.md`,
+`sim.toml`, `data/`, `logs/`). `ai/out/run1/` is **superseded**: the sim owner
+changed `sim/config/default.toml` to the OpenRocket-derived config at 20:36,
+after run 1's data had been generated. Run 2 copies the current OR-derived
+default verbatim and patches only `duration_s` 30 → 12.
 
-Two naming/threshold facts, recorded rather than silently changed:
+### Exact commands
 
-- `protocol/uart.yaml` calls phase 0 **BURN**; the edge frame copy calls it
-  `PHASE_IDLE`. Added `PHASE_BURN` as an alias of the same byte and used it in
-  the phase gate; no protocol file was edited.
-- Both model heads are `tanh`-bounded by `g_max`, so `|g_t - g_s| <= 2·g_max`
-  and the specified `> 3·g_max` divergence trip is unreachable with shared
-  bounds. Kept the literal 3.0 as the default `divergence_factor`, with a
-  public knob to exercise the log+warmup path in tests. Separately, the legacy
-  POTM teacher returns **raw** head logits through `infer_window`, so the
-  dispatch clamps both models to the system bound before applying or
-  comparing them (this also fixed an 80 ms/cycle warmup storm).
+```bash
+cd /home/sehaxe/potok-m/sim && cargo build --release -q -p potok-cli
 
-### Verification
+# Config: copy the CURRENT OR-derived default; ONE line changed, duration_s
+# 30.0 -> 12.0 (before ~10 s the reference optimizer is zeroed by the boost
+# interlock, so no learnable correction exists). All OR physics fields untouched.
+# sha256 of run2/sim.toml prefix: e57ead2c63edfe55
+cp sim/config/default.toml ai/out/run2/sim.toml
+sed -i 's/^duration_s = .*/duration_s = 12.0/' ai/out/run2/sim.toml
 
-- `cargo check --all-targets`: clean, no warnings.
-- `cargo test`: **35/35 pass** (5 lib, 4 model, 1 optimized, 7 runtime,
-  12 speculative, 3 real-export, 3 v2 fixture). `cargo fmt` applied.
-- Acceptance tests cover model_kind dispatch, student determinism and state
-  reset, warmup replay, BURN/motor-armed phase gate, low-confidence teacher
-  call, 20-frame forced-check cadence and its reset, CRC/seq bypass,
-  checksum refusal, 30 s (1500 steps) finite bounded state, divergence log,
-  and a <10 ms worst-case cycle.
-- Release benchmark, 2000 synthetic frames, `bench-spec` (x86_64 dev box):
-  normal p50/p99 **69.8 / 93.1 us**, low-confidence **186.8 / 224.7 us**,
-  forced-check **132.1 / 205.2 us**; worst cycle 0.835 ms incl. 0.61 ms UART
-  wire, well under 10 ms.
-- Release benchmark with the **real exports** (`distill.bin` teacher,
-  `student.bin` student): normal **47.1 / 87.0 us**, low-confidence
-  **330.5 / 350.5 us**, forced-check **236.4 / 332.9 us**; worst cycle
-  **0.960 ms** / 10 ms. Debug-build integration run (600 frames) measured
-  p99 0.84 / 6.56 / 6.92 ms — also under budget.
-- At most one teacher call per cycle is enforced by construction (single
-  `if low_conf || forced` block), a `debug_assert!` on the counter delta, and
-  a benchmark assertion `teacher_calls <= frames`.
+# Data: 100 generated episodes per split -> scenario(id % 20) keeps 80 train
+# episodes (16 scenarios) and 20 held-out episodes (scenarios 16-19).
+cd sim
+./target/release/potok-cli --config ../ai/out/run2/sim.toml --seed 1 --episodes 100 \
+    --physics-features --split train --validation-out /tmp/opencode/potok-train-or
+./target/release/potok-cli --config ../ai/out/run2/sim.toml --seed 1 --episodes 100 \
+    --physics-features --split held-out --validation-out /tmp/opencode/potok-heldout-or
+cp /tmp/opencode/potok-train-or/validation.bin   ../ai/out/run2/data/train_validation.bin
+cp /tmp/opencode/potok-heldout-or/validation.bin ../ai/out/run2/data/heldout_validation.bin
 
-Skipped: no GPU jobs, no pushes, no `ai/` edits. Outcome of a real A/B of
-student vs teacher quality is out of scope here — this change only wires and
-times the dispatch.
+# Training: from ai/, PYTHONPATH=src .venv/bin/python -m potok_ai.engine,
+# --stage train --seed 1 --device cpu --window 50 --batch 8
+# --width 64 --rank 32 --heads 4 --max-iters 2 --calibrate
+# (residual + curriculum are the engine defaults, left ON).
+python -m potok_ai.engine --model lrs --data out/run2/data --out out/run2/lrs \
+    --epochs 40 --limit 2 --eval-limit 560 --lr 0.03 \
+    --lite-width 64 --attn-rank 8 --lite-iters 2 --latent-tokens 16 --calibrate
+python -m potok_ai.engine --model loopwm-lite --data out/run2/data --out out/run2/lite \
+    --epochs 100 --limit 560 --eval-limit 560 \
+    --lite-width 64 --attn-rank 8 --lite-iters 2 --latent-tokens 16 --calibrate
+python -m potok_ai.engine --model loopwm --data out/run2/data --out out/run2/loopwm \
+    --epochs 40 --limit 560 --eval-limit 560 \
+    --lite-width 64 --attn-rank 8 --lite-iters 2 --latent-tokens 16 --calibrate
 
-## 2026-11-22 — Python student forward update (supersedes the cross-check above)
+# Harness (unchanged, seed 1, 20 episodes, 1 epoch, its own 8 s temp data),
+# rerun AFTER the config change:
+python3 /home/sehaxe/potok-m/scripts/smoke_engine.py
+uv run pytest -q && uv run ruff check src tests
+```
 
-`ai/src/potok_ai/student.py` changed during training work; read-only, not
-modified. `src/student_runtime.rs` now matches it exactly. The new real export
-(`potok-m-data/models/student.bin`, 75 611 B, g_max 0.910741) loads and runs.
+### Data counts
 
-### Spec deviations (authoritative, replace the older SPEC_STUDENT.md reading)
+Generated 100 episodes per split with `--physics-features`; the scenario split
+kept **80 train** (16 scenarios × 5 episodes) and **20 held-out** (4 scenarios
+16–19 × 5 episodes). 600 frames × 14 features each. Held-out calibration uses
+`eval_limit = 560` windows per held-out scenario (n = 2240 for the window
+families; LRS scores every tick of every held-out episode, n = 11020).
 
-1. **Recurrent state is leaky.** Python
-   `_StateBlock.forward`: `candidate = tanh(rec_x(x) + rec_h(h_prev))`,
-   `h = 0.8*h_prev + 0.2*candidate`, and the TSCT projection is applied to the
-   **new** `h`. SPEC_STUDENT.md's `h = tanh(W_h h_prev + W_x x)` with no carry
-   is obsolete. The 0.8/0.2 coefficients are literals in the Python forward,
-   not the model's `decay` field.
-2. **Final feature is `LayerNorm(total + source)`**, where `total` is the
-   decayed/allocated sum of loop outputs and `source` is the last block's
-   output of the last iteration (the stem vector is overwritten by the block
-   chain). Normalizing `total` alone is obsolete.
-3. **Head:** `corrections = tanh(|g_max|) * tanh(head_corr(z))`,
-   `confidence = sigmoid(head_conf(z))`, with `g_max` taken from the exported
-   tensor. This part already matched; kept unchanged.
+### Results (exact values from `out/run2/*/metrics.json`)
 
-The module doc in `src/student_runtime.rs` carries the same three deviations.
-Dispatch wiring (one teacher call per cycle, 20-frame forced check, BURN gate,
-CRC/seq bypass, divergence log) is unchanged.
+| model | rmse_train | rmse_held_out | ratio | ece | params | mac | bytes | pass |
+|---|---|---|---|---|---|---|---|---|
+| lrs | 0.7629318641176421 | 0.7549866115556559 | 0.9893352419271745 | 3.223263219298432e-05 | 22439 | 58816 | 78171 | PASS |
+| loopwm-lite | 0.773423373081182 | 0.7573962244702368 | 0.9792776515828635 | 0.0003740222745684038 | 34819 | 289984 | 150095 | PASS |
+| loopwm | 0.291805042290809 | 0.358268699214643 | 1.2277673353485004 | 2.973811673103098e-19 | 83075 | 6231744 | 78171 | PASS |
 
-### Cross-check and verification
+Calibration honesty: `lrs` coverage 0.000091 (1/11020), `loopwm-lite` 0.000446
+(1/2240), `loopwm` 0.876786. All three ECE ≤ 0.05, but the first two are
+**marginal** — a near-zero-confidence head on an almost-always-wrong model, not
+accuracy. `loopwm` is the genuinely non-degenerate result. The physics baseline
+saturates at ±1 on these features while reference commands are ±0.12, so
+absolute RMSE stays high for the two students; the ratio gate is the meaningful
+comparison. `bytes`/`mac` for `loopwm` are the exported student binary and the
+privileged teacher's analytic MAC, respectively (SPEC_ENGINE.md convention).
 
-Python goldens regenerated from the **new** export with the `ai` venv
-(`load_student_export(...).to_model().step/warmup`), read-only. Rust errors
-are at most **1e-8**, asserted at 1e-5 in `tests/real_models_spec_test.rs`:
+### Epoch / LR selection (no gate or architecture was changed)
 
-| case | Rust `[g0, g1, confidence]` | Python reference |
-|---|---|---|
-| zero state, one frame | `[0.012839871, -0.110565000, 0.813980000]` | `[0.012839884, -0.110564999, 0.813979983]` |
-| after 3-frame warmup | `[0.004873989, -0.107443390, 0.817990240]` | `[0.004873985, -0.107443415, 0.817990184]` |
-| after 50-frame warmup | `[-0.002074861, -0.110135900, 0.818366600]` | `[-0.002074862, -0.110135905, 0.818366587]` |
+- `loopwm` at 100 epochs **failed** ratio (1.315010 > 1.25, ECE 0.0142,
+  coverage 0.9156). Probes: 40 ep → 1.227767, 60 ep → 1.223427, 80 ep → 1.252631.
+  The final run uses 40 epochs — the documented minimum for non-degenerate
+  calibration — with coverage 0.8768 and ECE ≈ 0.
+- `lrs` at `--lr 0.01` (40/80 epochs, `--limit 2`/4) had coverage exactly 0 on
+  the OR config (min held-out error 0.108); `--lr 0.03` gives 1 correct sample.
 
-The 5.3e-7 agreement recorded in the previous section was against the **old**
-export and old forward; it is superseded by the table above.
+### Smoke harness (`scripts/report.json`, unchanged script, OR config)
 
-- `cargo fmt`, `cargo check --all-targets`: clean.
-- `cargo test`: **35/35 pass**, including the 30 s bounded-state test (the
-  convex `0.8/0.2` update keeps `|h| <= 1`).
-- Release bench with the new real exports, 2000 frames: normal p50/p99
-  **47.4 / 67.3 us**, low-confidence **294.4 / 461.5 us**, forced-check
-  **285.4 / 372.5 us**; worst cycle **1.071 ms** incl. 0.61 ms UART wire,
-  under the 10 ms budget.
+| model | rmse_train | rmse_held_out | ratio | ece | params | mac | bytes | pass |
+|---|---|---|---|---|---|---|---|---|
+| lrs | 0.946878 | 0.940006 | 0.992743 | 0.000000 | 22439 | 58816 | 78171 | PASS |
+| loopwm-lite | 1.053168 | 1.085928 | 1.031106 | 0.000000 | 11043 | 82528 | 54991 | PASS |
+| loopwm | 1.474050 | 1.546667 | 1.049264 | 0.049180 | 83075 | 6231744 | 78171 | PASS |
 
-## 2026-11-22 — smart 20-input student export
+Exit 0 (all gates pass), but `lrs`/`loopwm-lite` ECE = 0 is **degenerate**
+(8 s data, all-zero reference commands, 4 held-out windows → every sample
+incorrect) and `loopwm`'s 0.0492 only just clears 0.05. Not quality evidence;
+the 12 s run above is the real validation.
 
-`ai/FORMAT.md` and `ai/src/potok_ai/export.py` (read-only) confirm the binary
-layout is unchanged: `model_kind=2`, 56-byte header, and `in_features` is the
-full frame width — **10** for the legacy student (8 sensors + phase + flags),
-**20** for the smart student (14 physics features followed by 6 conditioning
-numbers, `mass_kg, area_m2, cd0, static_margin_cal, thrust_peak_n,
-gyro_noise`). No new header/meta fields were added in the file itself; the
-conditioning travels in the frame, not in a separate record.
+`uv run pytest -q` → `85 passed`; `uv run ruff check src tests` →
+`All checks passed!`. Gates, architecture and thresholds were not changed.
 
-Changes inside `edge/`:
+## Skipped (as of run 2, OR-derived config, 12 s)
 
-- `src/student_runtime.rs`: added `PHYSICS_FEATURES = 14`, `COND_FEATURES = 6`,
-  `SMART_FRAME_FEATURES = 20`, `LEGACY_STUDENT_FEATURES = 10` and a
-  `smart_frame(physics, conditioning)` builder. The loader already read the
-  width from the header (`stem.weight` is `[width, in_features]`), so a 20-input
-  export needed no reader change; both widths are now named and documented.
-  `step(&[f32])` keeps zero-padding shorter frames exactly like Python's
-  `_as_frame`, so legacy 10-input exports still work.
-- `src/speculative.rs`: `SpeculativeRuntime::set_conditioning([f32; 6])`
-  supplies the six numbers appended to every smart frame. When the student
-  reports 20 inputs, indices 8/9 are **not** overwritten with phase/flags
-  (they are physics features there); the conditioning is written to 14..20.
-  Legacy 10-input students keep the old phase/flags behaviour.
-- New `tests/fixtures/smart_student.bin` (78 171 B) and
-  `tests/fixtures/smart_student_expected.txt`, generated by a read-only script
-  that called `ai`'s `StatefulTCN(smart_student_config(seed=4242))` and
-  `export_student()` through the `uv` venv, then reloaded the file with
-  `load_student_export().to_model()` to produce goldens. Nothing in `ai/`,
-  `sim/` or `docs/` was written.
-- New `tests/smart_student_test.rs`: width assertion, three Python
-  cross-check cases (zero state, 3-frame and 50-frame warmup), and a dispatch
-  run with the smart student plus conditioning.
-
-### Verification
-
-- Rust vs Python for the smart export: single
-  `[0.01507757, 0.04972160, 0.50769144]`, warm3
-  `[0.04553854, 0.05702014, 0.50885016]`, warm50
-  `[0.01920378, 0.06179270, 0.49901032]`; **max |error| = 5.96e-8**, asserted
-  at 1e-5.
-- The 10-input student at `potok-m-data/models/student.bin` still loads and its
-  Python goldens still pass (the earlier section's table is unchanged).
-- `cargo fmt`, `cargo check --all-targets`: clean. `cargo test`: **38/38 pass**,
-  including the BURN phase gate, CRC/seq bypass, one-teacher-per-cycle and
-  worst-case-cycle tests. Dispatch, phase gate and CRC behaviour unchanged.
-
-## 2026-11-22 — lowlat profile
-
-Added `potok-protocol` as a path dependency (`../protocol/potok-protocol`,
-read-only) and `src/lowlat.rs`: a `FrameLayout` adapter whose encode/decode go
-through `potok_protocol::encode_lowlat_request` / `decode_lowlat_request` /
-`encode_lowlat_reply`. Magic, CRC, phase and version are checked by the
-generated codec; protocol errors map onto `FrameError` (a new `BadPhase` variant
-carries the rejected byte). The 14 int16 features are dequantized with
-`LOWLAT_REQUEST_FEATURES_SCALES`; reply corrections are quantized with the
-generated reply scales. Pressure/temperature/battery_mv (indices 10/12/13) are
-decoded but not fed to the model, whose input uses the 8 sensors + height +
-pitot. `compute_us` is written in 100 us units, saturating at 255 (25.5 ms),
-from the dispatch-only duration recorded through the new
-`FrameLayout::note_compute` hook (a no-op for compat). No heap allocation in
-either adapter method.
-
-`FrameLayout` gained `request_len` / `reply_len` (with a default `wire_bytes`),
-so `run_loop` no longer hardcodes 56/14-byte buffers and measures dispatch time
-for the reply field. `uart::serve_with_layout` lets the `infer` binary pick a
-layout; `serve` stays compat. `infer` now accepts `--profile compat|lowlat`
-(default compat) and defaults the baud to **921600** for compat and
-**2000000** for lowlat; `--baud` overrides either. The config profile is a CLI
-choice only — no runtime auto-detection, since the magics differ and firmware
-owns the selection.
-
-`bench-spec` accepts `--profile compat|lowlat|both` (default both) and
-`--baud N`, and prints bytes per cycle, wire time at the chosen baud and
-p50/p99 of the full cycle (encode request -> decode -> dispatch -> encode
-reply, CRC and quantize included).
-
-### Verification
-
-- `cargo check --all-targets`: clean, no warnings. `cargo fmt` applied.
-- `cargo test`: **44/44 pass**. New `tests/lowlat_test.rs` (6 tests): round trip
-  and dequantization, bad CRC/magic/version/phase, int16 saturation at
-  `i16::MIN/MAX`, the generated golden request/reply bytes re-encoded
-  byte-identically, BURN phase gate plus three-miss disable, and dispatch with
-  both profiles against both the 10-input and 20-input student.
-- No `protocol/`, `ai/`, `sim/` or `docs/` files were written; the dependency is
-  a read-only path reference.
-- Release bench, 2000 synthetic frames, default bauds, 2026-11-22:
-  - compat: **70 B/cycle**, wire **607.6 us @ 921600**, full cycle p50/p99
-    **167.3 / 273.3 us** (p99 + wire 880.9 us).
-  - lowlat: **58 B/cycle**, wire **232.0 us @ 2000000**, full cycle p50/p99
-    **168.9 / 260.0 us** (p99 + wire 492.0 us).
-  Both stay under the 10 ms dispatch budget; lowlat saves ~17% wire bytes and
-  ~2.6x wire time, with essentially the same CPU cost.
-
-## 2026-11-22 — calibration map on the inference side
-
-Landed the reader side of the calibration contract documented in
-`ai/BUILD_LOG.md` (read-only). New `src/calibration.rs`, wired into the
-student and the speculative dispatch. No `ai/`, `sim/`, `protocol/` or
-`docs/` files were touched.
-
-- `Calibration::{from_file, from_json, apply, apply_logit, threshold}`. The
-  runtime uses `apply_logit` on the head's pre-sigmoid scalar, so temperature
-  is exactly Python's `sigmoid(z / T)` even for a saturated head (the case the
-  Python fitter falls back to isotonic for); `apply(raw_sigmoid)` is the
-  probability-facing API and is equivalent only before saturation. Isotonic
-  looks up the PAVA step map by `sigmoid(logit)`. `threshold()` returns the
-  held-out quantile from the same file. `serde`/`serde_json` added (both
-  already in the local registry cache; `--offline` build verified),
-  diagnostics are ignored so future Python fields do not break the reader.
-- `StudentRuntime::new` keeps the old behaviour with a **LOUD** stderr line
-  and an identity map + 0.7 threshold. `with_calibration` (in-memory) and
-  `with_calibration_file` (I/O, hard error on a bad file) are the new seams.
-  `step` applies the map to `out[2]`; the two correction outputs are untouched.
-- `SpeculativeRuntime::new` takes its `confidence_threshold` from the
-  student's calibration, so the file drives the low-confidence branch.
-  `DEFAULT_CONFIDENCE_THRESHOLD` now aliases `calibration::FALLBACK_THRESHOLD`
-  (one source of truth). Added `load_with_calibration(teacher, student,
-  calibration)` for the file-based path. The binary CLIs do not yet expose a
-  `--calibration` flag; `bench_spec` overrides the threshold itself.
-
-### Format finding (record, do not paper over)
-
-`calibration.py::CalibrationResult.as_dict()` writes `method`, `temperature`,
-`threshold`, plus diagnostics (`raw_ece`, `ece`, `temperature_ece`, `coverage`,
-`n`, `loops`, `target_ece`, `model`, `seed`, `config_hash`) — but **no isotonic
-map**. Temperature files load as-is. A file with `method=isotonic` and no map
-is refused with a schema error naming the cause, rather than silently returning
-uncalibrated confidence. The reader accepts the map at top level (`bins` +
-`values`) or nested under `isotonic`, with `n` upper edges or `n+1` edges
-(normalised on load). Whichever shape the Python writer adopts, no invented
-numbers are used here.
-
-### Verification
-
-- `cargo fmt`; `cargo check --all-targets` clean (no warnings).
-- `cargo test --all-targets`: **all green**. New `tests/calibration_test.rs`
-  (6 tests) covers identity fallback, temperature map, isotonic map, threshold
-  driving dispatch, malformed/missing file failing loudly, and no-file
-  backward compatibility; 8 module tests pin the parser, both map forms, and
-  the saturated-logit path.
-  `cargo test --all-targets --release`: all green, including the tight
-  latency tests (real-export low-conf p99 well under 10 ms).
-- The debug-only `real_exports_dispatch_and_report_all_three_paths` p99 budget
-  (10 ms) fails on this shared host at ~10.4-11.3 ms. **Pre-existing**: the
-  same test fails at 11.25 ms on clean HEAD with this change reverted. Release
-  is the authoritative gate for that test and passes.
+- No GPU wheels, no A/B runs, no push. The 3-seed statistical protocol is still
+  unrun; this is one seed (1).
+- LoopWM-lite is trained against a randomly initialised teacher unless a
+  `loopwm.pt` from a `loopwm` stage sits in the same `--out` dir; the two real
+  runs used separate dirs, so lite's latent targets were random. Its gates pass
+  but its RMSE is not comparable to `loopwm`'s.
+- The 0.3–0.6 ms Pi latency estimate and an OpenRocket-derived aero card run are
+  not measured here. `sim/`, `edge/`, `protocol/` and `docs/` were not touched.
