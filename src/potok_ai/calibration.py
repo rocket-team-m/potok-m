@@ -39,9 +39,13 @@ class CalibrationResult:
     loops: int  # search passes, <= max_loops
     n: int
     target_ece: float = DEFAULT_TARGET_ECE
+    # Isotonic step map: upper edges of raw-sigmoid-confidence intervals and the
+    # calibrated value per interval. None when temperature scaling was selected.
+    bins: tuple[float, ...] | None = None
+    values: tuple[float, ...] | None = None
 
     def as_dict(self) -> dict:
-        return {
+        payload = {
             "threshold": self.threshold,
             "ece": self.ece,
             "raw_ece": self.raw_ece,
@@ -53,6 +57,12 @@ class CalibrationResult:
             "n": self.n,
             "target_ece": self.target_ece,
         }
+        if self.method == "isotonic" and self.bins is not None and self.values is not None:
+            # Top-level `bins` + `values` is the shape the edge reader accepts;
+            # temperature files stay byte-for-byte backward compatible.
+            payload["bins"] = list(self.bins)
+            payload["values"] = list(self.values)
+        return payload
 
 
 def correctness(error: np.ndarray, tol: float = DEFAULT_TOL) -> np.ndarray:
@@ -115,6 +125,63 @@ def isotonic_calibration(confidence: np.ndarray, correct: np.ndarray) -> np.ndar
     return result
 
 
+def isotonic_step_map(confidence: np.ndarray, correct: np.ndarray
+                      ) -> tuple[list[float], list[float]]:
+    """Collapse the PAVA fit into upper edges and values an edge reader can apply.
+
+    ``isotonic_calibration`` returns one fitted value per sample, constant inside
+    each pooled block. Emit one bin per block with the block's largest raw
+    confidence as its upper edge: the runtime looks up ``sigmoid(logit)``, maps
+    ``p <= edge`` to that block's value, and holds the last value past the final
+    edge. This is a pure re-encoding of the same fit, not a different algorithm.
+    """
+    conf = np.asarray(confidence, dtype=np.float64).ravel()
+    ok = np.asarray(correct, dtype=np.float64).ravel()
+    fitted = isotonic_calibration(conf, ok)
+    order = np.argsort(conf, kind="stable")
+    ordered_conf, ordered_fit = conf[order], fitted[order]
+    bins: list[float] = []
+    values: list[float] = []
+    block_start = 0
+    for i in range(1, ordered_conf.size + 1):
+        if i == ordered_conf.size or ordered_fit[i] != ordered_fit[block_start]:
+            edge = float(ordered_conf[i - 1])
+            value = float(ordered_fit[block_start])
+            if bins and edge <= bins[-1]:
+                # Exact confidence ties split across two PAVA blocks cannot be
+                # told apart by a step in p: keep the later (larger) fit.
+                values[-1] = value
+            else:
+                bins.append(edge)
+                values.append(value)
+            block_start = i
+    return bins, values
+
+
+def apply_calibration(payload: dict, logits: np.ndarray) -> np.ndarray:
+    """Apply a serialised calibration payload to pre-sigmoid logits.
+
+    Mirrors the edge reader's ``apply_logit``: temperature uses ``sigmoid(z / T)``;
+    isotonic looks the raw sigmoid up in the exported step map (first upper edge
+    >= p, holding the final value past the last edge). An ``n+1`` edge array is
+    accepted and its leading lower edge dropped, as on the edge side.
+    """
+    z = np.asarray(logits, dtype=np.float64).ravel()
+    method = payload["method"]
+    if method == "temperature":
+        return sigmoid(z / float(payload["temperature"]))
+    if method == "isotonic":
+        bins = np.asarray(payload["bins"], dtype=np.float64)
+        values = np.asarray(payload["values"], dtype=np.float64)
+        if bins.size == values.size + 1:
+            bins = bins[1:]
+        if values.size == 0 or bins.size != values.size:
+            raise ValueError("isotonic payload needs n upper edges and n values")
+        index = np.minimum(np.searchsorted(bins, sigmoid(z), side="left"), values.size - 1)
+        return values[index]
+    raise ValueError(f"unknown calibration method {method!r}")
+
+
 def conformal_calibrate(logits: np.ndarray, error: np.ndarray,
                         tol: float = DEFAULT_TOL,
                         target_ece: float = DEFAULT_TARGET_ECE,
@@ -153,12 +220,16 @@ def conformal_calibrate(logits: np.ndarray, error: np.ndarray,
 
     temperature_conf = sigmoid(z / max(temperature, 1e-6))
     temperature_ece = expected_calibration_error(temperature_conf, ok, bins)
+    iso_bins: tuple[float, ...] | None = None
+    iso_values: tuple[float, ...] | None = None
     if temperature_ece <= target_ece:
         method, calibrated = "temperature", temperature_conf
     else:
         isotonic_conf = isotonic_calibration(raw_conf, ok)
         if expected_calibration_error(isotonic_conf, ok, bins) <= temperature_ece:
             method, calibrated = "isotonic", isotonic_conf
+            edges, fitted = isotonic_step_map(raw_conf, ok)
+            iso_bins, iso_values = tuple(edges), tuple(fitted)
         else:
             method, calibrated = "temperature", temperature_conf
 
@@ -173,6 +244,8 @@ def conformal_calibrate(logits: np.ndarray, error: np.ndarray,
         loops=loops,
         n=int(z.size),
         target_ece=float(target_ece),
+        bins=iso_bins,
+        values=iso_values,
     )
 
 

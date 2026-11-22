@@ -624,3 +624,55 @@ students.
   RMSE is not comparable to `loopwm`'s.
 - The 0.3–0.6 ms Pi latency estimate and an OpenRocket-derived aero card run are
   not measured here. `sim/`, `edge/`, `protocol/` and `docs/` were not touched.
+
+## v2 calibration export: isotonic step map (2026-11-22)
+
+- Defect: `CalibrationResult.as_dict()` wrote `method`, `temperature`, `threshold`
+  and the diagnostics but **not the fitted isotonic map**. The edge reader refuses
+  an isotonic file with no map (no silent fallback to raw confidence), so the Rust
+  side could not apply calibration. Temperature files loaded as-is. Export-format
+  fix only: gate, temperature search and PAVA fit are unchanged; `apply`/`predict`
+  behaviour is unchanged.
+- `calibration.py` now collapses the PAVA fit into a step map: one bin per pooled
+  block, `bins[i]` = largest raw-sigmoid confidence in the block (ascending, in
+  `(0,1]`), `values[i]` = that block's empirical-correctness mean (in `[0,1]`).
+  `as_dict()` emits top-level `bins` + `values` **only** for `method == "isotonic"`;
+  the temperature JSON keeps exactly its old keys. `apply_calibration(payload,
+  logits)` mirrors the edge `apply_logit`: temperature = `sigmoid(z / T)`;
+  isotonic = first upper edge `>= sigmoid(z)`, holding the last value past the end
+  (an `n+1` edge array with a leading lower edge is accepted and normalised).
+- Exact JSON shape — illustrative values from the deterministic round-trip
+  fixture, **not a production measurement**:
+
+  ```json
+  {
+    "threshold": 0.3,
+    "ece": 0.0,
+    "raw_ece": 0.2910068939883774,
+    "temperature_ece": 0.09999999999999998,
+    "coverage": 0.6,
+    "temperature": 10.0,
+    "method": "isotonic",
+    "loops": 3,
+    "n": 160,
+    "target_ece": 0.05,
+    "bins": [2.0611536181902037e-09, 0.01798620996209156,
+             0.9820137900379085, 0.9999999979388463],
+    "values": [0.3, 0.5, 0.7, 0.9]
+  }
+  ```
+
+  A temperature file is the same object **without** `bins` and `values` (see any
+  `out/run4/*.calibration.json` with `method == "temperature"`). The edge reader
+  also accepts the map nested under `isotonic` and with `n+1` edges; we write the
+  flat `n`-edge form, so no reader change is needed.
+- Round-trip gate: `tests/test_calibration.py::test_isotonic_calibration_json_round_trip`
+  writes `calibration.json` from `as_dict()`, reads it back, and asserts
+  `apply_calibration(payload, logits)` equals `isotonic_calibration(sigmoid(logits),
+  correct)` on the same held-out logits (and under the `n+1` edge form). The
+  temperature counterpart asserts no map keys and unchanged `sigmoid(z / T)`.
+  No logit array is persisted under `ai/out/`, so the fixture is synthetic; no
+  number in any `REPORT.md` was invented or regenerated.
+- Verification: `uv run pytest -q` → `88 passed`; `uv run ruff check src tests` →
+  clean. Only `ai/src/potok_ai/calibration.py`, `ai/tests/test_calibration.py` and
+  this file changed; `scripts/`, `sim/`, `edge/` and `protocol/` were not touched.
