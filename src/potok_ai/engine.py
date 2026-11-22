@@ -87,6 +87,7 @@ class TrainConfig:
     exit_threshold: float = 1e-3
     latent_weight: float = 0.05
     target_weight: float = 0.1
+    conf_weight: float = 1.0
     latent_tokens: int = 16
     lite_width: int = 64
     attn_rank: int = 8
@@ -391,7 +392,7 @@ class LRSAdapter(ModelAdapter):
             raise ValueError("lrs training needs reference corrections")
         device = next(model.parameters()).device
         model.reset_state()
-        command_losses, conf_losses, confidences, errors = [], [], [], []
+        command_losses, logits, confidences, errors = [], [], [], []
         for tick, frame in enumerate(frames):
             corrections, confidence = model.step(frame)
             if tick + 1 < cfg.window:
@@ -401,17 +402,23 @@ class LRSAdapter(ModelAdapter):
             command = final_command(corrections, physics_baseline(features), cfg.residual)
             error = (command - reference).abs().max().detach()
             command_losses.append(F.mse_loss(command, reference))
-            conf_losses.append(F.mse_loss(confidence, confidence_target(error, cfg.calib_tol)))
+            # Train the LOGIT, never its sigmoid: a near-zero target on the
+            # probability drives the logit to -inf and collapses calibration.
+            # The target scale is shared across the episode's ticks so a spread
+            # survives even when every error is much larger than the tolerance.
+            logits.append(model.confidence_logit())
             confidences.append(confidence)
             errors.append(error)
         if not command_losses:
             raise ValueError("no student updates: episodes must be longer than the window")
+        error_stack = torch.stack(errors)
+        conf_loss = F.binary_cross_entropy_with_logits(
+            torch.stack(logits), confidence_target(error_stack, cfg.calib_tol)
+        )
         loss = (
             torch.stack(command_losses).mean()
-            + 0.1 * torch.stack(conf_losses).mean()
-            + confidence_spread_loss(
-                torch.stack(confidences), torch.stack(errors), cfg.calib_tol
-            )
+            + cfg.conf_weight * conf_loss
+            + confidence_spread_loss(torch.stack(confidences), error_stack, cfg.calib_tol)
         )
         optimizer.zero_grad(set_to_none=False)
         loss.backward()
@@ -539,7 +546,8 @@ class LiteAdapter(ModelAdapter):
         windows, conditions, targets = batch
         latent, _ = model.refine(windows, conditions)
         pooled = latent.mean(dim=1)
-        prediction = model.head_from_latent(pooled)
+        raw = model.head_logits(pooled)
+        prediction = model.head_output(raw)
         command = final_command(
             prediction[:, :2], physics_baseline(windows[:, -1, :]), cfg.residual
         )
@@ -550,9 +558,12 @@ class LiteAdapter(ModelAdapter):
             [F.mse_loss(predictions[h], teacher_targets[h]) for h in predictions]
         ).mean()
         error = (command - targets).abs().max(dim=1).values.detach()
-        confidence = F.mse_loss(prediction[:, 2], confidence_target(error, cfg.calib_tol))
+        # Logit-domain BCE keeps a spread; sigmoid MSE collapses the logit.
+        confidence = F.binary_cross_entropy_with_logits(
+            raw[:, 2], confidence_target(error, cfg.calib_tol)
+        )
         loss = (
-            correction + cfg.latent_weight * latent_loss + 0.1 * confidence
+            correction + cfg.latent_weight * latent_loss + cfg.conf_weight * confidence
             + confidence_spread_loss(prediction[:, 2], error, cfg.calib_tol)
         )
         optimizer.zero_grad(set_to_none=False)
@@ -764,6 +775,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--exit-threshold", type=float, default=1e-3)
     parser.add_argument("--latent-weight", type=float, default=0.05)
     parser.add_argument("--target-weight", type=float, default=0.1)
+    parser.add_argument(
+        "--conf-weight", type=float, default=1.0,
+        help="weight of the logit-domain confidence loss (default: 1.0)",
+    )
     parser.add_argument("--latent-tokens", type=int, default=16)
     parser.add_argument("--lite-width", type=int, default=64)
     parser.add_argument("--attn-rank", type=int, default=8)

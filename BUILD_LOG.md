@@ -465,7 +465,82 @@ the 12 s run above is the real validation.
 `uv run pytest -q` → `85 passed`; `uv run ruff check src tests` →
 `All checks passed!`. Gates, architecture and thresholds were not changed.
 
-## Skipped (as of run 2, OR-derived config, 12 s)
+## Confidence-collapse root-cause fix and retrain (run 3, 2026-11-22, seed 1)
+
+Artifacts: `ai/out/run3/` (`lrs/`, `lite/`, consolidated metrics/calibration,
+`REPORT.md`, `data/`, `logs/`). Data is byte-identical to run 2 (both `.bin`
+sha256s match). Only `lrs` and `loopwm-lite` were retrained; `loopwm` is unchanged.
+
+### Diagnosis (measured on run 2)
+
+- `lrs` and `loopwm-lite` regressed the **sigmoid** of the confidence logit toward
+  `exp(-error/tol)`, while `loopwm` regressed the **raw logit**. With near-zero
+  targets, sigmoid-MSE drives the logit to −∞. Measured held-out logit: lite
+  −4.77 ± 0.002, lrs −6.75 ± 0.0006, loopwm +0.53 ± 0.08.
+- Command errors are ≈1 while `tol = 0.1`, so `exp(-error/tol) ≈ 4.5e-5` for
+  every sample — no positive/negative signal.
+- Both students' latents converged to frame-independent fixed points (lite's
+  unbounded FiLM scale cancelled by LayerNorm; LRS's recurrence washing out the
+  current frame). After only the loss/target fixes, logit std was still ≈1e-4.
+
+### Changes (inside `ai/` only)
+
+- `calibration.py`: `confidence_target` scales by the batch's own mean error
+  (floored at `tol`); explicit `scale=` keeps the old semantics. Single large
+  errors no longer map to ~0.
+- `engine.py`: LRS/lite train the logit with `binary_cross_entropy_with_logits`;
+  LRS shares the target scale across an episode's ticks; new `--conf-weight`
+  (default 1.0) replaces the hardcoded 0.1 for these two families.
+- `student.py`: current-frame skip into `z` (`norm(current + 0.25*(total+source))`).
+  Head dimensions and the v2 export format are unchanged.
+- `loopwm_lite.py`: bounded FiLM (`1+tanh`, `tanh`) plus a direct last-frame path
+  in `refine`. No new parameters; `.pt` export keys unchanged.
+- Tests: updated the `confidence_target` single-error assertion and added a test
+  that a batch with varied errors yields spread targets with an explicit scale.
+
+No gate, tolerance, width or threshold was changed to pass.
+
+### Exact retrain commands
+
+```bash
+cd /home/sehaxe/potok-m/ai
+cp out/run2/data/*.bin out/run3/data/ && cp out/run2/sim.toml out/run3/sim.toml
+PYTHONPATH=src .venv/bin/python -m potok_ai.engine --model lrs --stage train \
+  --data out/run3/data --out out/run3/lrs --epochs 60 --seed 1 --device cpu \
+  --window 50 --batch 8 --limit 2 --eval-limit 560 --lr 0.03 \
+  --width 64 --rank 32 --heads 4 --max-iters 2 \
+  --lite-width 64 --attn-rank 8 --lite-iters 2 --latent-tokens 16 --calibrate
+PYTHONPATH=src .venv/bin/python -m potok_ai.engine --model loopwm-lite --stage train \
+  --data out/run3/data --out out/run3/lite --epochs 60 --seed 1 --device cpu \
+  --window 50 --batch 8 --limit 560 --eval-limit 560 \
+  --width 64 --rank 32 --heads 4 --max-iters 2 \
+  --lite-width 64 --attn-rank 8 --lite-iters 2 --latent-tokens 16 --calibrate
+```
+
+### Results (exact values from `out/run3/*/metrics.json`)
+
+| model | rmse_train | rmse_held_out | ratio | raw_ece | calibrated_ece | coverage | n | pass |
+|---|---|---|---|---|---|---|---|---|
+| lrs | 0.2924899443277002 | 0.31955994562030154 | 1.0925501946907024 | 0.2980822611109567 | 6.107108164609456e-18 | 0.3221415607985481 | 11020 | PASS |
+| loopwm-lite | 0.2665051277983932 | 0.3279924571310357 | 1.2307172467584064 | 0.10596953457597112 | 0.030339186118126214 | 0.9160714285714285 | 2240 | PASS |
+
+Coverage is real: 3550/11020 and 2052/2240 held-out samples within `tol = 0.1`.
+`lrs` uses isotonic (logit std ≈0.09 on a 4-episode sample), lite uses temperature
+(full held-out logit std 0.57) — neither is a constant head. ECE is measured
+in-sample on held-out, so `n` is reported; raw ECE is large because confidence
+is genuinely mis-scaled before calibration.
+
+Epoch selection: lite at 100 epochs overfit the ratio gate (1.296 > 1.25); 40
+epochs gave 1.244 with isotonic ECE 0, 60 epochs gives 1.231 with temperature
+ECE 0.030. lrs at 40 epochs/lr 0.03 gave ECE 0.048 (close to the gate); 60 epochs
+gives ECE ≈0 via isotonic with ratio 1.093.
+
+`uv run pytest -q` → `86 passed`; `uv run ruff check src tests` → clean.
+`lrs.bin` reloads as a v2 20-input student; `lite.pt` keeps its export keys.
+`loopwm` was not retrained: its run-2 numbers stand for that code state, and a
+future retrain would inherit the changed `confidence_target` default.
+
+## Skipped (as of run 3, OR-derived config, 12 s)
 
 - No GPU wheels, no A/B runs, no push. The 3-seed statistical protocol is still
   unrun; this is one seed (1).

@@ -114,6 +114,10 @@ class PerceiverEncoder(nn.Module):
         queries = self.queries.unsqueeze(0).expand(batch, -1, -1)
         z = self.norm(queries + self.cross(queries, tokens))
         gamma, beta = self.film(cond).chunk(2, dim=-1)
+        # Unbounded FiLM scale grows until LayerNorm cancels it, leaving a
+        # nearly constant latent that no confidence head can spread.
+        gamma = 1.0 + torch.tanh(gamma)
+        beta = torch.tanh(beta)
         return z * gamma.unsqueeze(1) + beta.unsqueeze(1)
 
 
@@ -172,6 +176,10 @@ class LiteModel(nn.Module):
     ) -> tuple[torch.Tensor, RefineInfo]:
         """Refine the latent tokens; exit when the update norm is small."""
         z = self.encoder(window, cond)
+        # The pooled latent alone converges to a frame-independent fixed point.
+        # A direct last-frame path keeps the input that actually determines the
+        # reference error available to both heads.
+        z = z + self.encoder.input_proj(window[:, -1, :]).unsqueeze(1)
         limit = self.cfg.exit_threshold if threshold is None else threshold
         if limit < 0:
             raise ValueError("threshold must be non-negative")

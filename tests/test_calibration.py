@@ -85,7 +85,20 @@ def test_calibration_rejects_bad_inputs():
 def test_confidence_target_tracks_uncertainty():
     assert confidence_target(torch.tensor(0.0)).item() == pytest.approx(1.0)
     assert confidence_target(torch.tensor(0.1)).item() == pytest.approx(np.exp(-1))
-    assert confidence_target(torch.tensor(1.0, requires_grad=True)).item() < 0.01
+    # A single large error no longer collapses to ~0: the scale follows the data.
+    assert confidence_target(torch.tensor(1.0, requires_grad=True)).item() == pytest.approx(np.exp(-1))
+
+
+def test_confidence_target_spreads_when_errors_exceed_tolerance():
+    error = torch.tensor([0.01, 0.1, 1.0, 2.0])
+    target = confidence_target(error)
+    assert target.min() > 0.05
+    assert target.max() > 0.7
+    assert (target.max() - target.min()) > 0.4
+    # An explicit scale keeps the original absolute-error semantics.
+    fixed = confidence_target(error, scale=0.1)
+    assert fixed[0].item() == pytest.approx(np.exp(-0.1))
+    assert fixed[1].item() == pytest.approx(np.exp(-1))
 
 
 def test_spread_reward_is_small_and_uncertainty_gated():

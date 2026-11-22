@@ -176,9 +176,25 @@ def conformal_calibrate(logits: np.ndarray, error: np.ndarray,
     )
 
 
-def confidence_target(error: torch.Tensor, tol: float = DEFAULT_TOL) -> torch.Tensor:
-    """Smooth correctness target: 1 at zero error, exp(-1) at the tolerance."""
-    return torch.exp(-error.detach().to(torch.float32) / max(tol, 1e-6))
+def confidence_target(
+    error: torch.Tensor, tol: float = DEFAULT_TOL, scale: torch.Tensor | float | None = None
+) -> torch.Tensor:
+    """Smooth correctness target with a *data-driven* error scale.
+
+    ``exp(-error/tol)`` is ~0 for every sample when the model's errors are much
+    larger than ``tol`` (error 1.0 with tol 0.1 gives 4.5e-5). Regressing a
+    sigmoid toward that value drives its logit to a constant negative number,
+    so calibration sees a collapsed head and reports a trivially small ECE.
+    Scaling by the batch's own mean error keeps a spread of targets at any
+    error scale; calibration is then free to map the logits to empirical
+    correctness. When the model already resolves errors below ``tol`` the
+    original behaviour is unchanged (the scale is floored at ``tol``).
+    """
+    e = error.detach().to(torch.float32)
+    if scale is None:
+        scale = e.mean().clamp_min(tol)
+    s = torch.as_tensor(scale, dtype=e.dtype).clamp_min(1e-6)
+    return torch.exp(-e / s)
 
 
 def confidence_spread_loss(confidence: torch.Tensor, error: torch.Tensor,
