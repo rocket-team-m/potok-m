@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'docs/**'
+      - 'site/**'
       - '.github/workflows/docs.yml'
   workflow_dispatch:
 
@@ -34,6 +35,8 @@ jobs:
       - name: Build
         working-directory: docs
         run: bun run build
+      - name: Copy landing page
+        run: cp -R site/. docs/dist/
       - uses: actions/upload-pages-artifact@v3
         with:
           path: docs/dist

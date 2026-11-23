@@ -5,7 +5,7 @@ import starlight from '@astrojs/starlight';
 // Сайт команды: https://rocket-team-m.github.io/potok-m/
 export default defineConfig({
   site: 'https://rocket-team-m.github.io',
-  base: '/potok-m',
+  base: '/potok-m/docs',
   integrations: [
     starlight({
       title: 'Поток-М',
