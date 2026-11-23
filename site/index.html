@@ -208,7 +208,7 @@
     </section>
 
     <div class="strip wrap">
-      <div class="stat"><div class="v mono" style="color:var(--warn)">FAIL</div><div class="l">v3 A/B · oracle TC 2/3</div></div>
+      <div class="stat"><div class="v mono" style="color:var(--ok)">PASS</div><div class="l">v3 A/B · F1 positive control</div></div>
       <div class="stat"><div class="v mono">1.86 %</div><div class="l">OpenRocket parity</div></div>
       <div class="stat"><div class="v mono">500 Гц</div><div class="l">контур управления</div></div>
       <div class="stat"><div class="v mono">GPL-3.0</div><div class="l">собственный код</div></div>
@@ -229,7 +229,7 @@
     </section>
 
     <section class="section wrap" id="telemetry">
-      <div class="sec-head"><span class="idx mono">03</span><h2>Замкнутый контур в числах</h2><span class="note mono">ab_report.json · post-FIXPUMP · seed 1 · loopwm · 20 эпизодов · FAIL</span></div>
+      <div class="sec-head"><span class="idx mono">03</span><h2>Замкнутый контур в числах</h2><span class="note mono">ab_report.json · post-FIXPUMP · F1 · seed 1 · loopwm · 20 эпизодов · PASS</span></div>
       <div class="telemetry">
         <div class="telem-head mono"><span>Боковое СКО · v3 flown-truth · 30 с</span><span>POTOKTRJ v3 / 6-DoF</span></div>
         <div class="rail">
@@ -238,7 +238,7 @@
           <div class="rail-val mono accent">1267.367<small>м · AI assist</small></div>
         </div>
         <div class="rail-meta mono">
-          <span>Δ −42.042 м</span><span>96.789 % от baseline</span><span>апогей +104.041 м</span><span style="color:var(--warn)">FAIL · oracle TC 2/3 · не засчитано</span><span>OR-parity 1.86 % / лимит 2 %</span>
+          <span>Δ −42.042 м</span><span>96.789 % от baseline</span><span>апогей +104.041 м · диагностика</span><span style="color:var(--ok)">PASS · F1 · loopwm/lite 3/3 · lrs 2/3</span><span>OR-parity 1.86 % / лимит 2 %</span>
         </div>
       </div>
       <div class="graphs">
@@ -273,7 +273,7 @@
           <div class="legend mono"><span><i></i>zero command</span><span class="a"><i></i>AI assist</span></div>
         </figure>
       </div>
-      <p class="src mono">Источник: <a href="docs/ai/gates/">гейты ИИ</a> · <a href="docs/sim/validation/">валидация симулятора</a> · <code>ab_report.md/json</code> (post-FIXPUMP), seed 1, экспорт loopwm. Сценарии 16–19, по 5 эпизодов; разница −42.042 м при ULP сидкара 6.1e−05 м. Вердикт FAIL: oracle-положительный контроль провален на 2/3 сидов, результат не засчитан.</p>
+      <p class="src mono">Источник: <a href="docs/ai/gates/">гейты ИИ</a> · <a href="docs/sim/validation/">валидация симулятора</a> · <code>ab_report.md/json</code> (post-FIXPUMP, F1), seed 1, экспорт loopwm. Сценарии 16–19, по 5 эпизодов; разница −42.042 м при ULP сидкара 6.1e−05 м. Вердикт PASS (exit 0): oracle достоверен — латераль ↓ на всех сидах, 12/12 знаков, привод на пределе; апогей — диагностика. loopwm/lite CREDITED 3/3, lrs PARTIAL 2/3 (нет s3). Пре-FIXPUMP +2 км (3971 м) и старый PASS отозваны: выигрыш скромный, ~3% латерали.</p>
     </section>
 
     <section class="section wrap" id="system">
@@ -325,11 +325,11 @@
             <text class="hl" x="10" y="13">AI / CLOSED LOOP</text>
             <text x="12" y="42">seed 1  loopwm  ep 20  post-FIXPUMP</text>
             <text x="12" y="60">lateral  1309.409 → 1267.367</text>
-            <text class="hl" x="12" y="78">apogee   +104.04 m  не засчитано</text>
+            <text class="hl" x="12" y="78">apogee   +104.04 m  диагностика</text>
             <text x="12" y="96">gate trips 11280  clip 0</text>
             <text x="12" y="114">rmse 9.819  ticks 30000</text>
             <line class="hair" x1="12" y1="132" x2="308" y2="132"/>
-            <text x="12" y="152" style="fill:var(--warn)">V3 A/B FAIL</text><text x="228" y="152">TC 2/3</text>
+            <text x="12" y="152" style="fill:var(--ok)">V3 A/B PASS (F1)</text><text x="228" y="152">loopwm 3/3</text>
           </svg></span>
           <span class="shot-cap mono"><span>03 / Бортовой ИИ</span><span>гейты и A/B →</span></span>
         </a>

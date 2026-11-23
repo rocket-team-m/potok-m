@@ -1,13 +1,13 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 600" width="1200" height="600" role="img" aria-label="V3 closed-loop A/B post-FIXPUMP: результат по сидам, вердикт FAIL">
-  <title>V3 closed-loop A/B (post-FIXPUMP): результат по сидам — FAIL</title>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 600" width="1200" height="600" role="img" aria-label="V3 closed-loop A/B post-FIXPUMP: результат по сидам, вердикт PASS (F1)">
+  <title>V3 closed-loop A/B (post-FIXPUMP): результат по сидам — PASS (F1)</title>
   <rect width="1200" height="600" fill="#ffffff"/>
   <rect x="0.5" y="0.5" width="1199" height="599" fill="none" stroke="#d7dce5"/>
   <text x="32" y="46" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="21" font-weight="700" fill="#0f172a">V3 closed-loop A/B: результат по сидам · post-FIXPUMP</text>
-  <rect x="1000" y="24" width="172" height="32" fill="#fff7ed" stroke="#b45309" stroke-width="1"/>
-  <text x="1086" y="45" text-anchor="middle" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="14" font-weight="700" fill="#b45309">ВЕРДИКТ: FAIL</text>
+  <rect x="1000" y="24" width="172" height="32" fill="#ecfdf5" stroke="#15803d" stroke-width="1"/>
+  <text x="1086" y="45" text-anchor="middle" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="14" font-weight="700" fill="#15803d">ВЕРДИКТ: PASS</text>
   <text x="32" y="70" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="12.5" fill="#475569">POTOKTRJ v3 flown-truth, 20 held-out эпизодов × 1500 тиков; seed order [1, 2, 3]</text>
-  <text x="32" y="94" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="12.5" font-weight="700" fill="#b45309">exit_code 1: oracle-положительный контроль провален на сидах 2/3 — студентские результаты не засчитаны</text>
+  <text x="32" y="94" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="12.5" font-weight="700" fill="#15803d">exit_code 0: oracle-положительный контроль достоверен (F1) — латераль снижена на всех сидах, апогей — диагностика</text>
   <text x="40" y="124" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="14" font-weight="700" fill="#0f172a">Боковое RMS, м</text>
   <text x="590" y="124" text-anchor="end" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="11.5" fill="#475569">меньше — лучше</text>
   <line x1="96" y1="180" x2="590" y2="180" stroke="#e6eaf1" stroke-width="1"/>
@@ -54,7 +54,7 @@
   <text x="548.5" y="266.8" text-anchor="middle" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="9" fill="#475569">1 298,0</text>
   <text x="485.8" y="470" text-anchor="middle" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="11" fill="#0f172a">seed 3</text>
   <text x="640" y="124" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="14" font-weight="700" fill="#0f172a">Апогей, м</text>
-  <text x="1190" y="124" text-anchor="end" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="11.5" fill="#475569">больше — лучше</text>
+  <text x="1190" y="124" text-anchor="end" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="11.5" fill="#475569">только диагностика</text>
   <line x1="696" y1="180" x2="1190" y2="180" stroke="#e6eaf1" stroke-width="1"/>
   <text x="688" y="183" text-anchor="end" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10" fill="#475569">2400</text>
   <line x1="696" y1="234" x2="1190" y2="234" stroke="#e6eaf1" stroke-width="1"/>
@@ -113,6 +113,6 @@
   <rect x="580" y="500" width="12" height="12" fill="#7c3aed"/>
   <text x="598" y="510" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="11" fill="#0f172a">oracle</text>
   <text x="40" y="540" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="11" fill="#475569">Нулевая команда: латераль 1306–1309 м, апогей 1973–1983 м. lrs seed 3: экспорт отсутствует, подстановок нет.</text>
-  <text x="40" y="558" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="11" fill="#b45309">Oracle — положительный контроль: латераль снижена на всех сидах, но апогей 1972,859 → 1970,708 м (seed 2) и 1983,003 → 1975,402 м (seed 3).</text>
-  <text x="40" y="578" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="11" fill="#475569">Источник: ab_report.md / ab_report.json (post-FIXPUMP, exit_code 1), config hash 1969edcc…79fed6. Прежние бары 1528/1735 м и 3971 м и вердикт PASS отозваны.</text>
+  <text x="40" y="558" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="11" fill="#15803d">F1: oracle снижает латераль на всех сидах (−17.312 / −10.503 / −8.382 м), 12/12 сценарных Δ &lt; 0, привод на пределе 16661/16661 · 16584/16584 · 16531/16531. Апогей +11.692 / −2.151 / −7.601 м — диагностика.</text>
+  <text x="40" y="578" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="11" fill="#475569">Источник: ab_report.md/json (post-FIXPUMP, F1, exit 0), hash 1969edcc…79fed6. PASS — боковое управление, выигрыш ~42 м из 1309 м (~3%). Пре-FIXPUMP +2 км (3971 м), бары 1528/1735 м и старый PASS отозваны.</text>
 </svg>
