@@ -184,8 +184,11 @@ struct Delayed {
 
 pub struct Sensor {
     cfg: SensorConfig,
-    dt: f64,
-    sqrt_dt: f64,
+    /// Measurement sample period (1 / frame_rate_hz), not the RK4 step dt.
+    /// `measure()` is called once per frame, so the lag filter and the Allan
+    /// noise model must integrate on this clock, not on `run.dt`.
+    sample_dt: f64,
+    sqrt_sample_dt: f64,
     gyro_lag: Vec3,
     accel_lag: Vec3,
     baro_lag: f64,
@@ -231,11 +234,14 @@ impl Sensor {
         let allan_gyro = sensor_cfg.gyro_arw > 0.0 || sensor_cfg.gyro_bias_stability > 0.0;
         let allan_accel = sensor_cfg.accel_arw > 0.0 || sensor_cfg.accel_bias_stability > 0.0;
         let latency = sensor_cfg.latency_steps.min(1024);
-        let dt = cfg.run.dt;
+        // The sensor is sampled once per transmitted frame, not once per RK4
+        // integration step. Using run.dt here made the lag time constant 10x
+        // too large and the ARW noise sqrt(10)x too high at 50 Hz.
+        let sample_dt = 1.0 / cfg.run.frame_rate_hz;
         Self {
             cfg: sensor_cfg,
-            dt,
-            sqrt_dt: dt.sqrt(),
+            sample_dt,
+            sqrt_sample_dt: sample_dt.sqrt(),
             gyro_lag: [0.0; 3],
             accel_lag: [0.0; 3],
             baro_lag: 0.0,
@@ -276,7 +282,7 @@ impl Sensor {
         let air = atm.at(s.pos()[2]);
         let pitot_true = 0.5 * air.density * norm(v_rel) * norm(v_rel);
 
-        let a = (-self.dt / self.cfg.lag_tau.max(1e-6)).exp();
+        let a = (-self.sample_dt / self.cfg.lag_tau.max(1e-6)).exp();
         let gq = if self.cfg.gyro_quant_step > 0.0 {
             self.cfg.gyro_quant_step
         } else {
@@ -296,26 +302,26 @@ impl Sensor {
             // gaussians per axis, in the original order.
             let g_bias = if self.allan_gyro {
                 let dw = self.gauss();
-                self.gyro_rw_bias[i] += self.cfg.gyro_bias_stability * self.sqrt_dt * dw;
+                self.gyro_rw_bias[i] += self.cfg.gyro_bias_stability * self.sqrt_sample_dt * dw;
                 self.cfg.gyro_bias[i] * self.bias_scale[i] + self.gyro_rw_bias[i]
             } else {
                 self.cfg.gyro_bias[i] * self.bias_scale[i]
             };
             let g_std = if self.allan_gyro {
-                self.cfg.gyro_arw / self.sqrt_dt
+                self.cfg.gyro_arw / self.sqrt_sample_dt
             } else {
                 self.cfg.gyro_noise * self.noise_scale[0]
             };
             let g_raw = s.omega()[i] + g_bias + self.gauss() * g_std;
             let a_bias = if self.allan_accel {
                 let dw = self.gauss();
-                self.accel_rw_bias[i] += self.cfg.accel_bias_stability * self.sqrt_dt * dw;
+                self.accel_rw_bias[i] += self.cfg.accel_bias_stability * self.sqrt_sample_dt * dw;
                 self.cfg.accel_bias[i] * self.bias_scale[i + 1] + self.accel_rw_bias[i]
             } else {
                 self.cfg.accel_bias[i] * self.bias_scale[i + 1]
             };
             let a_std = if self.allan_accel {
-                self.cfg.accel_arw / self.sqrt_dt
+                self.cfg.accel_arw / self.sqrt_sample_dt
             } else {
                 self.cfg.accel_noise * self.noise_scale[1]
             };

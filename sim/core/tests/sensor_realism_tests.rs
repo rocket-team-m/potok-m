@@ -21,7 +21,9 @@ use potok_sim::{
 };
 
 const G: f64 = 9.80665;
-const DT: f64 = 0.002;
+/// Sensor sample period: 1 / frame_rate_hz at the shipped 50 Hz frame rate.
+/// `Sensor::measure` is called once per frame, not once per 2 ms RK4 step.
+const SAMPLE_DT: f64 = 0.02;
 
 struct Rig {
     cfg: Config,
@@ -96,7 +98,7 @@ impl Rig {
     fn frame(&self, sensor: &mut Sensor, k: usize, st: &State, phase: Phase) -> Frame {
         sensor.measure(
             k as u16,
-            k as f64 * DT,
+            k as f64 * SAMPLE_DT,
             st,
             &self.vehicle,
             &self.atm,
@@ -188,8 +190,10 @@ fn same_seed_and_episode_reproduce_every_frame_byte() {
 
 #[test]
 fn allan_arw_sets_the_discrete_noise_std() {
-    // arw / sqrt(dt) is the per-sample standard deviation. The rig's lag is
-    // instant, so the measurement is the raw draw; quant is off.
+    // arw / sqrt(sample_dt) is the per-sample standard deviation for a noise
+    // density quoted per root-Hz. The rig's lag is instant, so the measurement
+    // is the raw draw; quant is off. Using the 2 ms RK4 step here instead of
+    // the 20 ms frame period would inflate the spread by sqrt(10) = 3.16x.
     let r = rig(11, |s| {
         s.gyro_arw = 0.02;
         s.accel_arw = 0.08;
@@ -202,8 +206,8 @@ fn allan_arw_sets_the_discrete_noise_std() {
         g.push(f.gyro[0] as f64);
         a.push(f.accel[0] as f64);
     }
-    let gyro_want = 0.02 / DT.sqrt();
-    let accel_want = 0.08 / DT.sqrt();
+    let gyro_want = 0.02 / SAMPLE_DT.sqrt();
+    let accel_want = 0.08 / SAMPLE_DT.sqrt();
     assert!((stddev(&g) / gyro_want - 1.0).abs() < 0.25, "gyro std");
     assert!((stddev(&a) / accel_want - 1.0).abs() < 0.25, "accel std");
     assert!(mean(&g).abs() < 0.15 * gyro_want, "gyro noise has a mean");
@@ -255,6 +259,49 @@ fn allan_bias_stability_drifts_while_zero_stability_is_exactly_flat() {
     let head = mean(&g[..100]);
     let tail = mean(&g[500..]);
     assert!((tail - head).abs() > 1e-6, "bias walk never drifted");
+}
+
+// ---------------------------------------------------------------------------
+// First-order lag time base
+// ---------------------------------------------------------------------------
+
+#[test]
+fn lag_filter_integrates_on_the_frame_period_not_the_rk4_step() {
+    // A unit step into a first-order lag gives y_0 = 1 - exp(-T/tau). With
+    // tau = 0.120 s sampled at 50 Hz (T = 0.02 s) that is 0.153518, i.e. a
+    // physical time constant of exactly tau. Using the 2 ms integration dt
+    // instead produced y_0 = 0.016529, an effective tau of 1.2 s -- 10x the
+    // configured constant at the same call rate.
+    const TAU: f64 = 0.120;
+    let first_sample = |frame_rate_hz: f64| -> f64 {
+        let mut cfg = quiet_config(0);
+        cfg.run.frame_rate_hz = frame_rate_hz;
+        cfg.sensor.lag_tau = TAU;
+        let r = rig_from(cfg);
+        let mut sensor = r.sensor(0);
+        let mut st = state();
+        st.omega = [1.0, 0.0, 0.0];
+        r.frame(&mut sensor, 0, &st, Phase::Coast).gyro[0] as f64
+    };
+
+    let y50 = first_sample(50.0);
+    let want50 = 1.0 - (-SAMPLE_DT / TAU).exp();
+    assert!(
+        (y50 - want50).abs() < 1e-6,
+        "gyro lag at 50 Hz: {y50} vs {want50}"
+    );
+    let tau_hat = -SAMPLE_DT / (1.0 - y50).ln();
+    assert!((tau_hat - TAU).abs() < 1e-3, "effective tau {tau_hat}");
+
+    // At 100 Hz the sample period halves; the lag coefficient must follow
+    // frame_rate_hz, not a hardcoded 0.02 and not the fixed 0.002 RK4 dt.
+    let y100 = first_sample(100.0);
+    let want100 = 1.0 - (-(SAMPLE_DT / 2.0) / TAU).exp();
+    assert!(
+        (y100 - want100).abs() < 1e-6,
+        "gyro lag at 100 Hz: {y100} vs {want100}"
+    );
+    assert!(y100 < y50, "faster sampling must lag less per sample");
 }
 
 // ---------------------------------------------------------------------------
