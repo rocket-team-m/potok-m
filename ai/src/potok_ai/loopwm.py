@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Privileged LoopWM teacher (SPEC_SMART.md, arXiv:2606.18208 idea).
 
 One parameter-shared transformer block refines a latent state iteratively;
@@ -25,6 +26,19 @@ from torch.nn import functional as F
 LATENT_SCALE_FLOOR = 1e-3
 
 
+def _project_row_column_spectral(weight: torch.Tensor, bound: float) -> torch.Tensor:
+    """Scale a square weight so its spectral norm cannot exceed ``bound``.
+
+    sigma(W) <= sqrt(||W||_1 ||W||_inf), so bounding the largest absolute row
+    and column sums by ``bound`` bounds the spectral norm too. A weight already
+    inside the ball is returned unchanged.
+    """
+    rows = weight.abs().sum(dim=1).amax()
+    cols = weight.abs().sum(dim=0).amax()
+    scale = torch.maximum(rows, cols).clamp_min(bound) / bound
+    return weight / scale
+
+
 @dataclass
 class LoopWMConfig:
     """Default sizes follow the smart teacher; width need not be a power of two."""
@@ -42,6 +56,14 @@ class LoopWMConfig:
     latent_weight: float = 0.05
     ema_momentum: float = 0.999
 
+    # LoopWM §3.2 Eq. 5-7 / §3.3-3.4 Eq. 11-12. Both switches default off so the
+    # shipped teacher's forward, checkpoints and A/B gates are unchanged.
+    spectral_residual: bool = False
+    spectral_bound: float = 1.0
+    learned_exit: bool = False
+    exit_gate_threshold: float = 0.5
+    exit_entropy_alpha: float = 0.01
+
     def __post_init__(self) -> None:
         if min(self.in_features, self.cond_features, self.width, self.heads, self.max_iters) < 1:
             raise ValueError("feature counts, width, heads and max_iters must be positive")
@@ -51,6 +73,14 @@ class LoopWMConfig:
             raise ValueError("exit_threshold must be finite and non-negative")
         if not self.horizons or any(h < 1 for h in self.horizons):
             raise ValueError("latent horizons must be positive frame offsets")
+        if self.spectral_residual and (
+            not math.isfinite(self.spectral_bound) or self.spectral_bound <= 0
+        ):
+            raise ValueError("spectral_bound must be finite and positive")
+        if not math.isfinite(self.exit_gate_threshold) or not 0 <= self.exit_gate_threshold <= 1:
+            raise ValueError("exit_gate_threshold must lie in [0, 1]")
+        if not math.isfinite(self.exit_entropy_alpha) or self.exit_entropy_alpha < 0:
+            raise ValueError("exit_entropy_alpha must be finite and non-negative")
 
 
 class CausalLatentEncoder(nn.Module):
@@ -88,6 +118,18 @@ class LoopBlock(nn.Module):
             nn.GELU(),
             nn.Linear(cfg.width * cfg.ff_mult, cfg.width),
         )
+        self.spectral_bound = cfg.spectral_bound if cfg.spectral_residual else None
+        if self.spectral_bound is not None:
+            # Residual-branch retention (Eq. 5-7). Identity init makes the first
+            # pass a no-op for bound >= 1; the projection keeps it contractive.
+            self.retention = nn.Linear(cfg.width, cfg.width, bias=False)
+            nn.init.eye_(self.retention.weight)
+
+    def projected_residual_weight(self) -> torch.Tensor | None:
+        """Effective (spectrally projected) residual weight; None when disabled."""
+        if self.spectral_bound is None:
+            return None
+        return _project_row_column_spectral(self.retention.weight, self.spectral_bound)
 
     def forward(self, z: torch.Tensor) -> torch.Tensor:
         batch, time, width = z.shape
@@ -98,7 +140,10 @@ class LoopBlock(nn.Module):
         attn = F.scaled_dot_product_attention(q, k, v, is_causal=True)
         attn = attn.transpose(1, 2).reshape(batch, time, width)
         increment = self.proj(attn)
-        return increment + self.ff(self.norm2(z + increment))
+        increment = increment + self.ff(self.norm2(z + increment))
+        if self.spectral_bound is not None:
+            increment = F.linear(increment, self.projected_residual_weight())
+        return increment
 
 
 @dataclass
@@ -107,6 +152,7 @@ class RefineInfo:
 
     iters: int
     updates: list[float] = field(default_factory=list)
+    gates: list[torch.Tensor] = field(default_factory=list)
 
 
 class LoopWM(nn.Module):
@@ -132,6 +178,8 @@ class LoopWM(nn.Module):
         self.norm = nn.LayerNorm(c.width)
         self.latent_heads = nn.ModuleDict({str(h): nn.Linear(c.width, c.width) for h in c.horizons})
         self.head = nn.Linear(c.width, c.out_features)
+        if c.learned_exit:
+            self.exit_gate = nn.Linear(c.width, 1)
 
     def refine(
         self,
@@ -155,6 +203,7 @@ class LoopWM(nn.Module):
         gamma, beta = self.film(cond).chunk(2, dim=-1)
         z = self.encoder(window) * gamma.unsqueeze(1) + beta.unsqueeze(1)
         updates: list[float] = []
+        gates: list[torch.Tensor] = []
         iters = 0
         for iteration in range(self.cfg.max_iters):
             increment = self.block(z)  # same weights on every pass
@@ -162,9 +211,22 @@ class LoopWM(nn.Module):
             updates.append(magnitude)
             z = z + increment
             iters = iteration + 1
-            if magnitude < limit:
+            stop = magnitude < limit
+            if self.cfg.learned_exit:
+                gate = torch.sigmoid(self.exit_gate(z[:, -1]))  # (batch, 1)
+                gates.append(gate)
+                stop = stop or bool(gate.detach().mean() > self.cfg.exit_gate_threshold)
+            if stop:
                 break
-        return self.norm(z), RefineInfo(iters=iters, updates=updates)
+        return self.norm(z), RefineInfo(iters=iters, updates=updates, gates=gates)
+
+    def exit_entropy_loss(self, info: RefineInfo) -> torch.Tensor:
+        """Eq. 11: ``-alpha * E sum_t H(g^t)``; minimising it resists exit collapse."""
+        if not info.gates:
+            return next(self.parameters()).new_zeros(())
+        gates = torch.stack(info.gates).clamp(1e-6, 1.0 - 1e-6)
+        entropy = -(gates * gates.log() + (1 - gates) * (1 - gates).log())
+        return -self.cfg.exit_entropy_alpha * entropy.mean()
 
     def latent_predictions(self, latent: torch.Tensor) -> dict[int, torch.Tensor]:
         """Predicted encoder latents at each horizon, one (B, T-h, width) per h."""

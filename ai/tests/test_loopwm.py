@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """LoopWM privileged teacher: shared iterative refinement, latent JEPA, and CLI."""
 
 import inspect
@@ -22,7 +23,7 @@ from potok_ai.data import (
 )
 from potok_ai.export import MODEL_KIND_STUDENT, SMART_STUDENT_FEATURES, load_student_export
 from potok_ai.jepa import EMATeacher
-from potok_ai.loopwm import LATENT_SCALE_FLOOR, LoopWM, LoopWMConfig
+from potok_ai.loopwm import LATENT_SCALE_FLOOR, LoopWM, LoopWMConfig, RefineInfo
 from potok_ai.train_loopwm import build_parser, evaluate, run
 from potok_ai.train_smart import generalisation_ratio
 
@@ -322,3 +323,87 @@ def test_training_finite_across_threshold_sweep():
         assert all(torch.isfinite(p).all() for p in model.parameters())
         latent, info = model.refine(torch.randn(2, 12, 14), torch.randn(2, 6))
         assert 1 <= info.iters <= 6 and torch.isfinite(latent).all()
+
+
+def test_spectral_residual_norm_bound():
+    torch.manual_seed(20)
+    cfg = _config(spectral_residual=True, spectral_bound=0.5)
+    model = LoopWM(cfg)
+    weight = model.block.projected_residual_weight()
+    assert weight is not None and weight.shape == (cfg.width, cfg.width)
+    assert torch.linalg.matrix_norm(weight, ord=2) <= cfg.spectral_bound + 1e-5
+    with torch.no_grad():
+        model.block.retention.weight.mul_(100.0)
+    weight = model.block.projected_residual_weight()
+    assert torch.isfinite(weight).all()
+    assert torch.linalg.matrix_norm(weight, ord=2) <= cfg.spectral_bound + 1e-5
+    plain = LoopWM(_config())
+    assert plain.block.projected_residual_weight() is None
+    assert "block.retention.weight" not in plain.state_dict()
+    with pytest.raises(ValueError):
+        LoopWM(_config(spectral_residual=True, spectral_bound=0.0))
+
+
+def test_learned_exit_count_and_hard_cap():
+    torch.manual_seed(21)
+    window, cond = torch.randn(2, 12, 14), torch.randn(2, 6)
+    cfg = _config(learned_exit=True, exit_threshold=0.0)
+    model = LoopWM(cfg)
+    _, info = model.refine(window, cond)
+    assert 1 <= info.iters <= cfg.max_iters == 6
+    assert len(info.gates) == info.iters and len(info.updates) == info.iters
+    assert all(g.shape == (2, 1) and torch.isfinite(g).all() for g in info.gates)
+    assert all(bool(((g >= 0) & (g <= 1)).all()) for g in info.gates)
+    with torch.no_grad():
+        model.exit_gate.bias.fill_(20.0)
+    _, early = model.refine(window, cond)
+    assert early.iters == 1 and len(early.gates) == 1
+    never = LoopWM(_config(learned_exit=True, exit_threshold=0.0, exit_gate_threshold=1.0))
+    _, capped = never.refine(window, cond)
+    assert capped.iters == 6 and len(capped.gates) == 6
+    plain = LoopWM(_config())
+    assert "exit_gate.weight" not in plain.state_dict()
+    _, trace = plain.refine(window, cond)
+    assert trace.gates == []
+
+
+def test_spectral_exit_determinism():
+    window, cond = torch.randn(2, 12, 14), torch.randn(2, 6)
+    cfg = _config(spectral_residual=True, learned_exit=True, spectral_bound=0.7)
+
+    def build():
+        torch.manual_seed(22)
+        return LoopWM(cfg)
+
+    first, second = build(), build()
+    assert all(torch.equal(a, b) for a, b in zip(first.parameters(), second.parameters()))
+    latent_a, info_a = first.refine(window, cond)
+    latent_b, info_b = second.refine(window, cond)
+    assert torch.equal(latent_a, latent_b)
+    assert info_a.iters == info_b.iters
+    assert all(torch.equal(a, b) for a, b in zip(info_a.gates, info_b.gates))
+    latent_a2, info_a2 = first.refine(window, cond)
+    assert torch.equal(latent_a, latent_a2) and info_a.iters == info_a2.iters
+
+
+def test_spectral_exit_backward_finite():
+    torch.manual_seed(23)
+    cfg = _config(
+        spectral_residual=True,
+        spectral_bound=0.5,
+        learned_exit=True,
+        exit_entropy_alpha=0.1,
+    )
+    model = LoopWM(cfg)
+    window, cond = torch.randn(2, 12, 14), torch.randn(2, 6)
+    latent, info = model.refine(window, cond)
+    entropy = model.exit_entropy_loss(info)
+    assert entropy.ndim == 0 and torch.isfinite(entropy) and entropy <= 0
+    loss = model.head_from_latent(latent).square().mean() + entropy
+    assert torch.isfinite(loss)
+    loss.backward()
+    grads = {name: p.grad for name, p in model.named_parameters() if p.grad is not None}
+    assert grads and all(torch.isfinite(g).all() for g in grads.values())
+    assert grads["block.retention.weight"].abs().sum() > 0
+    assert grads["exit_gate.weight"].abs().sum() > 0
+    assert LoopWM(_config()).exit_entropy_loss(RefineInfo(iters=1)).item() == 0.0
