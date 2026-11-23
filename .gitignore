@@ -57,3 +57,7 @@ scripts/analysis_out_light/
 # Regenerated datasets
 /ai/out/v3_data/*/validation.bin
 /ai/out/v3_data/*/validation.trajectory
+
+/ai/out/**/*.bin
+/ai/out/**/*.trajectory
+/ai/out/**/*.pt

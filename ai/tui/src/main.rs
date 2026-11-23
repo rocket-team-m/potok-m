@@ -105,7 +105,10 @@ fn resolve_model(run: &data::RunData, name: Option<&str>) -> Result<usize, Strin
             .ok_or_else(|| {
                 format!(
                     "model '{name}' not in run; available: {:?}",
-                    run.models.iter().map(|m| m.name.as_str()).collect::<Vec<_>>()
+                    run.models
+                        .iter()
+                        .map(|m| m.name.as_str())
+                        .collect::<Vec<_>>()
                 )
             }),
     }
@@ -221,7 +224,11 @@ fn main() {
             std::process::exit(2);
         }
     };
-    let result = if cli.plot_only { plot_mode(&cli) } else { live_mode(&cli) };
+    let result = if cli.plot_only {
+        plot_mode(&cli)
+    } else {
+        live_mode(&cli)
+    };
     if let Err(message) = result {
         eprintln!("error: {message}");
         std::process::exit(2);

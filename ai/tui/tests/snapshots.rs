@@ -7,11 +7,7 @@ static COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn temp_dir(tag: &str) -> PathBuf {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let path = std::env::temp_dir().join(format!(
-        "potok_tui_{tag}_{}_{}",
-        std::process::id(),
-        n
-    ));
+    let path = std::env::temp_dir().join(format!("potok_tui_{tag}_{}_{}", std::process::id(), n));
     let _ = std::fs::remove_dir_all(&path);
     std::fs::create_dir_all(&path).unwrap();
     path
@@ -74,7 +70,11 @@ fn demo_layout_renders_with_labels_and_hints() {
         "tab next model",
         "refresh",
     ] {
-        assert!(snap.text.contains(label), "missing '{label}' in:\n{}", snap.text);
+        assert!(
+            snap.text.contains(label),
+            "missing '{label}' in:\n{}",
+            snap.text
+        );
     }
     assert_eq!(snap.text.lines().count(), 40);
     assert!(snap.text.lines().all(|line| line.chars().count() == 120));
