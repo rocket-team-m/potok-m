@@ -12,7 +12,7 @@ Date: 2026-11-22. Scope: `protocol/` only. No GPU jobs, no git push.
 | `cargo test -p potok-protocol` | OK — same 15 protocol tests |
 | `cargo run -p potok-generator -- --check` | OK — `protocol/generated: up to date` |
 | `sha256sum generated/*` → regenerate → `sha256sum` → `diff` | OK — byte-identical (deterministic output) |
-| `cc -std=c11 -Wall -Wextra -Werror -Igenerated target/c_verify.c -o target/c_verify && ./target/c_verify` | OK — `crc123456789=29B1`, `C OK` |
+| `bash stm32/tests/check_golden.sh c` — committed harness `stm32/tests/golden_harness.c` (`cc -std=c11 -Wall -Wextra -Werror`) | OK — `check_golden c: OK`, golden frames and CRC-16 reproduced |
 | Python round-trip/error checks against `generated/protocol.py` | OK — `PY OK` |
 | C vs Python encoded-frame hex comparison | OK — both produce `4d50...c67f` (request) and `5052...c549` (reply) |
 

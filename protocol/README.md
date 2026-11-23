@@ -1,280 +1,182 @@
-# Potok-M UART protocol
+![Поток-М: Протокол](docs/banner.svg)
 
-Single source of truth: [`uart.yaml`](uart.yaml). Everything else in
-[`generated/`](generated/) is derived from it.
+[![CI](https://github.com/rocket-team-m/potok-m-protocol/actions/workflows/ci.yml/badge.svg)](https://github.com/rocket-team-m/potok-m-protocol/actions/workflows/ci.yml)
 
-## Wire format
+<div style="background:#0b0b0d;border-left:2px solid #34d399;padding:14px 18px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#d4d4d4;line-height:1.7">
 
-Two profiles share the same CRC, phase enum and flag bits. All frames are
-little-endian and fixed size. CRC is CRC-16/CCITT-FALSE (poly `0x1021`,
-init `0xFFFF`, no reflection, no final XOR) over every byte before the
-trailing 2-byte CRC field. `compat` is the default and is unchanged by the
-addition of `lowlat`.
+<span style="color:#34d399">UART / CONTRACT</span> · STM32H743 ⇄ Raspberry Pi · little-endian · CRC-16/CCITT-FALSE · no heap · <span style="color:#34d399">no_std</span>
 
-### compat profile
+</div>
 
-#### Request (STM32 → AI), 56 bytes, magic `0x504D`
+# Поток-М: UART-протокол
 
-| offset | field | type | note |
-|---:|---|---|---|
-| 0 | magic | u16 | `0x504D` |
-| 2 | seq | u16 | wraps at `u16::MAX` |
-| 4 | time_us | u32 | monotonic microseconds |
-| 8 | phase | u8 | enum, 0..=4 |
-| 9 | version | u8 | expected `1` |
-| 10 | flags | u8 | bitfield |
-| 11 | reserved | u8 | `0` |
-| 12 | gyro | f32[3] | x, y, z |
-| 24 | accel | f32[3] | x, y, z |
-| 36 | mag | f32[3] | x, y, z |
-| 48 | height | f32 | metres |
-| 52 | pitot_dp | i16 | differential pressure |
-| 54 | crc16 | u16 | over bytes `0..54` |
+Байтовый контракт между контроллером стабилизации и бортовым компьютером. Запрос с датчиков уходит **STM32 → Pi**, ответ с поправками и состоянием ИИ возвращается **Pi → STM32**. Описание кадров, контрольная сумма, нумерация, фазы и флаги живут в `uart.yaml`; три биндинга в `generated/` порождаются из него и ни в коем случае не редактируются руками.
 
-`Phase`: `0` BURN, `1` COAST, `2` APOGEE, `3` DESCENT, `4` LANDED.
-The numeric codes are the wire contract and are unchanged by the rename;
-`uart.yaml` validation rejects any other phase vocabulary.
+Прошивки STM32 в этом репозитории нет — только контракт. Прошивка живёт в [potok-m-firmware](https://github.com/rocket-team-m/potok-m-firmware), план — [FIRMWARE_RUST_PLAN.md](https://github.com/rocket-team-m/potok-m/blob/main/FIRMWARE_RUST_PLAN.md).
 
-Flags (bit index): `0` reserved (unassigned), `1` IMU_OK, `2` BARO_OK,
-`3` PITOT_OK, `4` AI_READY, `5` CALIBRATED, `6` MOTOR_ARMED, `7` FAULT.
+---
 
-#### Reply (AI → STM32), 14 bytes, magic `0x5250`
+## `01` / Направление — не переворачивать
 
-| offset | field | type | note |
-|---:|---|---|---|
-| 0 | magic | u16 | `0x5250` |
-| 2 | seq | u16 | echoes request seq |
-| 4 | g_pitch | i16 | × 0.001 rad |
-| 6 | g_yaw | i16 | × 0.001 rad |
-| 8 | confidence | u8 | 0..255 |
-| 9 | ai_healthy | u8 | 0 / 1 |
-| 10 | version | u16 | expected `1` |
-| 12 | crc16 | u16 | over bytes `0..12` |
+Кадр **request** формируется на STM32 и передаётся на Raspberry Pi. Кадр **reply** формируется на Pi и передаётся на STM32. Это не взаимозаменяемые структуры: у них разные magic, разный размер и разный смысл полей. Перестановка направлений — не косметическая ошибка, а путь к выполнению неверной команды.
 
-### lowlat profile (SPEC_PROTOCOL_LOWLAT.md)
-
-#### Request, 42 bytes, magic `0x4C54`
-
-| offset | field | type | note |
-|---:|---|---|---|
-| 0 | magic | u16 | `0x4C54` |
-| 2 | seq | u16 | wraps at `u16::MAX` |
-| 4 | time_us | u32 | monotonic microseconds |
-| 8 | phase | u8 | same Phase enum as compat |
-| 9 | version | u8 | expected `1` |
-| 10 | flags | u8 | same flag bits as compat |
-| 11 | reserved | u8 | `0` |
-| 12 | features | i16[14] | scales below |
-| 40 | crc16 | u16 | over bytes `0..40` |
-
-Feature scales, in wire order (`LOWLAT_REQUEST_FEATURES_SCALES` /
-`LOWLAT_REQUEST_FEATURES_NAMES`), are physical units per LSB:
-`gyro_x/y/z` 1e-3 rad/s, `accel_x/y/z` 1e-3 m/s², `mag_x/y/z` 1e-4 T,
-`height` 1e-2 m, `pressure` 1 Pa, `pitot_dp` 1 Pa, `temperature` 0.1 °C,
-`battery_mv` 1 mV. `quantize_i16(value, scale)` saturates at `i16::MIN/MAX`.
-
-#### Reply, 16 bytes, magic `0x4C52`
-
-| offset | field | type | note |
-|---:|---|---|---|
-| 0 | magic | u16 | `0x4C52` |
-| 2 | seq | u16 | echoes request seq |
-| 4 | g_pitch | i16 | × 0.001 rad |
-| 6 | g_yaw | i16 | × 0.001 rad |
-| 8 | confidence | u8 | 0..255 |
-| 9 | ai_healthy | u8 | 0 / 1 |
-| 10 | version | u8 | expected `1` |
-| 11 | compute_us | u8 | units of 100 µs |
-| 12 | reserved | u8[2] | `0`, see note |
-| 14 | crc16 | u16 | over bytes `0..14` |
-
-The spec states a 16-byte reply but its field list sums to 14 bytes; the two
-`reserved` bytes make the stated size exact. The reply magic `0x4C52` is an
-implementation choice — the spec only fixes the request magic. Both are
-declared explicitly in `uart.yaml` and validated.
-
-## Regenerate
-
-From this directory (Rust 1.100+, network needed once for `serde_yaml`):
-
-```sh
-cargo run -p potok-generator
+```text
+  STM32H743                         Raspberry Pi (edge)
+  датчики, фаза, seq, flags  ────►   decode → ИИ (potok-m-ai) → encode
+  применяет команду, держит  ◄────   g_pitch, g_yaw, confidence, ai_healthy
+  вето и фазу                       запрос/ответ
 ```
 
-This rewrites `generated/protocol.rs`, `generated/protocol.h`,
-`generated/protocol.py`. Output is deterministic (no timestamps); generated
-files are committed so consumers do not need the generator.
+Единственный источник правды — [`uart.yaml`](uart.yaml). Генератор [`generator/`](generator/) читает только его, проходит строгую serde-схему (`deny_unknown_fields`: лишний или опечатанный ключ — ошибка) и валидацию: размер кадра сверяется с суммой полей, CRC-field стоит в конце, версии и magic совпадают с объявленными, ссылки на enum и флаги разрешимы. Любое расхождение — громкая ошибка, а не молчаливая подстановка.
 
-Check that committed files match the YAML without writing anything:
+---
 
-```sh
+## `02` / Два профиля: compat и lowlat
+
+Канонический профиль по умолчанию — **compat**. **lowlat** добавлен вторым профилем и не отменяет первый: у каждого свои версии и кадры, но общие CRC, `Phase` и биты флагов.
+
+| | `compat` | `lowlat` |
+|---|---|---|
+| Запрос STM32 → Pi | 56 Б, magic `0x504D` | 42 Б, magic `0x4C54` |
+| Ответ Pi → STM32 | 14 Б, magic `0x5250` | 16 Б, magic `0x4C52` |
+| UART | 921600 бод, 8N1 | 2 Мбит/с, 8N1 |
+| Версия request / reply | 1 / 1 | 1 / 1 |
+| Время в проводе | 0,49 мс + 0,12 мс — расчёт | 0,168 мс + 0,064 мс — расчёт |
+
+Значения magic — ASCII-пары `PM`/`PR` и `LT`/`LR` в little-endian: `4d50…c67f` и `5052…c549` в compat, `544c…0a2b` и `524c…fd1b` в lowlat.
+
+**compat request, 56 Б:** `magic u16`, `seq u16`, `time_us u32`, `phase u8`, `version u8`, `flags u8`, `reserved u8`, `gyro f32[3]`, `accel f32[3]`, `mag f32[3]`, `height f32`, `pitot_dp i16`, `crc16 u16`.
+
+**compat reply, 14 Б:** `magic u16`, `seq u16`, `g_pitch i16` (×0,001), `g_yaw i16` (×0,001), `confidence u8`, `ai_healthy u8`, `version u16`, `crc16 u16`.
+
+**lowlat request, 42 Б:** те же 12 байт заголовка, затем 14 × `int16` признаков и CRC. Масштабы заданы в YAML и сгенерированы как `LOWLAT_REQUEST_FEATURES_SCALES` / `_NAMES`: гиро ×0,001, аксель ×0,001, магнитометр ×0,0001, высота ×0,01, давление ×1, Pitot ×1, температура ×0,1, батарея ×1. int16-диапазон покрывает диапазоны датчиков, но **проверка насыщения обязательна**; в библиотеке за это отвечают `quantize_i16` / `dequantize_i16` и `clamp_i16` (ограничение `-32768..32767`).
+
+**lowlat reply, 16 Б:** `magic u16`, `seq u16`, `g_pitch i16` (×0,001), `g_yaw i16` (×0,001), `confidence u8`, `ai_healthy u8`, `version u8`, `compute_us u8` (единица — 100 мкс), `reserved u8[2]`, `crc16 u16`.
+
+Две неоднозначности спецификации lowlat разрешены явно и зафиксированы валидацией: перечисление полей ответа давало 14 Б при заявленных 16 — добавлены два `reserved` по смещению 12; magic ответа в спецификации отсутствовал — выбран `0x4C52` и объявлен в YAML.
+
+---
+
+## `03` / CRC, seq, версия, фаза, флаги
+
+**CRC-16/CCITT-FALSE.** Полином `0x1021`, init `0xFFFF`, нет отражения на входе и выходе, `xor_out = 0x0000`. Покрывает все байты кадра, кроме последних двух — поля `crc16`. Контрольное значение для `123456789` — `29B1` (прогон C-харнесса: `crc123456789=29B1`). CRC ловит случайные искажения; это **не** криптозащита от злонамеренных атак.
+
+C-биндинг считает CRC по таблице `POTOK_CRC16_TABLE[256]` (512 Б `.rodata`), которую генератор строит из `crc.polynomial` в YAML. Байтовый lookup вместо побитового цикла: ~330 вместо ~2600 инструкций на 40-байтовый кадр на Cortex-M4 при `-Os` (замер MCUF03). Rust- и Python-биндинги не менялись.
+
+**Seq.** `SeqTracker` считает номер по кругу, окно по умолчанию 64 (должно быть `1..=0x7fff`, чтобы разворот был однозначен). Дубли (`Duplicate`) и запоздавшие кадры (`OutOfWindow`, `delta > window`) отвергаются. Повторной передачи нет: пропуск по дедлайну считается отказом кадра.
+
+**Версия и magic.** Проверяются при каждом decode: несовпадение даёт `VersionMismatch` или `BadMagic` с ожидаемым и полученным значением. У compat reply версия `u16`, у lowlat reply — `u8`.
+
+**Фаза.** Перечисление `Phase` фиксировано и проверяется генератором: `BURN=0`, `COAST=1`, `APOGEE=2`, `DESCENT=3`, `LANDED=4`. Тест `phase_uses_documented_names_and_codes` отвергает старую схему `Idle=0…` и любую другую расстановку. Числовые коды не менялись, поэтому переименование было wire-нейтральным.
+
+**Флаги.** Один байт: бит 0 зарезервирован (не назначен), `IMU_OK 1`, `BARO_OK 2`, `PITOT_OK 3`, `AI_READY 4`, `CALIBRATED 5`, `MOTOR_ARMED 6`, `FAULT 7`. Хелперы `flag_has` / `flag_set` / `flag_clear` работают без выделений.
+
+---
+
+## `04` / Генерация, golden-байты и CI
+
+`cargo run -p potok-generator` порождает `generated/protocol.rs`, `generated/protocol.h`, `generated/protocol.py`. Вывод детерминирован: перегенерация даёт побайтово одинаковые файлы (`sha256sum` → diff). Потребителям генератор не нужен — достаточно `--check`.
+
+Флаг `--check` сверяет содержимое трёх файлов с тем, что генератор произвёл из YAML, и при расхождении падает с сообщением `<path> is stale — rerun cargo run -p potok-generator`. Он же стоит в [CI](.github/workflows/ci.yml):
+
+```text
+cargo fmt --all -- --check
+cargo clippy --all-targets
+cargo test --all-targets
 cargo run -p potok-generator -- --check
+cargo check -p potok-protocol --no-default-features
 ```
 
-The generator uses `serde` with `deny_unknown_fields` on every schema node, so
-a misspelled or extra key is a hard error. It also validates frame sizes
-against the sum of field sizes, enum/flag references, CRC placement, expected
-versions and the magic constants.
+Кросс-языковой golden-шаг теперь есть и в CI: [`.github/workflows/cross-language.yml`](.github/workflows/cross-language.yml) гоняет шесть проверок `stm32/tests/check_golden.sh` — `self-test`, `license`, `yaml`, `c`, `python`, `rust`. Коммитный C-харнесс — [`stm32/tests/golden_harness.c`](stm32/tests/golden_harness.c), он собирается с `cc -std=c11 -Wall -Wextra -Werror`; Python round-trip проходит, все три языка воспроизводят одни и те же golden-кадры. Ручные замеры и протокол — в [`BUILD_LOG.md`](BUILD_LOG.md). Тесты `golden_wire_bytes_match_c_and_python` и `committed_golden_fixtures_reencode_byte_identical` не дают трём языкам молча разойтись. На момент последнего прогона — 37 тестов: 9 генератор, 3 библиотека, 10 lowlat, 15 compat.
 
-## Use from Rust
+Lowlat-golden, зафиксированные в `lowlat_tests.rs` и воспроизводимые C и Python:
 
-`potok-protocol` has no dependencies. It `include!`s the generated types, so
-the generated file must exist in `generated/`.
-
-```rust
-use potok_protocol::*;
-
-let mut frame = RequestFrame {
-    seq: 42,
-    time_us: 1_700_000_123,
-    phase: Phase::APOGEE,
-    version: REQUEST_VERSION,
-    flags: flags::IMU_OK | flags::AI_READY,
-    reserved: 0,
-    gyro: [0.0; 3], accel: [0.0; 3], mag: [0.0; 3],
-    height: 0.0, pitot_dp: 0,
-};
-let mut buf = [0u8; REQUEST_SIZE];
-encode_request(&frame, &mut buf)?;          // no heap allocation
-let decoded = decode_request(&buf)?;
-
-let mut tracker = SeqTracker::default();
-let seq = tracker.next_tx();
-frame.seq = seq;
-tracker.observe(seq)?;                       // wrap-safe, rejects duplicates
+```text
+request 544c34127bf15365020112000100feff03000400fbff06000700f8ff09000a000b00f4ff0d000e000a2b
+reply   524c34127d0006ffc801012a0000fd1b
 ```
 
-`encode_*` writes into a caller-provided slice (larger is fine); `decode_*`
-borrows the input and returns a `Result<_, Error>`. `Error` covers
-`BufferTooSmall`, `TooShort`, `BadMagic`, `BadCrc`, `BadPhase` and
-`VersionMismatch`. Decoding checks magic → CRC → enum → version in that order.
+---
 
-`SeqTracker::observe` accepts forward jumps of at most `window` (default 64)
-using wrapping arithmetic; `0x7fff` is the largest valid window.
+## `05` / Горящий цикл: zero-copy и 128,5 нс
 
-For receive paths that only read a few fields, skip the owned struct entirely:
+`decode_*` оставляет owns-путь, но базовый путь — через `RequestView<'a>` / `ReplyView<'a>` (и lowlat-аналоги): это провалидированные заимствованные представления поверх входного среза. Аксессоры читают исходные байты напрямую; ни одно поле не копируется до явного `to_owned()`. В кодировании и декодировании **нет выделений памяти**; сгенерированный код пишет и читает байты напрямую, без `try_into().unwrap()` и `copy_from_slice`.
 
-```rust
-let view = RequestView::new(&buf)?;   // validates magic, CRC, phase, version
-let seq = view.seq();                 // reads straight from the input slice
-let gyro = view.gyro();
-assert_eq!(view.as_bytes().as_ptr(), buf.as_ptr()); // no copy
-let owned = view.to_owned();          // only if a RequestFrame is needed
+CRC считается таблицей, построенной в compile-time из полинома YAML. `CRC_TABLE` плюс позиционные `CRC_TABLE2` дают slicing-by-4: четыре байта за два зависимых чтения таблиц, хвост из 1–3 байт — побайтово. `crc_table_matches_bitwise_reference` сравнивает табличный результат с побитовым на всех длинах `0..256`.
+
+Замер hotpath: `cargo run --release -p potok-protocol --example hotpath`, 1 000 000 итераций, 5 повторов, минимум, `black_box` на входах и выходах ([BUILD_LOG.md](BUILD_LOG.md), 2026-11-22):
+
+| случай | ns/кадр | MB/s |
+|---|---:|---:|
+| lowlat request encode+decode+CRC | **128,5** | 653,7 |
+| lowlat reply encode+decode+CRC | 28,7 | 1116,9 |
+| compat request encode+decode+CRC | 160,0 | 700,2 |
+| CRC по 54 Б, slicing-by-4 | 87,2 | 618,9 |
+| CRC по 54 Б, побитовый референс | 150,0 | 360,1 |
+
+Slicing-by-4 ускорил полный compat request (encode+decode+CRC) с 328,1 до 160,0 нс (2,05×), а CRC по 54 Б — с 180,9 до 87,2 нс (2,07×); побитовый референс в том же процессе показал 1,72× в пользу таблицы — эта пара нечувствительна к межпроцессному шуму (бокс был под нагрузкой ~5 от других процессов). Явные SIMD-интринзики **не добавлялись**: 16-битному CRC на 54 Б нужны gather и полиномиальная комбинация, и ни один такой кандидат не был измерен быстрее табличного пути. Пропущено сознательно, не предполагалось.
+
+---
+
+## `06` / Безопасность: семантика отказа
+
+Контракт, который обязаны соблюдать потребители кадров:
+
+- **Плохой кадр не вызывает модели.** При ошибке magic, CRC, версии, фазы или усечении ответ содержит признак неисправности, а инференс не запускается.
+- **Три подряд отвергнутых кадра отключают ассистента** до конца полёта; снимает защёлку только явный сброс прошивки.
+- **Фазу выставляет STM32.** Pi не может переопределить `BURN` и не управляет сервами напрямую; STM32 сохраняет право вето и не исполняет команды Pi бесконтрольно. Команда по умолчанию — ноль.
+- **Ретрансляции нет.** Дедлайн — это отказ кадра, а не повод повторить отправку.
+- CRC не заменяет защиту от умышленных искажений; для случайных помех на линии его достаточно, но fault injection на линии и проверка `BURN` с подключёнными сервами ещё не закрыты.
+
+Эти правила — часть протокольного контракта; исполняет их сторонняя прошивка и edge-потребитель, в этом репозитории реализованы проверки кадра и хелперы (`SeqTracker`, валидация фаз и флагов).
+
+---
+
+## `07` / Встраивание: no_std, C, Python
+
+`potok-protocol` не имеет зависимостей и по умолчанию `no_std` (`#![cfg_attr(not(feature = "std"), no_std)]`); фича `std` добавляет лишь `impl std::error::Error`. Это проверяется в CI отдельной строкой `cargo check -p potok-protocol --no-default-features`.
+
+Для C достаточно header-only [`generated/protocol.h`](generated/protocol.h): C11, явная укладка байтов, без `memcpy` структуры. Для Python — [`generated/protocol.py`](generated/protocol.py). Все три языка воспроизводят одни и те же golden-байты.
+
+Бюджет МКУ из [`PROTOCOL_BUDGET.md`](PROTOCOL_BUDGET.md) — именно **расчёт**, не измерение: 70 Б RAM под два статических буфера и 1536 Б Flash под таблицы CRC. Замеров на реальной STM32 нет; время в проводе посчитано из размера кадра и скорости.
+
+---
+
+## `08` / Команды
+
+```bash
+cargo check -p potok-protocol --no-default-features   # no_std, без аллокатора
+cargo test                                             # 37 тестов
+cargo run -p potok-generator -- --check                # сгенерированное совпадает с YAML
+cargo run -p potok-generator                           # перегенерировать .rs/.h/.py
+cargo run --release -p potok-protocol --example hotpath 1000000
 ```
 
-`ReplyView` has the same shape. Both are `Copy` and borrow the frame for `'a`.
+---
 
-CRC uses a compile-time table built from the YAML polynomial.
-`CRC_TABLE2` holds the two positional tables for slicing-by-4, which cuts the
-serial dependency chain to two table loads per four bytes. The byte table
-`CRC_TABLE` handles the trailing 1-3 bytes. `crc16()` is bit-identical to the
-original bitwise implementation (pinned by `crc_table_matches_bitwise_reference`).
+## `09` / Границы и честные ограничения
 
-Angle helpers: `reply_g_pitch_rad(raw)`, `reply_g_pitch_from_rad(rad)` and the
-`_g_yaw_` equivalents clamp to `i16`.
+**Нет прошивки.** В репозитории лежит контракт; STM32-прошивка — в [potok-m-firmware](https://github.com/rocket-team-m/potok-m-firmware).
 
-lowlat uses the same shapes with generated `LOWLAT_*` constants:
+**Нет замеров на реальной STM32.** Время в проводе — расчёт из размера кадра и скорости. Есть замеры только на edge: полный цикл lowlat p50 40,6 мкс, p99 356,6 мкс; с проводами 588,6 мкс; худший цикл с учителем 1,18 мс из отведённых 10 мс.
 
-```rust
-let low = LowlatRequestFrame {
-    seq: 42, time_us: 1_700_000_123, phase: Phase::APOGEE,
-    version: LOWLAT_REQUEST_VERSION, flags: flags::IMU_OK, reserved: 0,
-    features: [0; 14],
-};
-let mut buf = [0u8; LOWLAT_REQUEST_SIZE];
-encode_lowlat_request(&low, &mut buf)?;
-let low_view = LowlatRequestView::new(&buf)?;  // zero-copy
-let gyro_x = dequantize_i16(low_view.features()[0], LOWLAT_REQUEST_FEATURES_SCALES[0]);
-let raw = quantize_i16(1.0, LOWLAT_REQUEST_FEATURES_SCALES[0]); // 1000, saturating
-```
+**Не закрыто:** проверка на помехи, fault injection на линии, проверка `BURN` с подключёнными сервами, кросс-языковая интероперабельность с прошивкой, формальный safety case. Хотпат-замеры проводились на общей машине при load ~5. `PROTOCOL_BUDGET.md` и `SPEC_PROTOCOL_LOWLAT.md` помечены как черновики.
 
-## Use from C
+**Соседние репозитории:** [potok-m-ai](https://github.com/rocket-team-m/potok-m-ai) — потребитель кадров на Pi; [potok-m-sim](https://github.com/rocket-team-m/potok-m-sim) — генератор кадров в симуляции; [potok-m-firmware](https://github.com/rocket-team-m/potok-m-firmware) — прошивка STM32.
 
-Include `generated/protocol.h` (C11, stdlib only). It is header-only with
-`static inline` functions and uses explicit byte packing, not `memcpy` of a
-struct, so struct padding never reaches the wire.
+---
 
-`potok_crc16` uses `POTOK_CRC16_TABLE[256]` (512 B of `.rodata`), built by the
-generator from `uart.yaml`'s `crc.polynomial`. The bytewise lookup replaces the
-bitwise loop: ~330 instead of ~2600 instructions per 40 B frame on Cortex-M4 at
-`-Os` (MCUF03). The Rust and Python bindings are unchanged.
+## `10` / Структура
 
-```c
-#include "protocol.h"
+| Путь | Что внутри |
+|---|---|
+| [`uart.yaml`](uart.yaml) | Профили, кадры, CRC, `Phase`, флаги, версии, magic — источник правды |
+| [`generator/`](generator/) | Строгая serde-схема, валидация, три эмиттера `.rs` / `.h` / `.py` |
+| [`generated/`](generated/) | Зафиксированные в git детерминированные артефакты |
+| [`potok-protocol/`](potok-protocol/) | CRC slicing-by-4, codec, zero-copy views, `SeqTracker`, хелперы флагов и углов |
+| [`BUILD_LOG.md`](BUILD_LOG.md) | Протокол проверок, golden-байты, замеры hotpath |
+| [`PROTOCOL_BUDGET.md`](PROTOCOL_BUDGET.md), [`SPEC_PROTOCOL_LOWLAT.md`](SPEC_PROTOCOL_LOWLAT.md) | Бюджет/надёжность и спецификация lowlat (черновики) |
 
-uint8_t buf[POTOK_REQUEST_SIZE];
-PotokRequest req = {0};
-req.seq = 42;
-req.phase = POTOK_PHASE_APOGEE;
-req.version = POTOK_REQUEST_VERSION;
-req.flags = POTOK_FLAG_IMU_OK;
+Лицензия: GPL-3.0-or-later (или коммерческая).
 
-if (potok_request_encode(&req, buf, sizeof buf) != POTOK_OK) { /* ... */ }
-
-PotokRequest in;
-int rc = potok_request_decode(buf, sizeof buf, &in);
-/* POTOK_OK, POTOK_ERR_BUFFER, POTOK_ERR_MAGIC, POTOK_ERR_CRC,
-   POTOK_ERR_PHASE, POTOK_ERR_VERSION */
-```
-
-Flags: `potok_flag_has`, `potok_flag_set`, `potok_flag_clear` with
-`POTOK_FLAG_*` masks. Scaled angles: `potok_reply_g_pitch_scaled`,
-`potok_reply_g_pitch_from_scaled` (and `_g_yaw_`).
-
-lowlat: `PotokLowlatRequest` / `PotokLowlatReply` with
-`potok_lowlat_request_encode` / `_decode`, `potok_lowlat_reply_encode` /
-`_decode`, constants `POTOK_LOWLAT_REQUEST_SIZE` (42),
-`POTOK_LOWLAT_REPLY_SIZE` (16) and the scale arrays
-`POTOK_LOWLAT_REQUEST_FEATURES_SCALES` / `_NAMES`.
-
-## Use from Python
-
-Add `generated/` to `sys.path` (or copy `protocol.py` next to your code), then:
-
-```python
-import protocol as proto
-
-req = proto.Request(
-    seq=42, time_us=1_700_000_123, phase=proto.Phase.APOGEE,
-    version=proto.REQUEST_VERSION,
-    flags=proto.FLAG_IMU_OK, reserved=0,
-    gyro=[0.0, 0.0, 0.0], accel=[0.0, 0.0, 0.0], mag=[0.0, 0.0, 0.0],
-    height=0.0, pitot_dp=0,
-)
-buf = proto.encode_request(req)      # bytes, len == REQUEST_SIZE
-decoded = proto.decode_request(buf)
-
-rep = proto.decode_reply(reply_bytes)
-pitch_rad = proto.reply_g_pitch_scaled(rep.g_pitch)
-```
-
-Decode raises `Truncated`, `BadMagic`, `BadCrc`, `BadPhase` or
-`VersionMismatch` (all subclasses of `ProtocolError`).
-
-lowlat: `proto.LowlatRequest(seq=..., time_us=..., phase=proto.Phase.APOGEE,
-version=proto.LOWLAT_REQUEST_VERSION, flags=..., reserved=0, features=[0]*14)`
-with `proto.encode_lowlat_request` / `proto.decode_lowlat_request`; reply uses
-`proto.LowlatReply` with `compute_us` and a 2-byte `reserved` list.
-
-## Benchmark
-
-```sh
-cargo run --release -p potok-protocol --example hotpath
-```
-
-Optional first argument sets iterations (default 1 000 000). Prints ns/frame
-and MB/s of wire bytes for CRC (bitwise reference and slicing-by-4), encode,
-decode and encode+decode+CRC for both frames of both profiles. `black_box`
-prevents elision; five repetitions per case report the minimum duration.
-
-## Verify
-
-```sh
-cargo check
-cargo test
-```
-
-36 tests: the original 22 plus CRC table vs bitwise reference, zero-copy view
-equivalence, committed golden fixtures re-encoding byte-identically, and the
-lowlat profile suite (round trips, truncation, magic/CRC/phase/version errors,
-flags, int16 saturation, golden bytes and profile independence).
+Репозитории: [potok-m](https://github.com/rocket-team-m/potok-m) · [potok-m-ai](https://github.com/rocket-team-m/potok-m-ai) · [potok-m-edge](https://github.com/rocket-team-m/potok-m-edge) · [potok-m-sim](https://github.com/rocket-team-m/potok-m-sim) · [potok-m-protocol](https://github.com/rocket-team-m/potok-m-protocol) · [potok-m-firmware](https://github.com/rocket-team-m/potok-m-firmware) · [potok-m-3d](https://github.com/rocket-team-m/potok-m-3d).
