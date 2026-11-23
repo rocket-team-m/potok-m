@@ -194,6 +194,11 @@ Include `generated/protocol.h` (C11, stdlib only). It is header-only with
 `static inline` functions and uses explicit byte packing, not `memcpy` of a
 struct, so struct padding never reaches the wire.
 
+`potok_crc16` uses `POTOK_CRC16_TABLE[256]` (512 B of `.rodata`), built by the
+generator from `uart.yaml`'s `crc.polynomial`. The bytewise lookup replaces the
+bitwise loop: ~330 instead of ~2600 instructions per 40 B frame on Cortex-M4 at
+`-Os` (MCUF03). The Rust and Python bindings are unchanged.
+
 ```c
 #include "protocol.h"
 
