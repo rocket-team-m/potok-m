@@ -101,8 +101,11 @@ fn time_to_apogee_s(cfg: &Config, e: &Episode) -> f64 {
     // The tick must actually sit on the apogee this episode reports: the
     // trajectory is a 50 Hz subsample of the step-sampled apogee in `Episode`.
     let tick_apogee = e.trajectory[best].pos[2] as f64;
+    // Trajectory altitude is f32 (~4e-4 m of quantization at 3 km); a tick can
+    // round a hair above the f64 step apogee, so 1e-6 m is below the
+    // representation precision. 1 mm keeps the one-sided intent.
     assert!(
-        tick_apogee <= e.apogee_m + 1e-6 && rel(e.apogee_m, tick_apogee) < 0.01,
+        tick_apogee <= e.apogee_m + 1e-3 && rel(e.apogee_m, tick_apogee) < 0.01,
         "tick {best} altitude {tick_apogee:.3} m inconsistent with apogee {:.3} m",
         e.apogee_m
     );
@@ -173,6 +176,52 @@ fn episode0_vmax_matches_or_fixture() {
         "vmax err {:.2}% > {:.0}%",
         err * 100.0,
         VMAX_REL_TOL * 100.0
+    );
+}
+
+#[test]
+fn oracle_apogee_respects_burnout_energy_ceiling() {
+    use potok_sim::Vehicle;
+
+    let mut cfg = Config::default();
+    cfg.run.seed = 1;
+    let sim = Simulator::new(cfg.clone()).expect("Config::default() must load");
+    let burn_end = Vehicle::from_config(&cfg, 6.0, 1.0, [0.0, 0.0]).burn_end();
+    // AI is gated off through boost: baseline and oracle share the burnout
+    // state. Read the ceiling from the baseline so no coast energy pump can
+    // inflate the reference. With drag-only aero the coast can never climb
+    // above z_bo + |u_bo|^2 / 2g.
+    let base = sim.run_episode(16).expect("baseline episode must run");
+    let oracle = sim
+        .run_episode_with_oracle(16)
+        .expect("oracle episode must run");
+    let dt = 1.0 / cfg.run.frame_rate_hz;
+    let bo = base
+        .trajectory
+        .iter()
+        .enumerate()
+        .find(|(i, _)| *i as f64 * dt >= burn_end)
+        .map(|(_, tick)| tick)
+        .expect("a coast tick after burnout");
+    let u_bo2 = (0..3)
+        .map(|k| (bo.vel[k] as f64 - bo.wind[k] as f64).powi(2))
+        .sum::<f64>();
+    let ceiling = bo.pos[2] as f64 + u_bo2 / (2.0 * 9.80665);
+    eprintln!(
+        "ep16 baseline apogee {:.3} m, oracle apogee {:.3} m; \
+         burnout z {:.3} m, |u_bo| {:.3} m/s, energy ceiling {ceiling:.3} m",
+        base.apogee_m,
+        oracle.apogee_m,
+        bo.pos[2],
+        u_bo2.sqrt()
+    );
+    // The legacy normal force pumped ~14 kJ/kg and beat this ceiling by
+    // 152-203 m; 25 m still separates that artifact from RK4 drift. The
+    // decisive per-force gate is actuator_mapping_tests' no-positive-work test.
+    assert!(
+        oracle.apogee_m <= ceiling + 25.0,
+        "oracle apogee {:.3} m exceeds the burnout energy ceiling {ceiling:.3} m",
+        oracle.apogee_m
     );
 }
 

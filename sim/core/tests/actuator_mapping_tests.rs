@@ -127,6 +127,54 @@ fn zero_command_stays_bit_identical_under_the_new_mapping() {
 }
 
 #[test]
+fn aerodynamic_normal_force_does_no_positive_work() {
+    use potok_sim::{
+        dynamics::derivative,
+        math::{dot, sub},
+        Atmosphere, State, Vehicle,
+    };
+
+    let sim = sim(1337);
+    let atm: &Atmosphere = sim.atmosphere();
+    let cfg = sim.config();
+    let mk = |cna: f64| {
+        let mut v = Vehicle::from_config(cfg, 6.0, 1.0, [0.0, 0.0]);
+        v.aero.cna = cna;
+        v
+    };
+    // Identity quaternion keeps body axes aligned with world axes, so the
+    // 60 m/s lateral velocity is a large angle of attack -- exactly the
+    // condition that made the legacy normal force pump energy.
+    let s = State {
+        pos: [0.0, 0.0, 1000.0],
+        vel: [60.0, 0.0, 240.0],
+        quat: [1.0, 0.0, 0.0, 0.0],
+        omega: [0.0; 3],
+        mass: [6.0],
+    };
+    let wind = [0.0; 3];
+    let t = 15.0; // post-burnout: thrust force is zero
+    let g = [0.0, 0.0, -9.80665];
+    let drag_only = derivative(t, &s, wind, atm, &mk(0.0));
+    let with_lift = derivative(t, &s, wind, atm, &mk(cfg.aero.cna));
+    let v_rel = sub(s.vel, wind);
+    let p_drag = dot(sub(drag_only.vel, g), v_rel);
+    let p_lift = dot(sub(with_lift.vel, g), v_rel);
+    eprintln!(
+        "aero power at alpha: drag-only {p_drag:.6} W/kg, drag+normal {p_lift:.6} W/kg"
+    );
+    assert!(p_drag < 0.0, "drag alone must dissipate: {p_drag}");
+    assert!(
+        p_lift <= p_drag + 1e-6,
+        "normal force injects energy: {p_lift} vs drag-only {p_drag}"
+    );
+    assert!(
+        p_lift <= 1e-6,
+        "total aerodynamic power must be non-positive: {p_lift}"
+    );
+}
+
+#[test]
 fn oracle_accel_command_improves_lateral_rms_on_held_out() {
     let mut report = String::new();
     let mut improved = true;

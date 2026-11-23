@@ -517,13 +517,23 @@ pub fn derivative(t: f64, s: &State, wind: Vec3, atm: &Atmosphere, v: &Vehicle) 
     let drag = scale(vhat, -qdyn * v.aero.area_m2 * cd);
     // Bounded small-angle proxy: alpha ~ lateral speed / total speed.
     let az = speed.max(1.0);
-    // Normal force pushes the nose toward the relative wind. With the CP
-    // ahead of the CG (positive static_margin) this is restoring.
-    let normal = [
+    // Aerodynamic normal (lift) must be perpendicular to the relative wind.
+    // The legacy placeholder pointed ALONG the lateral relative wind, so its
+    // wind-frame power was N·v_b = qdyn·A·cna·(v_b0²+v_b1²)/a_z >= 0: a pump
+    // that added ~14 kJ/kg to the oracle coast and pushed apogee past the
+    // energy ceiling. Project out the along-wind component so only drag does
+    // work. The restoring moment (r_x CP x normal) keeps its small-alpha value.
+    let normal_raw = [
         qdyn * v.aero.area_m2 * cna * (vb[0] / az),
         qdyn * v.aero.area_m2 * cna * (vb[1] / az),
         0.0,
     ];
+    let normal = if speed > 1e-6 {
+        let along = dot(normal_raw, vb) / (speed * speed);
+        sub(normal_raw, scale(vb, along))
+    } else {
+        normal_raw
+    };
     let thrust_n = v.thrust_at(t);
     let thrust = scale(v.thrust_dir, thrust_n);
     let body_force = add(add(drag, normal), thrust);
