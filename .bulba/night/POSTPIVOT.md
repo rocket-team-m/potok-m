@@ -45,7 +45,7 @@ generalisation ratio / ECE / entropy, `module_sources`. Физика, порог
 - `.venv/bin/python -m pytest -q tests/test_train_teacher_v2.py` → **23 passed**.
 - `.venv/bin/python -m pytest -q` → **350 passed in 114.61s**.
 
-Коммит: `f512a0c` — `refactor(ai): default teacher-v2 to DAgger distillation; RLVR opt-in`.
+Коммит: `e3da20c` — `refactor(ai): default teacher-v2 to DAgger distillation; RLVR opt-in`.
 Push: origin main.
 
 ## Вне зоны задания (не трогал, требуется владельцу)
