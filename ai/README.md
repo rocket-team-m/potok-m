@@ -60,6 +60,30 @@ TSCT — наша внутренняя технология без публик�
 
 Тернарные факторы и 4-битные активации идут по линии [BitNet b1.58](https://arxiv.org/abs/2402.17764), [Reloaded](https://arxiv.org/abs/2407.09527), [BitNet v2](https://arxiv.org/abs/2504.18415). Оптимизатор — Muon+, [arXiv:2502.16982](https://arxiv.org/abs/2502.16982).
 
+## Пост-обучение: дистилляция по умолчанию
+
+Staged CLI `potok-train-teacher-v2` по умолчанию выполняет
+`sft → privileged (LoopWM + JEPA v2) → dagger → distill`. Это линия on-policy
+привилегированной дистилляции (DAgger/RMA); RLVR **не** входит в порядок по
+умолчанию — прямой GRPO на непрерывном контроллере low-dimensional коллапсирует
+(RES-RLVR, 2026-11-24). Детерминированный симуляционный верификатор остаётся,
+но как инструмент выбора чекпоинта и фальсификации, а не как источник градиента.
+
+`--rlvr` (или `--stage rlvr`) включает пятую стадию по запросу: снимки учителя
+после `sft`/`privileged`/`dagger` оцениваются тем же верификатором (формула,
+веса, жёсткий гейт и provenance не изменились), лучший снимок восстанавливается
+перед `distill` и сохраняется в `teacher_selected.pt`. Оптимизатор в этой стадии
+не создаётся, градиент от награды не считается; `--stage rlvr` запускает только
+стадии учителя и выбор, без дистилляции. Гейты RMSE / generalisation ratio /
+ECE / entropy, а также split и fingerprint DAgger сохранены; физика и пороги
+не тронуты.
+
+```sh
+PYTHONPATH=src .venv/bin/python -m potok_ai.train_teacher_v2 \
+  --data out/v3_final/data --out /tmp/potok-teacher --stage all --seed 1
+# опционально: добавить --rlvr для выбора чекпоинта верификатором
+```
+
 ## Контракт данных
 
 Симулятор пишет `validation.bin` v2/v3 и sidecar:

@@ -39,6 +39,52 @@ fields (`ece_held_out`, `conformal_coverage`) keep their honest disjoint-fit
 semantics. Held-out scenarios 16–19 are never passed to a training batch;
 their files are not written by this recipe.
 
+## Staged teacher-v2: DAgger/privileged distillation by default (RES-RLVR)
+
+`potok-train-teacher-v2` now runs four stages by default:
+
+```
+sft -> privileged (LoopWM + JEPA v2) -> dagger -> distill
+```
+
+RLVR is **not** part of that order. RES-RLVR (2026-11-24) found direct GRPO
+collapsing on a low-dimensional continuous controller (Ant/Walker2d/Humanoid
+returns 1012.77 / 129.60 / 86.93 vs 6609.79 / 5964.93 / 9484.00 for PPO in the
+one head-to-head found). The deterministic simulator verifier stays, but as a
+checkpoint-selection and falsification instrument, never as a gradient source.
+
+`--rlvr` (or `--stage rlvr`) opts into the fifth stage. It snapshots the teacher
+after each of `sft`, `privileged` and `dagger`, scores every snapshot with the
+**unchanged** verifier (`REWARD_FORMULA`, `REWARD_WEIGHTS`, hard gate on finite
+`u` and `|u| <= g_max`, the same `engine01:rlvr` child stream), restores the
+best-scoring snapshot into the teacher before `distill`, and writes
+`teacher_selected.pt` plus the `reward` provenance block in `metrics.json`.
+No optimizer is built and no loss is back-propagated there
+(`details.optimizer_steps == 0`); `--stage rlvr` runs the teacher stages and
+selection only, without distillation.
+
+All existing gates and provenance are preserved: RMSE / generalisation ratio /
+ECE / entropy on every stage, DAgger fit-held-out split and dataset fingerprint,
+module sources, reward formula, weights, hard gate and `reward_provenance`.
+No physics constant, gate or threshold was tuned.
+
+```sh
+# default: sft -> privileged -> dagger -> distill
+PYTHONPATH=src .venv/bin/python -m potok_ai.train_teacher_v2 \
+  --data out/v3_final/data --out /tmp/opencode/teacher_default --stage all --seed 1
+
+# opt-in verifier checkpoint selection (no policy gradient)
+PYTHONPATH=src .venv/bin/python -m potok_ai.train_teacher_v2 \
+  --data out/v3_final/data --out /tmp/opencode/teacher_rlvr \
+  --stage all --rlvr --seed 1
+```
+
+The regression gate is `tests/test_train_teacher_v2.py` (23 gates including
+default ordering, opt-in selection order, no-gradient verifier and preserved
+reward provenance). `scripts/train_final_v3.py` checks `stages_completed`
+against `STAGE_ORDER`, so artifacts from the old five-stage default no longer
+match the new default and must be re-run or archived explicitly.
+
 ## Run
 
 Production (full split, 3 seeds, 100 epochs):

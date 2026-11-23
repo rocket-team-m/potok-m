@@ -121,8 +121,8 @@ def test_entropy_is_reported_at_top_level_in_full_pipeline(tmp_path: Path, monke
     metrics = ttv.run(cfg)
     payload = json.loads((cfg.out / "metrics.json").read_text())
     assert metrics.entropy_enabled and metrics.entropy != 0.0
-    assert payload["entropy"] == metrics.stages["rlvr"]["entropy"]
-    assert metrics.entropy == metrics.stages["rlvr"]["entropy"]
+    assert payload["entropy"] == metrics.stages["dagger"]["entropy"]
+    assert metrics.entropy == metrics.stages["dagger"]["entropy"]
 
 
 @pytest.mark.parametrize("seed", ttv.SEEDS)
@@ -251,6 +251,13 @@ def test_rlvr_stage_records_reward_provenance(tmp_path: Path, monkeypatch) -> No
     assert "v3" in provenance["source"]
     assert "R =" in provenance["formula"]
     assert np.isfinite(provenance["total_mean"])
+    details = metrics.stages["rlvr"]["details"]
+    assert details["role"] == "checkpoint_selection"
+    assert details["optimizer_steps"] == 0
+    assert details["selected_checkpoint"] in {"sft", "privileged", "dagger"}
+    saved = torch.load(cfg.out / "teacher_selected.pt", map_location="cpu", weights_only=True)
+    assert saved["selected"] == details["selected_checkpoint"]
+    assert saved["role"] == "checkpoint_selection"
 
 
 def test_distill_stage_writes_student(tmp_path: Path, monkeypatch) -> None:
@@ -259,6 +266,7 @@ def test_distill_stage_writes_student(tmp_path: Path, monkeypatch) -> None:
     metrics = ttv.run(cfg)
     assert metrics.stage == "distill"
     assert metrics.stages_completed == ttv.STAGE_ORDER
+    assert "rlvr" not in metrics.stages_completed
     path = cfg.out / "student.pt"
     assert path.exists()
     saved = torch.load(path, map_location="cpu", weights_only=True)
@@ -266,6 +274,47 @@ def test_distill_stage_writes_student(tmp_path: Path, monkeypatch) -> None:
     assert saved["config_hash"] == metrics.config_hash
     assert saved["source"] in {"gdn2_student", "local"}
     assert metrics.module_sources["student"] == saved["source"]
+
+
+def test_default_pipeline_is_dagger_distillation_without_rlvr(tmp_path: Path, monkeypatch) -> None:
+    _use_episodes(monkeypatch, _episodes())
+    cfg = _cfg(tmp_path, stage="all")
+    assert ttv.STAGE_ORDER == ("sft", "privileged", "dagger", "distill")
+    metrics = ttv.run(cfg)
+    assert metrics.stages_completed == ttv.STAGE_ORDER
+    assert "rlvr" not in metrics.stages
+    assert metrics.reward_provenance == {}
+    assert not (cfg.out / "teacher_selected.pt").exists()
+
+
+def test_rlvr_opt_in_selects_before_distill(tmp_path: Path, monkeypatch) -> None:
+    _use_episodes(monkeypatch, _episodes())
+    metrics = ttv.run(_cfg(tmp_path, stage="all", rlvr=True))
+    assert metrics.stages_completed == ("sft", "privileged", "dagger", "rlvr", "distill")
+    assert metrics.stages_completed.index("rlvr") < metrics.stages_completed.index("distill")
+    details = metrics.stages["rlvr"]["details"]
+    assert set(details["candidates_scored"]) == {"sft", "privileged", "dagger"}
+    assert details["optimizer_steps"] == 0
+
+
+def test_rlvr_selection_takes_no_policy_gradient(tmp_path: Path, monkeypatch) -> None:
+    _use_episodes(monkeypatch, _episodes())
+    real_build = ttv._build_optimizer
+    real_reward = ttv.verifiable_reward
+    builds = {"count": 0}
+
+    def counting_build(parameters, cfg, lr):
+        builds["count"] += 1
+        return real_build(parameters, cfg, lr)
+
+    def verifier_only(candidate, baseline, target, g_max):
+        assert not torch.is_grad_enabled()
+        return real_reward(candidate, baseline, target, g_max)
+
+    monkeypatch.setattr(ttv, "_build_optimizer", counting_build)
+    monkeypatch.setattr(ttv, "verifiable_reward", verifier_only)
+    metrics = ttv.run(_cfg(tmp_path, stage="all", rlvr=True))
+    assert builds["count"] == len([s for s in metrics.stages_completed if s != "rlvr"])
 
 
 def test_eval_contamination_refused_before_training(tmp_path: Path, monkeypatch) -> None:
@@ -284,6 +333,8 @@ def test_cli_parser_builds_typed_config() -> None:
     assert cfg.data == Path("d") and cfg.out == Path("o")
     with pytest.raises(SystemExit):
         ttv.build_parser().parse_args(["--data", "d", "--out", "o", "--seed", "9"])
+    opt_in = ttv.build_parser().parse_args(["--data", "d", "--out", "o", "--rlvr"])
+    assert ttv.TeacherV2Config.from_args(opt_in).rlvr is True
 
 
 def test_teacher_config_keeps_post05_defaults_off(tmp_path: Path) -> None:

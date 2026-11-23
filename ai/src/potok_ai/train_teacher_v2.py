@@ -1,10 +1,18 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Staged teacher-v2 trainer (ENGINE01).
 
-One CLI, one typed config and one ``metrics.json`` for the five-stage teacher
+One CLI, one typed config and one ``metrics.json`` for the staged teacher
 pipeline:
 
-    sft -> privileged (LoopWM + JEPA v2) -> dagger -> rlvr -> distill
+    sft -> privileged (LoopWM + JEPA v2) -> dagger -> distill
+
+On-policy privileged-teacher distillation (DAgger/RMA-style) is the default;
+RLVR is NOT (RES-RLVR: direct GRPO collapses on this low-dimensional continuous
+controller). ``--rlvr`` or ``--stage rlvr`` opts into a final checkpoint-selection
+stage: the deterministic verifier scores the teacher snapshots saved after each
+teacher stage, the best one is restored before distillation, and no reward
+gradient is ever taken. The reward formula, weights, hard gate and provenance
+are unchanged; only its role moves from policy update to model selection.
 
 ``--stage X`` runs every stage through X (so a later stage never starts from a
 fresh model). Determinism is structural: seeds 1/2/3 only, named child streams
@@ -104,7 +112,8 @@ class StudentLike(Protocol):
     def forward(self, window: torch.Tensor, cond: torch.Tensor) -> torch.Tensor: ...
 
 
-STAGE_ORDER = ("sft", "privileged", "dagger", "rlvr", "distill")
+STAGE_ORDER = ("sft", "privileged", "dagger", "distill")
+RLVR_STAGE = "rlvr"
 SEEDS = (1, 2, 3)
 EVAL_SCENARIO_IDS = frozenset({16, 17, 18, 19})
 JEPA_HORIZONS = (3, 6, 10)
@@ -158,6 +167,7 @@ class TeacherV2Config:
     entropy_weight: float = 1.0
     dagger_rounds: int = 1
     n_inner_held_out: int = 2
+    rlvr: bool = False  # opt-in checkpoint selection, never a policy gradient
     rlvr_samples: int = 4
     rlvr_temperature: float = 0.05
     truth_sidecar: Path | None = None
@@ -172,9 +182,10 @@ class TeacherV2Config:
         object.__setattr__(self, "out", Path(self.out))
         if self.truth_sidecar is not None:
             object.__setattr__(self, "truth_sidecar", Path(self.truth_sidecar))
-        if self.stage not in (*STAGE_ORDER, "all"):
+        if self.stage not in (*STAGE_ORDER, RLVR_STAGE, "all"):
             raise ValueError(
-                f"unknown stage {self.stage!r}; expected one of all, {', '.join(STAGE_ORDER)}"
+                f"unknown stage {self.stage!r}; expected one of all, "
+                f"{', '.join((*STAGE_ORDER, RLVR_STAGE))}"
             )
         if self.opt not in ("adamw", "muon"):
             raise ValueError(f"unknown optimizer {self.opt!r}; expected adamw or muon")
@@ -862,33 +873,35 @@ def verifiable_reward(
     return total, parts
 
 
-def _stage_rlvr(
+def _verifier_score(
     model: LoopWM,
     cfg: TeacherV2Config,
-    fit: list[Episode],
-    inner: list[Episode],
-    device: torch.device,
+    batches: list[tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[int | None]]],
     cfg_hash: str,
-) -> StageReport:
-    optimizer = _build_optimizer(list(model.named_parameters()), cfg, cfg.lr)
-    rng = torch.Generator().manual_seed(child_seed(cfg.seed, "rlvr"))
-    batches = _window_batches(fit, cfg)
-    steps, entropy = 0, 0.0
+) -> tuple[float, VerifiableReward]:
+    """Score one teacher snapshot with the verifier; no graph, no optimizer.
+
+    The reward formula, weights, hard gate and provenance are the historical
+    ones (REWARD_FORMULA / REWARD_WEIGHTS / verifiable_reward). Only the use of
+    the result changes: it ranks snapshots, it is never back-propagated.
+    """
     totals: list[float] = []
     laterals: list[float] = []
     efforts: list[float] = []
     risks: list[float] = []
     valid_count, sample_count = 0, 0
-    model.train()
-    for _ in range(cfg.epochs):
-        for batch in batches:
-            window, cond, target = (t.to(device) for t in batch[:3])
-            latent, info = model.refine(window, cond)
+    generator = torch.Generator().manual_seed(child_seed(cfg.seed, RLVR_STAGE))
+    model.eval()
+    with torch.no_grad():
+        for window, cond, target, _ in batches:
+            latent, _ = model.refine(window, cond)
             raw = model.head_logits(latent)
             mean = model.head_output(raw)[:, :2]
             baseline = physics_baseline(window[:, -1])
-            noise = torch.randn((cfg.rlvr_samples, *mean.shape), generator=rng, dtype=mean.dtype)
-            candidate = mean.unsqueeze(0).detach() + cfg.rlvr_temperature * noise
+            noise = torch.randn(
+                (cfg.rlvr_samples, *mean.shape), generator=generator, dtype=mean.dtype
+            )
+            candidate = mean.unsqueeze(0) + cfg.rlvr_temperature * noise
             rewards, parts = verifiable_reward(
                 candidate, baseline.unsqueeze(0), target.unsqueeze(0), float(model.cfg.g_max)
             )
@@ -898,26 +911,10 @@ def _stage_rlvr(
                 raise ValueError(
                     "every RLVR group needs at least one candidate that passes the gate"
                 )
-            masked = torch.where(valid, rewards, torch.zeros_like(rewards))
-            group_mean = masked.sum(dim=0) / counts
-            spread = torch.where(valid, (rewards - group_mean).square(), torch.zeros_like(rewards))
-            group_std = torch.sqrt(spread.sum(dim=0) / counts)
-            advantage = torch.where(
-                valid, (rewards - group_mean) / (group_std + 1e-6), torch.zeros_like(rewards)
-            )
-            policy = -(advantage.unsqueeze(-1) * (candidate - mean.detach().unsqueeze(0))).mean()
-            command = final_command(mean, baseline, residual=True)
-            anchor = normalized_correction_loss(command, target)
-            entropy = model.exit_entropy_loss(info) if cfg.learned_exit else raw.new_zeros(())
-            loss = policy + anchor + cfg.entropy_weight * entropy
-            optimizer.zero_grad(set_to_none=False)
-            loss.backward()
-            optimizer.step()
-            steps += 1
-            totals.extend(rewards.detach().reshape(-1).tolist())
-            laterals.extend(parts["lateral"].detach().reshape(-1).tolist())
-            efforts.extend(parts["effort"].detach().reshape(-1).tolist())
-            risks.extend(parts["risk"].detach().reshape(-1).tolist())
+            totals.extend(rewards.reshape(-1).tolist())
+            laterals.extend(parts["lateral"].reshape(-1).tolist())
+            efforts.extend(parts["effort"].reshape(-1).tolist())
+            risks.extend(parts["risk"].reshape(-1).tolist())
             valid_count += int(valid.sum())
             sample_count += int(valid.numel())
     n = max(len(totals), 1)
@@ -934,19 +931,63 @@ def _stage_rlvr(
         risk=sum(risks) / n,
         total_mean=sum(totals) / n,
     )
-    train, held, ratio, ece = _evaluate(model, fit, inner, cfg, device)
-    details = {"reward": reward.as_dict(), "rlvr_samples_per_group": cfg.rlvr_samples}
-    return StageReport(
-        "rlvr",
-        steps,
-        train,
-        held,
-        ratio,
-        ece,
-        float(entropy.detach()),
-        cfg.learned_exit,
-        details,
+    return reward.total_mean, reward
+
+
+def _stage_rlvr(
+    model: LoopWM,
+    cfg: TeacherV2Config,
+    fit: list[Episode],
+    inner: list[Episode],
+    device: torch.device,
+    cfg_hash: str,
+    candidates: list[tuple[str, dict[str, torch.Tensor]]] | None = None,
+) -> StageReport:
+    """Select the best teacher snapshot by verifier reward; never update weights from it.
+
+    RES-RLVR: a GRPO policy gradient collapses on this continuous controller, so
+    the verifier is a selection/falsification instrument only. Candidates are the
+    snapshots saved after each teacher stage. The winner is restored into ``model``
+    before distillation. No optimizer is built, no loss is back-propagated.
+    """
+    if not candidates:
+        state = {name: value.detach().clone() for name, value in model.state_dict().items()}
+        candidates = [(RLVR_STAGE, state)]
+    batches = _window_batches(fit, cfg)
+    scored: list[tuple[float, str, dict[str, torch.Tensor], VerifiableReward]] = []
+    for name, state in candidates:
+        model.load_state_dict(state)
+        score, reward = _verifier_score(model, cfg, batches, cfg_hash)
+        scored.append((score, name, state, reward))
+    if not scored:
+        raise ValueError("RLVR checkpoint selection needs at least one teacher snapshot")
+    # max() keeps the first entry on ties -> deterministic across seeds/processes.
+    best_score, best_name, best_state, best_reward = max(scored, key=lambda row: row[0])
+    model.load_state_dict(best_state)
+    cfg.out.mkdir(parents=True, exist_ok=True)
+    torch.save(
+        {
+            "stage": RLVR_STAGE,
+            "role": "checkpoint_selection",
+            "source": "v3 verifier (no policy gradient)",
+            "seed": cfg.seed,
+            "config_hash": cfg_hash,
+            "selected": best_name,
+            "score": best_score,
+            "state_dict": best_state,
+        },
+        cfg.out / "teacher_selected.pt",
     )
+    train, held, ratio, ece = _evaluate(model, fit, inner, cfg, device)
+    details = {
+        "reward": best_reward.as_dict(),
+        "rlvr_samples_per_group": cfg.rlvr_samples,
+        "role": "checkpoint_selection",
+        "selected_checkpoint": best_name,
+        "candidates_scored": [name for _, name, _, _ in scored],
+        "optimizer_steps": 0,
+    }
+    return StageReport(RLVR_STAGE, 0, train, held, ratio, ece, 0.0, False, details)
 
 
 def _build_student(cfg: TeacherV2Config, device: torch.device) -> StudentLike:
@@ -1012,28 +1053,41 @@ def run(cfg: TeacherV2Config) -> TeacherV2Metrics:
     fit, inner, held_ids = partition_episodes(
         load_episodes(cfg.data), seed=cfg.seed, n_held_out=cfg.n_inner_held_out
     )
-    stages = STAGE_ORDER if cfg.stage == "all" else STAGE_ORDER[: STAGE_ORDER.index(cfg.stage) + 1]
+    if cfg.stage == "all":
+        stages = list(STAGE_ORDER)
+    elif cfg.stage == RLVR_STAGE:
+        # Opt-in selection after the teacher stages, before any distillation.
+        stages = [*STAGE_ORDER[:-1], RLVR_STAGE]
+    else:
+        stages = list(STAGE_ORDER[: STAGE_ORDER.index(cfg.stage) + 1])
+    if cfg.rlvr and RLVR_STAGE not in stages:
+        insert_at = stages.index("distill") if "distill" in stages else len(stages)
+        stages.insert(insert_at, RLVR_STAGE)
     model = _build_teacher(cfg, device)
     digest = config_hash(cfg)
     reports: dict[str, StageReport] = {}
     reward: dict[str, Any] = {}
+    snapshots: list[tuple[str, dict[str, torch.Tensor]]] = []
     for stage in stages:
         if stage == "privileged":
             report = _stage_privileged(model, cfg, fit, inner, device)
         elif stage == "dagger":
             report = _stage_dagger(model, cfg, fit, inner, held_ids, device)
-        elif stage == "rlvr":
-            report = _stage_rlvr(model, cfg, fit, inner, device, digest)
+        elif stage == RLVR_STAGE:
+            report = _stage_rlvr(model, cfg, fit, inner, device, digest, snapshots)
         elif stage == "distill":
             report = _stage_distill(model, cfg, fit, inner, device)
         else:
             report = _stage_sft(model, cfg, fit, inner, device)
         reports[stage] = report
+        if RLVR_STAGE in stages and stage in STAGE_ORDER[:-1]:
+            state = {name: value.detach().clone() for name, value in model.state_dict().items()}
+            snapshots.append((stage, state))
         if "reward" in report.details:
             reward = report.details["reward"]
     last = reports[stages[-1]]
-    # The student stage has no LoopWM entropy; report the last teacher stage's
-    # value at the top level so --stage all still records the entropy term.
+    # The student (and RLVR selection) stages have no LoopWM entropy; report the
+    # last teacher stage's value so --stage all still records the entropy term.
     entropy_enabled = any(report.entropy_enabled for report in reports.values())
     entropy = next(
         (report.entropy for report in reversed(list(reports.values())) if report.entropy_enabled),
@@ -1076,9 +1130,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--stage",
-        choices=(*STAGE_ORDER, "all"),
+        choices=(*STAGE_ORDER, RLVR_STAGE, "all"),
         default="all",
-        help="run every stage through this one (default: all)",
+        help=(
+            "run every stage through this one (default: all; RLVR is opt-in via "
+            "--rlvr or --stage rlvr)"
+        ),
     )
     parser.add_argument("--seed", type=int, choices=SEEDS, default=1)
     parser.add_argument("--device", choices=("cpu",), default="cpu")
@@ -1100,6 +1157,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--entropy-weight", type=float, default=1.0)
     parser.add_argument("--dagger-rounds", type=int, default=1)
     parser.add_argument("--n-inner-held-out", type=int, default=2)
+    parser.add_argument(
+        "--rlvr",
+        action="store_true",
+        help="opt into RLVR verifier checkpoint selection (no policy gradient)",
+    )
     parser.add_argument("--rlvr-samples", type=int, default=4)
     parser.add_argument("--rlvr-temperature", type=float, default=0.05)
     parser.add_argument("--truth-sidecar", type=Path, default=None)
