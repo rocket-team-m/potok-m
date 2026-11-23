@@ -53,14 +53,22 @@ fn physics_features_are_finite_and_bounded() {
                 "physics angles must come from the state, not zeros"
             );
 
-            // Relation between derived features, not an invented constant:
-            // drag_est = cd0 * qdyn(Pa) * area / current mass. The mass falls
-            // as propellant burns, so lift-off mass gives the lower bound.
+            // drag_est = cd0 * qdyn(Pa) * area / current mass. Recover the
+            // current mass from the trajectory tick and pin the feature to it.
+            // After separation the floor drops below half the lift-off mass,
+            // so a fixed multiple of the lift-off value is not a valid bound.
             let c = e.meta.conditioning;
             for (i, f) in e.frames.iter().enumerate() {
                 let at_liftoff = c.cd0 * f.physics[2] * 1000.0 * c.area_m2 / c.mass_kg;
-                assert!(f.physics[4] >= at_liftoff * 0.99 - 1e-6);
-                assert!(f.physics[4] <= at_liftoff * 2.0 + 1e-6);
+                let at_tick = at_liftoff * c.mass_kg / e.trajectory[i].mass_kg;
+                // Relative 1e-3; the absolute floor keeps a zero-qdyn tick
+                // (at_tick == 0) from turning into 0/0.
+                assert!(
+                    (f.physics[4] - at_tick).abs() <= at_tick * 1e-3 + 1e-6,
+                    "seed {seed} index {index} frame {i}: drag_est {} vs at_tick {}",
+                    f.physics[4],
+                    at_tick
+                );
                 let off = i * 14;
                 assert_eq!(f.physics[0], e.features[off + 8]);
                 assert_eq!(f.physics[5], e.features[off + 13]);
