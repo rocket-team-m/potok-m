@@ -6,9 +6,11 @@ layout; version 2 adds conditioning, a wind/gust scenario id and a split flag;
 version 3 keeps the v2 layout but writes six targets per frame, appending the
 authoritative fin command demand ``g_accel_y, g_accel_x`` (m/s^2) to the four
 legacy angle-domain columns. ``Episode.command_target()`` returns the fin
-command ``[g_accel_y, -g_accel_x]`` for v3; ``Episode.g_theta()`` keeps the
-legacy angle target as a diagnostic. The version and target count are checked
-together, so a v3 file is never silently read as v2. The older
+command ``[g_accel_y, -g_accel_x]`` for v3 and raises for v1/v2; ``Episode.g_theta()``
+keeps the legacy angle target as a diagnostic. Fitting that angle target as a
+command requires the explicit ``allow_diagnostic_target`` escape, never a silent
+substitution. The version and target count are checked together, so a v3 file is
+never silently read as v2. The older
 ``POTOK1\\0\\0`` layout and a bare float32 array remain as fixture fallbacks.
 """
 
@@ -80,20 +82,28 @@ class Episode:
             raise ValueError("episode has no reference targets")
         return np.asarray(self.targets[:, TARGET_G_ROLL : TARGET_G_PITCH + 1], np.float32)
 
-    def command_target(self) -> np.ndarray:
+    def command_target(self, *, allow_diagnostic_target: bool = False) -> np.ndarray:
         """Authoritative fin command ``(T,2)`` in [roll, pitch] order.
 
         A v3 file carries ``g_accel``; the fin actuator consumes
-        ``[g_accel_y, -g_accel_x]`` m/s^2 (sim ``fin_accel_command``). A legacy
-        v1/v2 file has no acceleration column, so its only reference is the
-        diagnostic ``g_theta`` - use that explicitly rather than inventing a
-        value, and never mistake it for the v3 command.
+        ``[g_accel_y, -g_accel_x]`` m/s^2 (sim ``fin_accel_command``). A v1/v2
+        file has no acceleration column, so it has no command at all: fitting
+        the diagnostic ``g_theta`` (rad) as a command is a loud error unless
+        ``allow_diagnostic_target`` explicitly requests angle-domain diagnostic
+        training.
         """
-        if self.g_accel is not None:
-            return np.stack(
-                (self.g_accel[:, 0], -self.g_accel[:, 1]), axis=1
-            ).astype(np.float32)
-        return self.g_theta()
+        if self.g_accel is None:
+            if allow_diagnostic_target:
+                return self.g_theta()
+            raise ValueError(
+                "v1/v2 episode has no authoritative g_accel command; "
+                "command-target training requires v3 data (g_theta is "
+                "diagnostic only). Pass allow_diagnostic_target=True only for "
+                "explicit angle-domain diagnostic training"
+            )
+        return np.stack(
+            (self.g_accel[:, 0], -self.g_accel[:, 1]), axis=1
+        ).astype(np.float32)
 
 
 @dataclass
@@ -378,8 +388,14 @@ def make_smart_episode(
         axis=1,
     ).astype(np.float32)
     frames_array = np.concatenate([raw, physics], axis=1)
-    targets = np.tanh(frames_array[:, 1:3] * 0.3).astype(np.float32)
-    targets = np.concatenate([targets, np.ones((frames, 2), np.float32)], axis=1)
+    diagnostic = np.tanh(frames_array[:, 1:3] * 0.3).astype(np.float32)
+    # v3 fixture: choose g_accel so the authoritative command equals the old
+    # diagnostic target, keeping training numerics unchanged while exercising
+    # the command-target path.
+    g_accel = np.stack((diagnostic[:, 0], -diagnostic[:, 1]), axis=1).astype(np.float32)
+    targets = np.concatenate(
+        [diagnostic, np.ones((frames, 2), np.float32), g_accel], axis=1
+    )
     if conditioning is None:
         conditioning = np.array([13.0, 0.0082, 0.35, 0.95, 3000.0, 0.01], np.float32)
     legacy_meta = np.array([13.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0], np.float32)
@@ -392,6 +408,7 @@ def make_smart_episode(
         scenario_id=scenario_id,
         conditioning=np.asarray(conditioning, np.float32).copy(),
         held_out=held_out,
+        g_accel=g_accel,
     )
 
 
@@ -404,6 +421,7 @@ class SmartWindowDataset(Dataset):
         window: int = 50,
         step: int = 1,
         limit: int | None = None,
+        allow_diagnostic_target: bool = False,
     ) -> None:
         if window < 1:
             raise ValueError("window must be positive")
@@ -415,9 +433,14 @@ class SmartWindowDataset(Dataset):
                 )
             if episode.conditioning is None:
                 raise ValueError("smart episodes need a conditioning vector")
-            # v3 targets are the fin command [g_accel_y, -g_accel_x]; legacy
-            # v1/v2 episodes fall back to their diagnostic g_theta columns.
-            command = episode.command_target() if episode.targets is not None else None
+            # v3 targets are the fin command [g_accel_y, -g_accel_x]. A legacy
+            # v1/v2 episode has no command: it is refused loudly unless the
+            # caller opts into angle-domain diagnostic training.
+            command = (
+                episode.command_target(allow_diagnostic_target=allow_diagnostic_target)
+                if episode.targets is not None
+                else None
+            )
             for start in range(0, len(episode.frames) - window + 1, step):
                 target = (
                     command[start + window - 1]

@@ -3,6 +3,7 @@
 import struct
 
 import numpy as np
+import pytest
 
 from potok_ai.data import (
     SIM_MAGIC,
@@ -138,12 +139,17 @@ def test_v3_truth_metadata_keeps_scenario_split_and_target(tmp_path):
     assert np.allclose(episode.command_target()[0], [2.0, -3.0])
 
 
-def test_legacy_v2_target_is_diagnostic_g_theta(tmp_path):
+def test_legacy_v2_target_is_diagnostic_only(tmp_path):
     path = tmp_path / "v2.bin"
     path.write_bytes(_pack_v3(2, SIM_TARGETS, SIM_META_V2))
     episode = read_validation(path).episodes[0]
     assert episode.g_accel is None
-    assert np.allclose(episode.command_target()[0], [0.01, -0.02])
+    assert np.allclose(episode.g_theta()[0], [0.01, -0.02])
+    with pytest.raises(ValueError, match="v1/v2"):
+        episode.command_target()
+    assert np.allclose(
+        episode.command_target(allow_diagnostic_target=True)[0], [0.01, -0.02]
+    )
 
 
 def test_rejects_corrupt_header(tmp_path):

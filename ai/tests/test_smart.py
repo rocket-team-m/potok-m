@@ -10,7 +10,7 @@ from potok_ai.data import (
     SIM_HEADER,
     SIM_MAGIC,
     SIM_META_V2,
-    SIM_TARGETS,
+    SIM_TARGETS_V3,
     SIM_V2_EPISODE,
     SMART_FEATURES,
     group_by_scenario,
@@ -59,12 +59,12 @@ def _pack(episodes: list) -> bytes:
     header = struct.pack(
         "<8sIQ4I3f32s",
         SIM_MAGIC,
-        2,
+        3,
         42,
         len(episodes),
         first.frames.shape[0],
         SMART_FEATURES,
-        SIM_TARGETS,
+        SIM_TARGETS_V3,
         50.0,
         0.02,
         0.06,
@@ -95,7 +95,7 @@ def test_smart_validation_reader_and_scenario_split(tmp_path):
     path = tmp_path / "validation.bin"
     path.write_bytes(_pack(_episodes()))
     data = read_validation(path)
-    assert data.header.version == 2
+    assert data.header.version == 3
     assert data.header.feature_count == SMART_FEATURES
     episodes = data.episodes
     assert [episode.frames.shape for episode in episodes] == [(40, 14)] * 6

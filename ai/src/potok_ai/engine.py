@@ -46,6 +46,7 @@ from .data import (
     group_by_scenario,
     load_episodes,
 )
+from .data_v3 import training_target
 from .export import export_student, load_student_export
 from .loopwm import LoopWM, LoopWMConfig
 from .loopwm_lite import LiteConfig, LiteModel
@@ -89,6 +90,7 @@ class TrainConfig:
     exit_threshold: float = 1e-3
     latent_weight: float = 0.05
     target_weight: float = 0.1
+    allow_diagnostic_target: bool = False
     conf_weight: float = 1.0
     latent_tokens: int = 16
     lite_width: int = 64
@@ -121,6 +123,7 @@ class TrainConfig:
             lr=self.lr,
             student_lr=self.student_lr,
             target_weight=self.target_weight,
+            allow_diagnostic_target=self.allow_diagnostic_target,
             width=self.width,
             rank=self.rank,
             heads=self.heads,
@@ -370,14 +373,20 @@ def seed_everything(seed: int) -> None:
     torch.set_num_threads(1)
 
 
-def _smart_frames(episode) -> tuple[np.ndarray, np.ndarray | None]:
+def _smart_frames(
+    episode, *, allow_diagnostic_target: bool = False
+) -> tuple[np.ndarray, np.ndarray | None]:
     """A 20-value frame per tick: 14 features plus the 6 conditioning numbers."""
     frames = np.asarray(episode.frames[:, :SMART_FEATURES], dtype=np.float32)
     conditioning = np.asarray(episode.conditioning, dtype=np.float32)
     with_cond = np.concatenate([frames, np.tile(conditioning, (len(frames), 1))], axis=1)
-    # Authoritative v3 fin command [g_accel_y, -g_accel_x]; legacy v1/v2
-    # episodes fall back to their diagnostic g_theta columns.
-    targets = None if episode.targets is None else episode.command_target()
+    # Authoritative v3 fin command [g_accel_y, -g_accel_x]. A v1/v2 episode is
+    # refused loudly unless angle-domain diagnostic training was requested.
+    targets = (
+        None
+        if episode.targets is None
+        else training_target(episode, allow_diagnostic_target=allow_diagnostic_target)
+    )
     return with_cond, targets
 
 
@@ -391,7 +400,12 @@ def _window_held_out_predictions(model: nn.Module, groups: dict, cfg: TrainConfi
         for name, episodes in groups.items():
             if not any(episode.held_out for episode in episodes):
                 continue
-            dataset = SmartWindowDataset(episodes, window=cfg.window, limit=cfg.eval_limit)
+            dataset = SmartWindowDataset(
+                episodes,
+                window=cfg.window,
+                limit=cfg.eval_limit,
+                allow_diagnostic_target=cfg.allow_diagnostic_target,
+            )
             if not dataset.samples:
                 raise ValueError(f"scenario {name} has no evaluation windows")
             for windows, conditions, targets in _batches(dataset, cfg.batch):
@@ -415,7 +429,10 @@ class LRSAdapter(ModelAdapter):
         return StatefulTCN(smart_student_config(seed=cfg.seed)).to(device)
 
     def batches(self, episodes: list, cfg: TrainConfig):
-        data = [_smart_frames(episode) for episode in episodes]
+        data = [
+            _smart_frames(episode, allow_diagnostic_target=cfg.allow_diagnostic_target)
+            for episode in episodes
+        ]
         if cfg.limit is not None:
             data = data[: cfg.limit]
         yield from data
@@ -468,7 +485,9 @@ class LRSAdapter(ModelAdapter):
             for name, episodes in groups.items():
                 squared, count = 0.0, 0
                 for episode in episodes:
-                    frames, targets = _smart_frames(episode)
+                    frames, targets = _smart_frames(
+                        episode, allow_diagnostic_target=cfg.allow_diagnostic_target
+                    )
                     if targets is None:
                         raise ValueError(f"scenario {name} has no reference corrections")
                     model.reset_state()
@@ -497,7 +516,9 @@ class LRSAdapter(ModelAdapter):
                 if not any(episode.held_out for episode in episodes):
                     continue
                 for episode in episodes:
-                    frames, targets = _smart_frames(episode)
+                    frames, targets = _smart_frames(
+                        episode, allow_diagnostic_target=cfg.allow_diagnostic_target
+                    )
                     if targets is None:
                         raise ValueError(f"scenario {name} has no reference corrections")
                     model.reset_state()
@@ -571,7 +592,12 @@ class LiteAdapter(ModelAdapter):
         return model
 
     def batches(self, episodes: list, cfg: TrainConfig):
-        dataset = SmartWindowDataset(episodes, window=cfg.window, limit=cfg.limit)
+        dataset = SmartWindowDataset(
+            episodes,
+            window=cfg.window,
+            limit=cfg.limit,
+            allow_diagnostic_target=cfg.allow_diagnostic_target,
+        )
         if not dataset.samples:
             raise ValueError("no training windows in the non-held-out scenarios")
         yield from _batches(dataset, cfg.batch)
@@ -685,7 +711,12 @@ class LoopWMAdapter(ModelAdapter):
         ).to(device)
 
     def batches(self, episodes: list, cfg: TrainConfig):
-        dataset = SmartWindowDataset(episodes, window=cfg.window, limit=cfg.limit)
+        dataset = SmartWindowDataset(
+            episodes,
+            window=cfg.window,
+            limit=cfg.limit,
+            allow_diagnostic_target=cfg.allow_diagnostic_target,
+        )
         if not dataset.samples:
             raise ValueError("no training windows in the non-held-out scenarios")
         yield from _batches(dataset, cfg.batch)
@@ -810,6 +841,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--exit-threshold", type=float, default=1e-3)
     parser.add_argument("--latent-weight", type=float, default=0.05)
     parser.add_argument("--target-weight", type=float, default=0.1)
+    parser.add_argument(
+        "--allow-diagnostic-target", action="store_true",
+        help="fit angle-domain g_theta when data is v1/v2 (diagnostic training "
+             "only; command-target training requires v3)",
+    )
     parser.add_argument(
         "--conf-weight", type=float, default=1.0,
         help="weight of the logit-domain confidence loss (default: 1.0)",

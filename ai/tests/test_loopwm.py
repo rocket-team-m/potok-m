@@ -13,7 +13,7 @@ from potok_ai.data import (
     SIM_HEADER,
     SIM_MAGIC,
     SIM_META_V2,
-    SIM_TARGETS,
+    SIM_TARGETS_V3,
     SIM_V2_EPISODE,
     SMART_FEATURES,
     group_by_scenario,
@@ -58,12 +58,12 @@ def _pack(episodes: list) -> bytes:
     header = struct.pack(
         "<8sIQ4I3f32s",
         SIM_MAGIC,
-        2,
+        3,
         42,
         len(episodes),
         first.frames.shape[0],
         SMART_FEATURES,
-        SIM_TARGETS,
+        SIM_TARGETS_V3,
         50.0,
         0.02,
         0.06,
@@ -310,6 +310,14 @@ def test_training_finite_across_threshold_sweep():
             ]
         )
         episodes = [e for e in load_episodes(data) if not e.held_out]
+        # The archived run4 data is v2: give the fixture the v3 command columns
+        # (command == g_theta) so the trainer's command-target contract holds.
+        for episode in episodes:
+            if episode.g_accel is None:
+                theta = episode.g_theta()
+                episode.g_accel = np.stack(
+                    (theta[:, 0], -theta[:, 1]), axis=1
+                ).astype(np.float32)
         model = train_teacher(episodes, args, torch.device("cpu"))
         assert all(torch.isfinite(p).all() for p in model.parameters())
         latent, info = model.refine(torch.randn(2, 12, 14), torch.randn(2, 6))

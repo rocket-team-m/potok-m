@@ -9,6 +9,9 @@ module adds the distinction a trainer must not get wrong:
 * ``g_roll`` / ``g_pitch`` (``g_theta``) are the angle-domain diagnostic target.
 * v1/v2 have no acceleration column: they expose only the diagnostic. Asking
   them for an authoritative command is a loud error, never a substitution.
+  ``training_target`` is the single trainer-facing resolver: v3 returns the
+  fin command, and fitting g_theta is possible only through the explicit
+  ``allow_diagnostic_target`` escape for angle-domain diagnostic training.
 """
 
 from __future__ import annotations
@@ -57,15 +60,21 @@ def authoritative_command(episode: Episode) -> np.ndarray | None:
     return episode.command_target()
 
 
+def training_target(
+    episode: Episode, *, allow_diagnostic_target: bool = False
+) -> np.ndarray:
+    """The target a trainer fits: authoritative command, or explicit diagnostic.
+
+    v3 returns the fin command. For v1/v2 there is no command: the call is loud
+    unless ``allow_diagnostic_target`` explicitly requests angle-domain
+    diagnostic training, in which case the legacy g_theta columns are fitted.
+    """
+    return episode.command_target(allow_diagnostic_target=allow_diagnostic_target)
+
+
 def authoritative_target(episode: Episode) -> np.ndarray:
     """Authoritative fin command ``(T, 2)``; loud error for v1/v2 episodes."""
-    command = authoritative_command(episode)
-    if command is None:
-        raise ValueError(
-            "episode has no authoritative v3 g_accel command; "
-            "g_theta is diagnostic only, upgrade the data to v3"
-        )
-    return command
+    return training_target(episode)
 
 
 def diagnostic_target(episode: Episode) -> np.ndarray:

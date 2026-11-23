@@ -23,6 +23,7 @@ from torch.nn import functional as F
 from torch.optim import AdamW
 
 from .data import SMART_FEATURES, SmartWindowDataset, group_by_scenario, load_episodes
+from .data_v3 import training_target
 from .export import export_student
 from .jepa import JEPAPredictor, mask_windows
 from .model import SmartConfig, SmartTeacher
@@ -46,6 +47,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lr", type=float, default=2e-3)
     parser.add_argument("--student-lr", type=float, default=1e-3)
     parser.add_argument("--target-weight", type=float, default=0.1)
+    parser.add_argument(
+        "--allow-diagnostic-target", action="store_true",
+        help="fit angle-domain g_theta when data is v1/v2 (diagnostic training "
+             "only; command-target training requires v3)",
+    )
     parser.add_argument("--width", type=int, default=128, help="teacher width (spec: 128)")
     parser.add_argument("--rank", type=int, default=64, help="teacher TSCT rank (spec: 64)")
     return parser
@@ -142,7 +148,12 @@ def train_teacher(episodes, args: argparse.Namespace, device: torch.device) -> S
     ema = _TeacherEMA(model, config.ema_momentum)
     predictor = JEPAPredictor(config.width).to(device)
     optimizer = AdamW(list(model.parameters()) + list(predictor.parameters()), lr=args.lr)
-    dataset = SmartWindowDataset(episodes, window=args.window, limit=args.limit)
+    dataset = SmartWindowDataset(
+        episodes,
+        window=args.window,
+        limit=args.limit,
+        allow_diagnostic_target=getattr(args, "allow_diagnostic_target", False),
+    )
     if not dataset.samples:
         raise ValueError("no training windows in the non-held-out scenarios")
 
@@ -172,7 +183,12 @@ def evaluate(
     model.eval()
     with torch.no_grad():
         for name, episodes in groups.items():
-            dataset = SmartWindowDataset(episodes, window=args.window, limit=args.eval_limit)
+            dataset = SmartWindowDataset(
+                episodes,
+                window=args.window,
+                limit=args.eval_limit,
+                allow_diagnostic_target=getattr(args, "allow_diagnostic_target", False),
+            )
             if not dataset.samples:
                 raise ValueError(f"scenario {name} has no evaluation windows")
             squared, count = 0.0, 0
@@ -208,7 +224,10 @@ def distil_student(
         if episode.conditioning is None or episode.targets is None:
             raise ValueError("smart distillation needs conditioning and reference targets")
         frames = np.asarray(episode.frames, dtype=np.float32)[:, :SMART_FEATURES]
-        command = episode.command_target()
+        command = training_target(
+            episode,
+            allow_diagnostic_target=getattr(args, "allow_diagnostic_target", False),
+        )
         condition = torch.as_tensor(episode.conditioning, dtype=torch.float32, device=device)
         student.reset_state()
         for tick in range(len(frames)):

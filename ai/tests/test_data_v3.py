@@ -1,9 +1,11 @@
 """Synthetic v1/v2/v3 POTOKSIM bytes for the trainer-facing target contract."""
 
+import argparse
 import struct
 
 import numpy as np
 import pytest
+import torch
 
 from potok_ai.data import (
     SIM_EPISODE,
@@ -15,6 +17,7 @@ from potok_ai.data import (
     SIM_V2_EPISODE,
     SIM_V2_TRUTH_EPISODE,
     SMART_FEATURES,
+    SmartWindowDataset,
     read_validation,
 )
 from potok_ai.data_v3 import (
@@ -22,7 +25,10 @@ from potok_ai.data_v3 import (
     authoritative_target,
     diagnostic_target,
     read_targets,
+    training_target,
 )
+from potok_ai.engine import _smart_frames
+from potok_ai.train_smart import distil_student
 
 FRAMES = 3
 
@@ -132,3 +138,45 @@ def test_version_target_width_mismatch_is_loud(tmp_path, version, targets):
     path.write_bytes(_pack(version, targets=targets, meta_count=SIM_META_V2))
     with pytest.raises(ValueError, match="targets"):
         read_targets(path)
+
+
+def _episode_at(tmp_path, version, targets, name):
+    path = tmp_path / f"{name}.bin"
+    path.write_bytes(_pack(version, targets=targets, meta_count=SIM_META_V2))
+    return read_validation(path).episodes[0]
+
+
+def test_training_target_refuses_v1_v2_unless_diagnostic_is_explicit(tmp_path):
+    v3 = _episode_at(tmp_path, 3, SIM_TARGETS_V3, "v3")
+    v2 = _episode_at(tmp_path, 2, SIM_TARGETS, "v2")
+    assert np.allclose(training_target(v3)[0], [2.0, -3.0])
+    assert np.allclose(authoritative_target(v3)[0], [2.0, -3.0])
+    with pytest.raises(ValueError, match="v1/v2"):
+        training_target(v2)
+    with pytest.raises(ValueError, match="v1/v2"):
+        authoritative_target(v2)
+    assert np.allclose(training_target(v2, allow_diagnostic_target=True)[0], [0.1, -0.2])
+    assert np.allclose(diagnostic_target(v2)[0], [0.1, -0.2])
+
+
+def test_smart_window_dataset_refuses_v2_command_target(tmp_path):
+    v2 = _episode_at(tmp_path, 2, SIM_TARGETS, "v2")
+    with pytest.raises(ValueError, match="v1/v2"):
+        SmartWindowDataset([v2], window=2, limit=1)
+    dataset = SmartWindowDataset([v2], window=1, limit=1, allow_diagnostic_target=True)
+    assert np.allclose(dataset[0][2].numpy(), [0.1, -0.2])
+
+
+def test_engine_smart_frames_refuse_v2_command_target(tmp_path):
+    v2 = _episode_at(tmp_path, 2, SIM_TARGETS, "v2")
+    with pytest.raises(ValueError, match="v1/v2"):
+        _smart_frames(v2)
+    _, targets = _smart_frames(v2, allow_diagnostic_target=True)
+    assert np.allclose(targets[0], [0.1, -0.2])
+
+
+def test_distil_student_refuses_v2_command_target(tmp_path):
+    v2 = _episode_at(tmp_path, 2, SIM_TARGETS, "v2")
+    args = argparse.Namespace(seed=1, student_lr=1e-3, window=2, limit=None)
+    with pytest.raises(ValueError, match="v1/v2"):
+        distil_student(None, [v2], args, torch.device("cpu"))
