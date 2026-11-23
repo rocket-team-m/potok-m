@@ -6,9 +6,11 @@
 //! byte-identical JSON.
 
 use std::{
+    collections::BTreeMap,
     fs::File,
     io::{BufReader, BufWriter, Read, Write},
-    path::Path,
+    path::{Path, PathBuf},
+    process::Command,
 };
 
 use serde::{Deserialize, Serialize};
@@ -22,6 +24,21 @@ use crate::{
 };
 
 pub const SCHEMA_VERSION: u32 = 1;
+
+/// Manifest wire versions the provenance binding accepts. The dataset itself
+/// has three live wire versions: v1 legacy validation, v2 privileged truth,
+/// v3 per-tick truth. A binding must not invalidate older splits.
+pub const SUPPORTED_SCHEMA_VERSIONS: [u32; 3] = [1, 2, 3];
+
+/// Wire version of the provenance companion document. New fields are
+/// `#[serde(default)]` so an older, shorter JSON still parses and is then
+/// rejected loudly if a bound hash is missing.
+pub const PROVENANCE_SCHEMA_VERSION: u32 = 1;
+
+/// Filename substrings recognised as measurement inputs. Matching is
+/// case-insensitive and restricted to data extensions, so a source file named
+/// `servo.rs` is not mistaken for a servo measurement.
+pub const MEASUREMENT_TOKENS: [&str; 3] = ["thrust", "allan", "servo"];
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NamedRange {
@@ -146,4 +163,338 @@ pub fn default_target_names() -> Vec<String> {
 /// Per-tick truth names of the generated (v3) sidecar.
 pub fn default_truth_names() -> Vec<String> {
     TRUTH_V3_TICK_NAMES.iter().map(|s| s.to_string()).collect()
+}
+
+// --- Provenance binding -----------------------------------------------------
+//
+// These are the manifest's audit fields. They live in a companion JSON next
+// to `manifest.json` because the v1 `DatasetManifest` wire shape is shared by
+// the generator, the CLI and the firmware dataset writer, all of which build
+// it with exhaustive struct literals. A separate document keeps v1/v2/v3
+// splits readable while binding the exact stack that produced them.
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProvenanceManifest {
+    pub schema_version: u32,
+    /// sha256 of the canonical JSON of the companion `manifest.json`.
+    pub manifest_hash: String,
+    /// `git rev-parse HEAD` of the code that produced the dataset.
+    pub code_hash: String,
+    /// sha256 of the canonical protocol schema (`protocol/uart.yaml`).
+    pub protocol_schema_hash: String,
+    /// `filename -> sha256` for measurement inputs found, sorted by filename.
+    #[serde(default)]
+    pub measurement_hashes: BTreeMap<String, String>,
+    /// sha256 over the pinned seed-1337 episode-0 file hashes.
+    pub golden_episode_hash: String,
+}
+
+/// External inputs a provenance document is checked against. `None` for
+/// `measurement_dir` means the dataset has no measurement inputs, so the
+/// recorded map must be empty.
+#[derive(Debug, Clone, Copy)]
+pub struct ProvenanceSources<'a> {
+    pub repo: &'a Path,
+    pub protocol_schema: &'a Path,
+    pub measurement_dir: Option<&'a Path>,
+}
+
+fn is_sha256_hex(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+}
+
+fn require_sha256(label: &str, value: &str) -> Result<()> {
+    if is_sha256_hex(value) {
+        Ok(())
+    } else {
+        Err(SimError::Dataset(format!(
+            "provenance: {label} is not a lowercase 64-char sha256: {value:?}; regenerate the binding"
+        )))
+    }
+}
+
+fn mismatch(field: &str, expected: &str, got: &str) -> SimError {
+    SimError::Dataset(format!(
+        "provenance mismatch: {field}: expected {expected}, got {got}; regenerate the dataset at the recorded inputs or update the binding"
+    ))
+}
+
+/// LOUD git HEAD reader: no environment, no clock, no fallback. The escape in
+/// the error is to pass the hash explicitly to [`build_provenance`].
+pub fn git_head_hash(repo: &Path) -> Result<String> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .map_err(|e| {
+            SimError::Dataset(format!(
+                "provenance: cannot run git at {}: {e}; install git or pass the code hash explicitly",
+                repo.display()
+            ))
+        })?;
+    if !out.status.success() {
+        return Err(SimError::Dataset(format!(
+            "provenance: git rev-parse HEAD failed at {}: {}",
+            repo.display(),
+            String::from_utf8_lossy(&out.stderr).trim()
+        )));
+    }
+    let head = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if head.len() != 40
+        || !head
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+    {
+        return Err(SimError::Dataset(format!(
+            "provenance: git HEAD {head:?} is not a lowercase 40-char SHA-1"
+        )));
+    }
+    Ok(head)
+}
+
+/// sha256 of the protocol schema bytes. A missing or unreadable schema is an
+/// error that names the path.
+pub fn protocol_schema_hash(path: &Path) -> Result<String> {
+    sha256_file(path).map_err(|e| {
+        SimError::Dataset(format!(
+            "provenance: protocol schema {} is unreadable: {e}",
+            path.display()
+        ))
+    })
+}
+
+/// Hashes thrust/Allan/servo measurement files found directly in `dir`.
+/// Absent files are omitted, not zero-filled; a missing directory means no
+/// measurement inputs. The map is keyed by bare filename and sorted, so the
+/// JSON is byte-identical regardless of filesystem enumeration order.
+pub fn measurement_hashes(dir: &Path) -> Result<BTreeMap<String, String>> {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(rd) => rd,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
+        Err(e) => {
+            return Err(SimError::Dataset(format!(
+                "provenance: cannot read measurement directory {}: {e}",
+                dir.display()
+            )))
+        }
+    };
+    let mut names = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|e| {
+            SimError::Dataset(format!(
+                "provenance: cannot enumerate measurement directory {}: {e}",
+                dir.display()
+            ))
+        })?;
+        if !entry
+            .file_type()
+            .map_err(|e| SimError::Dataset(format!("provenance: file type: {e}")))?
+            .is_file()
+        {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let lower = name.to_ascii_lowercase();
+        let data_file = [".csv", ".json", ".toml", ".txt", ".dat"]
+            .iter()
+            .any(|ext| lower.ends_with(ext));
+        if data_file && MEASUREMENT_TOKENS.iter().any(|token| lower.contains(token)) {
+            names.push(name);
+        }
+    }
+    names.sort();
+    let mut out = BTreeMap::new();
+    for name in names {
+        let hash = sha256_file(&dir.join(&name))?;
+        out.insert(name, hash);
+    }
+    Ok(out)
+}
+
+/// Canonical sha256 over the pinned episode's file records. Each record is
+/// encoded as `name NUL bytes NUL sha256 LF`, records are sorted by name; the
+/// NUL separators make the encoding unambiguous.
+pub fn golden_episode_hash(files: &[FileRecord]) -> Result<String> {
+    if files.is_empty() {
+        return Err(SimError::Dataset(
+            "provenance: golden_episode_hash needs at least one file record".into(),
+        ));
+    }
+    let mut rows: Vec<&FileRecord> = files.iter().collect();
+    rows.sort_by(|a, b| a.name.cmp(&b.name));
+    let mut buf = Vec::new();
+    for rec in rows {
+        if rec.name.is_empty() || rec.name.contains('\0') || rec.name.contains('\n') {
+            return Err(SimError::Dataset(format!(
+                "provenance: golden file name {:?} contains a separator",
+                rec.name
+            )));
+        }
+        require_sha256(&format!("golden file {}", rec.name), &rec.sha256)?;
+        buf.extend_from_slice(rec.name.as_bytes());
+        buf.push(0);
+        buf.extend_from_slice(rec.bytes.to_string().as_bytes());
+        buf.push(0);
+        buf.extend_from_slice(rec.sha256.as_bytes());
+        buf.push(b'\n');
+    }
+    Ok(sha256_hex(&buf))
+}
+
+/// Assemble a provenance document from already-computed inputs. Every hash is
+/// checked for shape here; equality is checked by the `verify_*` functions.
+pub fn build_provenance(
+    manifest: &DatasetManifest,
+    code_hash: &str,
+    protocol_hash: &str,
+    measurements: BTreeMap<String, String>,
+    golden_hash: &str,
+) -> Result<ProvenanceManifest> {
+    if code_hash.len() != 40
+        || !code_hash
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+    {
+        return Err(SimError::Dataset(format!(
+            "provenance: code_hash {code_hash:?} is not a lowercase 40-char git SHA-1; pass `git rev-parse HEAD`"
+        )));
+    }
+    require_sha256("protocol_schema_hash", protocol_hash)?;
+    require_sha256("golden_episode_hash", golden_hash)?;
+    for (name, hash) in &measurements {
+        require_sha256(&format!("measurement hash for {name}"), hash)?;
+    }
+    Ok(ProvenanceManifest {
+        schema_version: PROVENANCE_SCHEMA_VERSION,
+        manifest_hash: sha256_hex(manifest_to_string(manifest)?.as_bytes()),
+        code_hash: code_hash.to_string(),
+        protocol_schema_hash: protocol_hash.to_string(),
+        measurement_hashes: measurements,
+        golden_episode_hash: golden_hash.to_string(),
+    })
+}
+
+/// Deterministic JSON: one key order, no timestamps, trailing newline.
+pub fn provenance_to_string(provenance: &ProvenanceManifest) -> Result<String> {
+    let mut s = serde_json::to_string_pretty(provenance)
+        .map_err(|e| SimError::Dataset(format!("provenance serialization: {e}")))?;
+    s.push('\n');
+    Ok(s)
+}
+
+pub fn provenance_from_str(text: &str) -> Result<ProvenanceManifest> {
+    serde_json::from_str(text).map_err(|e| SimError::Dataset(format!("provenance parse: {e}")))
+}
+
+/// Sidecar path for a manifest: `manifest.json` -> `manifest.provenance.json`.
+pub fn provenance_path(manifest_path: &Path) -> PathBuf {
+    let name = manifest_path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy();
+    let stem = name.strip_suffix(".json").unwrap_or(&name);
+    manifest_path.with_file_name(format!("{stem}.provenance.json"))
+}
+
+pub fn write_provenance(path: &Path, provenance: &ProvenanceManifest) -> Result<()> {
+    let text = provenance_to_string(provenance)?;
+    let mut w = BufWriter::new(File::create(path)?);
+    w.write_all(text.as_bytes())?;
+    w.flush()?;
+    Ok(())
+}
+
+pub fn read_provenance(path: &Path) -> Result<ProvenanceManifest> {
+    let mut text = String::new();
+    BufReader::new(File::open(path)?).read_to_string(&mut text)?;
+    provenance_from_str(&text)
+}
+
+/// Bind the provenance document to its dataset manifest and check hash shape.
+/// Accepts v1/v2/v3 wire versions; anything else is LOUD.
+pub fn verify_provenance_binding(
+    manifest: &DatasetManifest,
+    provenance: &ProvenanceManifest,
+) -> Result<()> {
+    if !SUPPORTED_SCHEMA_VERSIONS.contains(&manifest.schema_version) {
+        return Err(SimError::Dataset(format!(
+            "provenance: unsupported manifest schema_version {}; supported {:?}",
+            manifest.schema_version, SUPPORTED_SCHEMA_VERSIONS
+        )));
+    }
+    if !SUPPORTED_SCHEMA_VERSIONS.contains(&provenance.schema_version) {
+        return Err(SimError::Dataset(format!(
+            "provenance: unsupported provenance schema_version {}; supported {:?}",
+            provenance.schema_version, SUPPORTED_SCHEMA_VERSIONS
+        )));
+    }
+    require_sha256("manifest_hash", &provenance.manifest_hash)?;
+    require_sha256("protocol_schema_hash", &provenance.protocol_schema_hash)?;
+    require_sha256("golden_episode_hash", &provenance.golden_episode_hash)?;
+    for (name, hash) in &provenance.measurement_hashes {
+        require_sha256(&format!("measurement hash for {name}"), hash)?;
+    }
+    let actual = sha256_hex(manifest_to_string(manifest)?.as_bytes());
+    if actual != provenance.manifest_hash {
+        return Err(mismatch(
+            "manifest_hash",
+            &provenance.manifest_hash,
+            &actual,
+        ));
+    }
+    Ok(())
+}
+
+pub fn verify_code_hash(provenance: &ProvenanceManifest, repo: &Path) -> Result<()> {
+    let actual = git_head_hash(repo)?;
+    if actual != provenance.code_hash {
+        return Err(mismatch("code_hash", &provenance.code_hash, &actual));
+    }
+    Ok(())
+}
+
+pub fn verify_protocol_schema(provenance: &ProvenanceManifest, path: &Path) -> Result<()> {
+    let actual = protocol_schema_hash(path)?;
+    if actual != provenance.protocol_schema_hash {
+        return Err(mismatch(
+            "protocol_schema_hash",
+            &provenance.protocol_schema_hash,
+            &actual,
+        ));
+    }
+    Ok(())
+}
+
+pub fn verify_measurement_inputs(
+    provenance: &ProvenanceManifest,
+    dir: Option<&Path>,
+) -> Result<()> {
+    let actual = match dir {
+        Some(d) => measurement_hashes(d)?,
+        None => BTreeMap::new(),
+    };
+    if actual != provenance.measurement_hashes {
+        return Err(mismatch(
+            "measurement_hashes",
+            &format!("{:?}", provenance.measurement_hashes),
+            &format!("{actual:?}"),
+        ));
+    }
+    Ok(())
+}
+
+pub fn verify_golden_episode(provenance: &ProvenanceManifest, files: &[FileRecord]) -> Result<()> {
+    let actual = golden_episode_hash(files)?;
+    if actual != provenance.golden_episode_hash {
+        return Err(mismatch(
+            "golden_episode_hash",
+            &provenance.golden_episode_hash,
+            &actual,
+        ));
+    }
+    Ok(())
 }

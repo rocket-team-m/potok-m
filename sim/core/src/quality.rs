@@ -10,7 +10,11 @@ use crate::{
     config::Config,
     control::MAX_COMMAND_MPS2,
     error::{Result, SimError},
-    manifest::{Bounds, NamedRange},
+    manifest::{
+        verify_code_hash, verify_golden_episode, verify_measurement_inputs, verify_protocol_schema,
+        verify_provenance_binding, Bounds, FileRecord, NamedRange, ProvenanceManifest,
+        ProvenanceSources, SUPPORTED_SCHEMA_VERSIONS,
+    },
     optimizer::MAX_CORRECTION,
     trajectory::{
         TrajectorySet, TRUTH_STRIDE, TRUTH_TICK_NAMES, TRUTH_V3_STRIDE, TRUTH_V3_TICK_NAMES,
@@ -476,4 +480,72 @@ pub fn write_quality_report(path: &std::path::Path, report: &QualityReport) -> R
     let text = quality_report_to_string(report)?;
     std::fs::write(path, text.as_bytes())?;
     Ok(())
+}
+
+/// Every provenance gate in one call. A mismatch stops the check with a LOUD
+/// error naming the field, the recorded value and the observed value; there is
+/// no clamp, skip or silent fallback.
+pub fn check_provenance(
+    dataset: &str,
+    manifest: &crate::manifest::DatasetManifest,
+    provenance: &ProvenanceManifest,
+    sources: &ProvenanceSources<'_>,
+) -> Result<Vec<GateCheck>> {
+    verify_provenance_binding(manifest, provenance)
+        .map_err(|e| fail(dataset, "provenance_binding", e))?;
+    let mut checks = vec![GateCheck {
+        name: "provenance_binding".into(),
+        ok: true,
+        detail: format!(
+            "manifest_sha256={}, accepted schemas={SUPPORTED_SCHEMA_VERSIONS:?}",
+            provenance.manifest_hash
+        ),
+    }];
+
+    verify_code_hash(provenance, sources.repo).map_err(|e| fail(dataset, "code_hash", e))?;
+    checks.push(GateCheck {
+        name: "code_hash".into(),
+        ok: true,
+        detail: format!("git HEAD={}", provenance.code_hash),
+    });
+
+    verify_protocol_schema(provenance, sources.protocol_schema)
+        .map_err(|e| fail(dataset, "protocol_schema_hash", e))?;
+    checks.push(GateCheck {
+        name: "protocol_schema_hash".into(),
+        ok: true,
+        detail: format!("protocol schema sha256={}", provenance.protocol_schema_hash),
+    });
+
+    verify_measurement_inputs(provenance, sources.measurement_dir)
+        .map_err(|e| fail(dataset, "measurement_hashes", e))?;
+    checks.push(GateCheck {
+        name: "measurement_hashes".into(),
+        ok: true,
+        detail: format!(
+            "{} measurement input(s) bound",
+            provenance.measurement_hashes.len()
+        ),
+    });
+    Ok(checks)
+}
+
+/// The golden-episode pin: the recorded file hashes must still produce the
+/// recorded combined hash. A changed RNG draw order or one flipped byte fails
+/// this gate loudly.
+pub fn check_golden_episode(
+    dataset: &str,
+    provenance: &ProvenanceManifest,
+    files: &[FileRecord],
+) -> Result<GateCheck> {
+    verify_golden_episode(provenance, files).map_err(|e| fail(dataset, "golden_episode", e))?;
+    Ok(GateCheck {
+        name: "golden_episode".into(),
+        ok: true,
+        detail: format!(
+            "{} pinned file(s), sha256={}",
+            files.len(),
+            provenance.golden_episode_hash
+        ),
+    })
 }
