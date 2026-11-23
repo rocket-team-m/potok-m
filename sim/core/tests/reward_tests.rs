@@ -11,8 +11,8 @@
 mod reward;
 
 use reward::{
-    evaluate, FlightSample, GateLimits, GateObservation, GateViolation, RewardError, RewardWeights,
-    TruthSidecar,
+    dense_reward, evaluate, potential, FlightSample, GateLimits, GateObservation, GateViolation,
+    RewardError, RewardWeights, ShapingWeights, TruthSidecar,
 };
 
 const WEIGHTS: RewardWeights = RewardWeights {
@@ -20,6 +20,12 @@ const WEIGHTS: RewardWeights = RewardWeights {
     apogee: 0.5,
     effort: 3.0,
     risk: 7.0,
+};
+
+const SHAPING: ShapingWeights = ShapingWeights {
+    lateral: 2.0,
+    apogee: 0.5,
+    gamma: 0.9,
 };
 
 fn tick(t: f64, x: f64, z: f64, u: f64, violation: bool) -> FlightSample {
@@ -345,4 +351,222 @@ fn same_inputs_give_bitwise_identical_rewards() {
     assert_eq!(a, b);
     assert_eq!(a.total.to_bits(), b.total.to_bits());
     assert!(a.check(WEIGHTS));
+}
+
+#[test]
+fn potential_matches_the_typed_formula() {
+    let truth = sidecar(flat(3, 0.0, 100.0));
+    let low = tick(0.0, 3.0, 60.0, 0.0, false);
+    let at_apogee = tick(1.0, 0.0, 100.0, 0.0, false);
+    let above = tick(2.0, 0.0, 140.0, 0.0, false);
+
+    assert_eq!(potential(&low, Some(&truth), SHAPING).unwrap(), -38.0);
+    assert_eq!(potential(&at_apogee, Some(&truth), SHAPING).unwrap(), 0.0);
+    assert_eq!(potential(&above, Some(&truth), SHAPING).unwrap(), 0.0);
+    assert_eq!(
+        potential(
+            &low,
+            Some(&truth),
+            ShapingWeights {
+                apogee: 0.0,
+                ..SHAPING
+            }
+        )
+        .unwrap(),
+        -18.0
+    );
+    assert_eq!(
+        potential(
+            &low,
+            Some(&truth),
+            ShapingWeights {
+                lateral: 0.0,
+                ..SHAPING
+            }
+        )
+        .unwrap(),
+        -20.0
+    );
+}
+
+#[test]
+fn dense_shaping_is_the_discounted_potential_difference() {
+    let truth = sidecar(flat(3, 0.0, 100.0));
+    let a = tick(0.0, 3.0, 60.0, 0.0, false);
+    let b = tick(1.0, 1.0, 80.0, 0.0, false);
+    let phi_a = potential(&a, Some(&truth), SHAPING).unwrap();
+    let phi_b = potential(&b, Some(&truth), SHAPING).unwrap();
+    assert_eq!(phi_a, -38.0);
+    assert_eq!(phi_b, -12.0);
+
+    let expected = SHAPING.gamma * phi_b - phi_a;
+    assert_eq!(
+        dense_reward(&a, &b, Some(&truth), SHAPING)
+            .unwrap()
+            .to_bits(),
+        expected.to_bits()
+    );
+    assert_eq!(
+        dense_reward(
+            &a,
+            &b,
+            Some(&truth),
+            ShapingWeights {
+                gamma: 0.0,
+                ..SHAPING
+            }
+        )
+        .unwrap(),
+        -phi_a
+    );
+}
+
+#[test]
+fn dense_shaping_telescopes_over_a_trajectory() {
+    let truth = sidecar(flat(3, 0.0, 100.0));
+    let flown = vec![
+        tick(0.0, 8.0, 0.0, 0.0, false),
+        tick(1.0, 4.0, 50.0, 0.0, false),
+        tick(2.0, 1.0, 90.0, 0.0, false),
+        tick(3.0, 0.0, 110.0, 0.0, false),
+    ];
+
+    let mut sum = 0.0;
+    let mut discount = 1.0;
+    for pair in flown.windows(2) {
+        sum += discount * dense_reward(&pair[0], &pair[1], Some(&truth), SHAPING).unwrap();
+        discount *= SHAPING.gamma;
+    }
+    let phi_0 = potential(&flown[0], Some(&truth), SHAPING).unwrap();
+    let phi_t = potential(&flown[flown.len() - 1], Some(&truth), SHAPING).unwrap();
+    let closed_form = SHAPING.gamma.powi((flown.len() - 1) as i32) * phi_t - phi_0;
+    assert!((sum - closed_form).abs() < 1e-9 * (1.0 + closed_form.abs()));
+    assert!(sum > 0.0);
+
+    let again: f64 = flown
+        .windows(2)
+        .enumerate()
+        .map(|(i, pair)| {
+            SHAPING.gamma.powi(i as i32)
+                * dense_reward(&pair[0], &pair[1], Some(&truth), SHAPING).unwrap()
+        })
+        .sum();
+    assert_eq!(sum.to_bits(), again.to_bits());
+}
+
+#[test]
+fn shaping_rejects_hard_gates_instead_of_penalising() {
+    let state = tick(0.0, 3.0, 60.0, 0.0, false);
+    let flown = vec![state];
+    let base = sidecar(flat(3, 0.0, 100.0)).observed;
+    let cases = [
+        (
+            GateObservation {
+                mach_peak: 1.2,
+                ..base
+            },
+            GateViolation::Mach {
+                observed: 1.2,
+                limit: 1.0,
+            },
+        ),
+        (
+            GateObservation {
+                safety_factor_min: 1.2,
+                ..base
+            },
+            GateViolation::SafetyFactor {
+                observed: 1.2,
+                limit: 1.5,
+            },
+        ),
+        (
+            GateObservation {
+                static_margin_cal_min: 0.7,
+                ..base
+            },
+            GateViolation::StaticMarginCal {
+                observed: 0.7,
+                limit: 1.0,
+            },
+        ),
+    ];
+
+    for (observed, violation) in cases {
+        let mut truth = sidecar(flat(3, 0.0, 100.0));
+        truth.observed = observed;
+        let expected = Err(RewardError::GateRejected(violation));
+        assert_eq!(potential(&state, Some(&truth), SHAPING), expected);
+        assert_eq!(
+            dense_reward(&state, &state, Some(&truth), SHAPING),
+            expected
+        );
+        assert_eq!(
+            evaluate(&flown, Some(&truth), WEIGHTS),
+            Err(RewardError::GateRejected(violation))
+        );
+        assert_eq!(
+            potential(
+                &state,
+                Some(&truth),
+                ShapingWeights {
+                    apogee: 1e6,
+                    ..SHAPING
+                }
+            ),
+            expected
+        );
+    }
+}
+
+#[test]
+fn shaping_missing_truth_and_malformed_inputs_are_loud() {
+    let truth = sidecar(flat(3, 0.0, 100.0));
+    let state = tick(0.0, 3.0, 60.0, 0.0, false);
+    let mut bad_position = state;
+    bad_position.pos_m[1] = f64::NAN;
+
+    assert_eq!(
+        potential(&state, None, SHAPING),
+        Err(RewardError::MissingTruth)
+    );
+    assert_eq!(
+        dense_reward(&state, &state, None, SHAPING),
+        Err(RewardError::MissingTruth)
+    );
+    assert_eq!(
+        potential(&state, Some(&sidecar(vec![])), SHAPING),
+        Err(RewardError::MissingReference)
+    );
+    assert_eq!(
+        potential(&bad_position, Some(&truth), SHAPING),
+        Err(RewardError::NonFinite("position"))
+    );
+    assert_eq!(
+        dense_reward(&bad_position, &state, Some(&truth), SHAPING),
+        Err(RewardError::NonFinite("position"))
+    );
+    assert_eq!(
+        potential(
+            &state,
+            Some(&truth),
+            ShapingWeights {
+                lateral: -1.0,
+                ..SHAPING
+            }
+        ),
+        Err(RewardError::InvalidWeights("shaping lateral"))
+    );
+    assert_eq!(
+        dense_reward(
+            &state,
+            &state,
+            Some(&truth),
+            ShapingWeights {
+                gamma: 1.5,
+                ..SHAPING
+            }
+        ),
+        Err(RewardError::InvalidWeights("shaping gamma"))
+    );
 }

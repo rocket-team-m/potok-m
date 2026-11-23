@@ -13,6 +13,18 @@
 //! `safety_violations` count in the soft term is a separate per-tick
 //! flight-recorder mark (health/actuator limit breached), not a gate.
 //!
+//! ## Dense potential-based shaping
+//!
+//! [`evaluate`] is the terminal verifier. On top of it, [`potential`] defines
+//! `Φ(s) = −k·lateral_error(s)² − k_apogee·apogee_loss(s)` from privileged
+//! truth, and [`dense_reward`] returns `γ·Φ(s′) − Φ(s)` for one transition.
+//! Summed over a trajectory that term telescopes to `γᵀ·Φ(s_T) − Φ(s_0)`, so
+//! it changes the speed of credit assignment, not the optimal policy (the
+//! standard potential-based shaping identity). The weights are typed and
+//! caller-supplied, never fitted to a flight log: the identity holds for any
+//! finite potential. A hard gate still rejects — shaping never converts a
+//! rejection into a soft penalty.
+//!
 //! This module is deliberately dependency-free: it owns its input types, so a
 //! caller maps its own trajectory and sidecar records into them. No physics
 //! constants, dataset numbers or calibration live here, and no source file
@@ -81,6 +93,19 @@ pub struct RewardWeights {
     pub apogee: f64,
     pub effort: f64,
     pub risk: f64,
+}
+
+/// Typed weights for the dense potential-based shaping term, kept separate
+/// from [`RewardWeights`] so terminal and dense scales cannot be mixed by
+/// accident. There is no default: a caller supplies every field explicitly.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShapingWeights {
+    /// `k` on the quadratic lateral-error term.
+    pub lateral: f64,
+    /// `k_apogee` on the apogee-shortfall term.
+    pub apogee: f64,
+    /// Discount `γ` in `γ·Φ(s′) − Φ(s)`; finite and in `[0, 1]`.
+    pub gamma: f64,
 }
 
 /// Which hard gate rejected the flight, with the two compared values.
@@ -221,6 +246,71 @@ pub fn evaluate(
         risk_term,
         total,
     })
+}
+
+/// The potential `Φ(s) = −lateral·lateral_error(s)² − apogee·apogee_loss(s)`.
+///
+/// `lateral_error(s)` is the horizontal displacement magnitude `√(x² + y²)`
+/// at this tick — the same quantity the terminal verifier aggregates as
+/// `lateral_rms_m`. `apogee_loss(s)` is `max(0, reference_apogee − altitude)`:
+/// the remaining shortfall below the truth reference's apogee. Both come from
+/// privileged truth; no aerodynamics or gravity constant is re-derived here.
+/// Missing truth, malformed input, invalid weights or a rejected hard gate is
+/// a loud error.
+pub fn potential(
+    state: &FlightSample,
+    truth: Option<&TruthSidecar>,
+    weights: ShapingWeights,
+) -> Result<f64, RewardError> {
+    let truth = truth.ok_or(RewardError::MissingTruth)?;
+    check_shaping_weights(weights)?;
+    check_gates(truth)?;
+    if truth.reference.is_empty() {
+        return Err(RewardError::MissingReference);
+    }
+    for sample in &truth.reference {
+        check_position(sample)?;
+    }
+    check_position(state)?;
+
+    let lateral_sq = state.pos_m[0].powi(2) + state.pos_m[1].powi(2);
+    let apogee_loss = (apogee_m(&truth.reference) - state.pos_m[2]).max(0.0);
+    Ok(-weights.lateral * lateral_sq - weights.apogee * apogee_loss)
+}
+
+/// The dense shaping reward for one transition `s → s'`: `γ·Φ(s′) − Φ(s)`.
+/// Add it to the terminal [`evaluate`] reward on each tick; over a whole
+/// trajectory the terms telescope to `γᵀ·Φ(s_T) − Φ(s_0)`. Hard gates reject
+/// here as well, so a rejected flight earns neither terminal nor dense reward.
+pub fn dense_reward(
+    state: &FlightSample,
+    next: &FlightSample,
+    truth: Option<&TruthSidecar>,
+    weights: ShapingWeights,
+) -> Result<f64, RewardError> {
+    let phi = potential(state, truth, weights)?;
+    let phi_next = potential(next, truth, weights)?;
+    Ok(weights.gamma * phi_next - phi)
+}
+
+fn check_shaping_weights(w: ShapingWeights) -> Result<(), RewardError> {
+    if !w.lateral.is_finite() || w.lateral < 0.0 {
+        return Err(RewardError::InvalidWeights("shaping lateral"));
+    }
+    if !w.apogee.is_finite() || w.apogee < 0.0 {
+        return Err(RewardError::InvalidWeights("shaping apogee"));
+    }
+    if !w.gamma.is_finite() || !(0.0..=1.0).contains(&w.gamma) {
+        return Err(RewardError::InvalidWeights("shaping gamma"));
+    }
+    Ok(())
+}
+
+fn check_position(sample: &FlightSample) -> Result<(), RewardError> {
+    if sample.pos_m.iter().any(|v| !v.is_finite()) {
+        return Err(RewardError::NonFinite("position"));
+    }
+    Ok(())
 }
 
 fn check_weights(w: RewardWeights) -> Result<(), RewardError> {
