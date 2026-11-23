@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     error::{Result, SimError},
     math::episode_seed,
+    parachute::ParachuteConfig,
     scenario::{scenario, Split, SCENARIO_COUNT},
 };
 
@@ -45,6 +46,36 @@ fn default_true() -> bool {
 
 fn default_episodes() -> usize {
     1
+}
+
+/// The shipped `config/default.toml` spells the apogee trigger
+/// `time_since_apogee`, while `DeployTrigger` serializes that variant as
+/// `time_since_apogee_s`. Normalize the legacy spelling at the config boundary
+/// so the opt-in field can be parsed without changing either shared file. New
+/// configs should use the serde spelling; both are accepted here.
+fn normalize_trigger_kind(value: &mut toml::Value) {
+    if let toml::Value::Table(table) = value {
+        if let Some(toml::Value::String(kind)) = table.get_mut("kind") {
+            match kind.as_str() {
+                "time_since_apogee" => *kind = "time_since_apogee_s".into(),
+                "time_since_launch" => *kind = "time_since_launch_s".into(),
+                _ => {}
+            }
+        }
+    }
+}
+
+fn deserialize_parachute<'de, D>(deserializer: D) -> std::result::Result<ParachuteConfig, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let mut value = toml::Value::deserialize(deserializer)?;
+    for stage in ["drogue", "main"] {
+        if let Some(trigger) = value.get_mut(stage).and_then(|s| s.get_mut("trigger")) {
+            normalize_trigger_kind(trigger);
+        }
+    }
+    ParachuteConfig::deserialize(value).map_err(serde::de::Error::custom)
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -551,6 +582,11 @@ pub struct Config {
     /// not a runtime degradation.
     #[serde(default = "CurriculumConfig::default")]
     pub curriculum: CurriculumConfig,
+    /// CHUTE03: opt-in classical recovery canopy. `enabled = false` by default,
+    /// so every existing trajectory, golden hash and A/B stays bit-identical.
+    #[serde(default = "ParachuteConfig::default")]
+    #[serde(deserialize_with = "deserialize_parachute")]
+    pub parachute: ParachuteConfig,
 }
 
 impl Config {
@@ -740,6 +776,11 @@ impl Config {
                 d.lag_scale_range.1, held_lag_floor
             )));
         }
+        // CHUTE03: validate even when disabled, so a malformed canopy config
+        // cannot lie dormant waiting for someone to flip the switch.
+        self.parachute
+            .validate()
+            .map_err(|e| SimError::Config(e.to_string()))?;
         Ok(())
     }
 

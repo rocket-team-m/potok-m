@@ -18,6 +18,7 @@ pub mod identification;
 pub mod manifest;
 pub mod math;
 pub mod optimizer;
+pub mod parachute;
 pub mod physics;
 pub mod playback3d;
 pub mod quality;

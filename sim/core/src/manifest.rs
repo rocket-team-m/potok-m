@@ -18,7 +18,9 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     config::Config,
+    episode::Episode,
     error::{Result, SimError},
+    parachute::CHUTE_MANIFEST_FIELDS,
     trajectory::TRUTH_V3_TICK_NAMES,
     validation::TARGET_NAMES,
 };
@@ -163,6 +165,81 @@ pub fn default_target_names() -> Vec<String> {
 /// Per-tick truth names of the generated (v3) sidecar.
 pub fn default_truth_names() -> Vec<String> {
     TRUTH_V3_TICK_NAMES.iter().map(|s| s.to_string()).collect()
+}
+
+// --- CHUTE03: optional canopy manifest block -------------------------------
+//
+// A separate block, not a field on `DatasetManifest`: that wire shape is built
+// with exhaustive struct literals by the generator, the CLI and the firmware
+// writer, none of which this task may touch. The nine names come from the
+// parachute model so the emitter and the model cannot drift.
+
+/// The nine canopy manifest fields, as min/max ranges over episodes that
+/// landed. Empty when `[parachute] enabled = false`: fields are absent, not
+/// zero-filled. With the canopy on, a missing landing is a LOUD error.
+pub fn chute_manifest_bounds(cfg: &Config, episodes: &[Episode]) -> Result<Vec<NamedRange>> {
+    if !cfg.parachute.enabled {
+        return Ok(Vec::new());
+    }
+    let mut spans: Vec<(f64, f64)> = Vec::new();
+    for e in episodes {
+        let chute = e.chute.as_ref().ok_or_else(|| {
+            SimError::Dataset(format!(
+                "episode {} has no canopy telemetry; enable [parachute] and run to landing \
+                 before emitting chute manifest fields",
+                e.meta.index
+            ))
+        })?;
+        let floats = chute.landing.manifest_named_floats(true);
+        if spans.is_empty() {
+            spans = floats.iter().map(|(_, v)| (*v, *v)).collect();
+        } else {
+            for (span, (_, v)) in spans.iter_mut().zip(floats.iter()) {
+                span.0 = span.0.min(*v);
+                span.1 = span.1.max(*v);
+            }
+        }
+    }
+    if spans.is_empty() {
+        return Ok(Vec::new());
+    }
+    Ok(CHUTE_MANIFEST_FIELDS
+        .iter()
+        .zip(spans)
+        .map(|(name, (min, max))| NamedRange {
+            name: (*name).to_string(),
+            min,
+            max,
+        })
+        .collect())
+}
+
+/// `dir/manifest.json` -> `dir/manifest.chute.json`.
+pub fn chute_manifest_path(manifest_path: &Path) -> PathBuf {
+    manifest_path.with_extension("chute.json")
+}
+
+/// Write the optional canopy manifest block as JSON. An empty field list (the
+/// disabled case) writes nothing at all, leaving no sidecar behind.
+pub fn write_chute_manifest(path: &Path, fields: &[NamedRange]) -> Result<()> {
+    if fields.is_empty() {
+        return Ok(());
+    }
+    let text = serde_json::to_string_pretty(fields)
+        .map_err(|e| SimError::Dataset(format!("chute manifest serialization: {e}")))?;
+    let mut w = BufWriter::new(File::create(path)?);
+    w.write_all(text.as_bytes())?;
+    w.write_all(b"\n")?;
+    w.flush()?;
+    Ok(())
+}
+
+/// Read back the optional canopy manifest block written by
+/// [`write_chute_manifest`].
+pub fn read_chute_manifest(path: &Path) -> Result<Vec<NamedRange>> {
+    let mut text = String::new();
+    BufReader::new(File::open(path)?).read_to_string(&mut text)?;
+    serde_json::from_str(&text).map_err(|e| SimError::Dataset(format!("chute manifest parse: {e}")))
 }
 
 // --- Provenance binding -----------------------------------------------------

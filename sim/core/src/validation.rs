@@ -628,3 +628,47 @@ pub fn read_deployment_truth(path: &Path) -> Result<Vec<DeploymentTruth>> {
     }
     Ok(out)
 }
+
+// --- CHUTE03: emit POTOKDPL records from captured canopy telemetry ----------
+//
+// The simulator had no canopy when the sidecar was defined, so the reader and
+// the metric split refuse to guess a deployment tick. With the model wired in,
+// the single per-episode `Parachute` supplies that truth. Nothing here writes
+// a file while the feature is off: the sidecar is absent, not a block of zeros.
+
+/// Build one POTOKDPL record from an episode's canopy telemetry. A missing
+/// landing, a non-finite value or a reversed boost/deploy gate is a LOUD error
+/// naming the escape, never a zero-filled record.
+pub fn deployment_truth_from_episode(e: &Episode) -> Result<DeploymentTruth> {
+    let chute = e.chute.as_ref().ok_or_else(|| {
+        SimError::InvalidValidation(format!(
+            "episode {} has no canopy telemetry: set [parachute] enabled = true and run long \
+             enough to land before writing validation.deployment",
+            e.meta.index
+        ))
+    })?;
+    let record = DeploymentTruth {
+        index: e.meta.index,
+        boost_end_tick: chute.boost_end_tick,
+        deployment_tick: chute.deploy_tick,
+        landing_xy: [
+            chute.landing.landing_pos_m[0] as f32,
+            chute.landing.landing_pos_m[1] as f32,
+        ],
+        wind_mean_xy: [chute.wind_mean_xy[0] as f32, chute.wind_mean_xy[1] as f32],
+    };
+    record.validate()?;
+    Ok(record)
+}
+
+/// All POTOKDPL records for a validation split. Empty when the canopy is off:
+/// no sidecar should be written at all, not a file of zero-valued records.
+pub fn deployment_truth_from_episodes(
+    cfg: &Config,
+    episodes: &[Episode],
+) -> Result<Vec<DeploymentTruth>> {
+    if !cfg.parachute.enabled {
+        return Ok(Vec::new());
+    }
+    episodes.iter().map(deployment_truth_from_episode).collect()
+}

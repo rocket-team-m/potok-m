@@ -16,6 +16,7 @@ use crate::{
     error::{Result, SimError},
     math::{episode_seed, mat_t_vec, norm, quat_to_matrix, sub, Vec3},
     optimizer::{ReferenceOptimizer, Target},
+    parachute::{ChutePhase, FlightCtx, LandingDispersion, Parachute},
     physics::PhysicsFeatures,
     scenario::{scenario, Split},
     sensor::{feature, Frame, Sensor, FEATURE_NAMES},
@@ -69,6 +70,36 @@ pub struct Episode {
     /// Written to the trajectory sidecar; apogee and lateral drift are
     /// measured from this, not from a surrogate.
     pub trajectory: Vec<TrajectoryTick>,
+    /// CHUTE03: canopy telemetry from the single model instance owned by this
+    /// episode. `None` when `[parachute] enabled = false`: no canopy phase and
+    /// no change to any legacy output. The landing record and deploy gate are
+    /// the ground truth for the POTOKDPL sidecar and the manifest fields.
+    pub chute: Option<EpisodeChute>,
+}
+
+/// Canopy ground truth captured by one episode (CHUTE03). The model owns an
+/// `Option` on the episode rather than a global, so parallel episodes cannot
+/// share latches and a disabled run allocates no canopy at all.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EpisodeChute {
+    /// 0-based 50 Hz tick at which the drogue first fired.
+    pub deploy_tick: u32,
+    /// Last AI-forbidden (pad/boost) tick; fin flight starts after this.
+    pub boost_end_tick: u32,
+    /// One-shot touchdown record. `lateral_offset_m` is canopy-only drift.
+    pub landing: LandingDispersion,
+    /// Mean true horizontal wind under canopy, world frame (m/s).
+    pub wind_mean_xy: [f64; 2],
+    /// Final canopy truth row in `CHUTE_TRUTH_NAMES` order.
+    pub truth_last: [f32; 8],
+}
+
+impl EpisodeChute {
+    /// Canopy deploy-to-landing drift, deliberately separate from the
+    /// fin-flight `lateral_rms_at_deployment_m`.
+    pub fn landing_dispersion_m(&self) -> f64 {
+        self.landing.lateral_offset_m()
+    }
 }
 
 impl Episode {
@@ -240,6 +271,23 @@ impl Simulator {
         let mut sensor = Sensor::new(&ep_cfg, index);
         let optimizer = ReferenceOptimizer::new(cfg);
 
+        // CHUTE03: one canopy per episode. `None` while disabled keeps the
+        // fin-flight integrator and every legacy output bit-for-bit unchanged.
+        let mut chute = if cfg.parachute.enabled {
+            Some(
+                Parachute::new(cfg.parachute.clone())
+                    .map_err(|e| SimError::Config(e.to_string()))?,
+            )
+        } else {
+            None
+        };
+        let mut t_apogee_s: Option<f64> = None;
+        let mut boost_end_tick: u32 = 0;
+        let mut canopy_wind_sum = [0.0_f64; 2];
+        let mut canopy_ticks: u64 = 0;
+        let mut deploy_tick: Option<u32> = None;
+        let mut chute_truth_last = [0.0_f32; 8];
+
         let steps = cfg.steps();
         let spf = cfg.steps_per_frame();
         let nf = cfg.frames_per_episode();
@@ -282,6 +330,10 @@ impl Simulator {
             }
 
             if step % spf == 0 {
+                let tick_index = (step / spf) as u32;
+                if !phase.ai_allowed() {
+                    boost_end_tick = tick_index;
+                }
                 truth = Some(TruthRecord {
                     wind: [w[0] as f32, w[1] as f32, w[2] as f32],
                     gust_start_s: gust_info.map(|g| g.0).unwrap_or(-1.0) as f32,
@@ -407,8 +459,58 @@ impl Simulator {
                 frames_generated += 1;
             }
 
-            vehicle.control_accel = command_deg;
-            state = rk4(t, &state, cfg.run.dt, w, &self.atm, &vehicle);
+            // CHUTE03: sampled BEFORE the step, so the deploying tick still
+            // finishes its 6-DoF integration and canopy flight begins next
+            // tick. With the canopy disabled this is always false and the
+            // original rk4 path below executes unchanged (zero-command
+            // bit-identity).
+            let canopy_active = chute
+                .as_ref()
+                .map(|c| c.state().phase != ChutePhase::Stowed)
+                .unwrap_or(false);
+            let phase_before = chute.as_ref().map(|c| c.state().phase);
+            // No command field: recovery is classical, outside AI authority.
+            let ctx = FlightCtx {
+                t_s: t,
+                altitude_m: state.pos()[2],
+                vz_mps: state.vel()[2],
+                pos_m: [state.pos()[0], state.pos()[1]],
+                vel_xy_mps: [state.vel()[0], state.vel()[1]],
+                true_wind_xy: [w[0], w[1]],
+                t_apogee_s,
+            };
+            if let Some(c) = chute.as_mut() {
+                c.step(cfg.run.dt, ctx)
+                    .map_err(|e| SimError::Config(e.to_string()))?;
+            }
+            if let Some(c) = chute.as_ref() {
+                if deploy_tick.is_none()
+                    && phase_before == Some(ChutePhase::Stowed)
+                    && c.state().phase != ChutePhase::Stowed
+                {
+                    deploy_tick = Some((step / spf) as u32);
+                }
+                chute_truth_last = c.state().truth_floats([w[0], w[1]]);
+            }
+
+            if canopy_active {
+                // Under canopy the model owns horizontal/vertical motion; the
+                // RK4 integrator no longer runs. This is the only place the
+                // canopy mutates the flown state.
+                let cs = chute.as_ref().unwrap().state();
+                state.pos[0] = cs.pos_m[0];
+                state.pos[1] = cs.pos_m[1];
+                state.pos[2] = cs.altitude_m;
+                state.vel[0] = cs.vel_xy_mps[0];
+                state.vel[1] = cs.vel_xy_mps[1];
+                state.vel[2] = cs.vz_mps;
+                canopy_wind_sum[0] += w[0];
+                canopy_wind_sum[1] += w[1];
+                canopy_ticks += 1;
+            } else {
+                vehicle.control_accel = command_deg;
+                state = rk4(t, &state, cfg.run.dt, w, &self.atm, &vehicle);
+            }
             if let Some(f) = vehicle.control_fault.take() {
                 return Err(SimError::Control(format!(
                     "nonzero command with {} authority (value={}): provide a finite Cm_delta > 0 \
@@ -423,6 +525,9 @@ impl Simulator {
                     lo: f.lo,
                     hi: f.hi,
                 });
+            }
+            if chute.is_some() && state.pos[2] > apogee_m {
+                t_apogee_s = Some(t + cfg.run.dt);
             }
             apogee_m = apogee_m.max(state.pos[2]);
             max_speed_mps = max_speed_mps.max(crate::math::norm(state.vel));
@@ -452,6 +557,22 @@ impl Simulator {
             conditioning,
             curriculum,
         };
+        // CHUTE03: only a landed canopy yields emission truth. `None` while
+        // disabled, or when the run ended before touchdown (the sidecar and
+        // manifest writers then refuse to invent a landing point).
+        let chute_data = match (chute.as_ref(), deploy_tick) {
+            (Some(c), Some(dt)) => c.landing().map(|landing| EpisodeChute {
+                deploy_tick: dt,
+                boost_end_tick,
+                landing: landing.clone(),
+                wind_mean_xy: [
+                    canopy_wind_sum[0] / canopy_ticks.max(1) as f64,
+                    canopy_wind_sum[1] / canopy_ticks.max(1) as f64,
+                ],
+                truth_last: chute_truth_last,
+            }),
+            _ => None,
+        };
         Ok(Episode {
             meta,
             frames,
@@ -465,6 +586,7 @@ impl Simulator {
             max_speed_mps,
             truth,
             trajectory,
+            chute: chute_data,
         })
     }
 
