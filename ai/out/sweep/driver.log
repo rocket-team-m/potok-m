@@ -1,0 +1,26 @@
+jobs=27 already_done=3 todo=24 workers=10
+DONE  loopwm-lite  e40   s2   172.4s held=0.224613
+DONE  loopwm-lite  e40   s3   173.3s held=0.225048
+DONE  loopwm-lite  e60   s2   292.4s held=0.299572
+DONE  loopwm-lite  e60   s1   294.2s held=0.172896
+DONE  loopwm-lite  e60   s3   255.0s held=0.630336
+DONE  loopwm-lite  e100  s1   419.3s held=0.190333
+DONE  loopwm-lite  e100  s2   484.5s held=0.181089
+DONE  loopwm-lite  e100  s3   491.0s held=0.171834
+DONE  loopwm       e40   s2   288.5s held=0.172075
+DONE  lrs          e40   s2  1532.6s held=0.406082
+DONE  lrs          e40   s3  1576.3s held=0.201263
+DONE  loopwm       e40   s3   292.0s held=0.195186
+DONE  loopwm       e60   s1   372.7s held=0.186962
+DONE  loopwm       e60   s2   385.2s held=0.196785
+DONE  loopwm       e60   s3   376.8s held=0.388567
+DONE  lrs          e60   s3  2101.4s held=0.176750
+DONE  lrs          e60   s2  2109.6s held=0.208671
+DONE  lrs          e60   s1  2128.5s held=0.179594
+DONE  loopwm       e100  s1   506.2s held=0.178910
+DONE  loopwm       e100  s2   446.2s held=0.199793
+DONE  loopwm       e100  s3   419.6s held=0.187975
+DONE  lrs          e100  s1  2853.9s held=0.181753
+DONE  lrs          e100  s3  2891.1s held=0.180829
+DONE  lrs          e100  s2  2912.6s held=0.176865
+DONE 27/27 successful; results=/home/sehaxe/potok-m/ai/out/sweep/results.csv

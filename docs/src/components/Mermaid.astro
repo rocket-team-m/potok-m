@@ -1,0 +1,35 @@
+---
+interface Props {
+  code: string;
+}
+
+const { code } = Astro.props;
+---
+
+<div class="mermaid">{code}</div>
+
+<script>
+  import mermaid from 'mermaid';
+
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: 'neutral',
+    securityLevel: 'loose',
+  });
+
+  const render = async () => {
+    const nodes = document.querySelectorAll<HTMLElement>('.mermaid:not([data-processed])');
+    if (nodes.length === 0) return;
+    await mermaid.run({ nodes: [...nodes] });
+  };
+
+  render();
+  document.addEventListener('astro:page-load', render);
+</script>
+
+<style>
+  .mermaid {
+    margin: 1.5rem 0;
+    text-align: center;
+  }
+</style>

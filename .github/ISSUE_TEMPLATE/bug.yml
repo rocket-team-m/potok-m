@@ -1,0 +1,31 @@
+name: Ошибка
+description: Что-то работает не так
+title: "[баг] "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: Что происходит
+      description: Ожидаемое и фактическое поведение
+    validations:
+      required: true
+  - type: textarea
+    id: how
+    attributes:
+      label: Как повторить
+      description: Шаги, файлы, версия прошивки или модели
+    validations:
+      required: false
+  - type: dropdown
+    id: area
+    attributes:
+      label: Подсистема
+      options: [Документация, Борт, ИИ, Форма и аэродинамика, Полёты, Процессы]
+  - type: textarea
+    id: logs
+    attributes:
+      label: Логи или скриншоты
+      description: Вставь текст или приложи файл
+    validations:
+      required: false

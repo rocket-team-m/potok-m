@@ -1,0 +1,122 @@
+name: Guard
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  binary-size-guard:
+    name: Binary size guard · no binaries, ≤2 MB per file
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Reject binary extensions and files over 2 MB
+        run: bash .github/scripts/guard.sh
+
+  license-gate:
+    name: License gate · GPL-3.0-or-later
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Own code and manifests declare GPL-3.0-or-later
+        run: |
+          set -euo pipefail
+          fail=0
+          err() { echo "::error file=$1::$2"; fail=1; }
+
+          if [ ! -f LICENSE ] || ! grep -q "GNU GENERAL PUBLIC LICENSE" LICENSE; then
+            err LICENSE "LICENSE must be the GNU General Public License"
+          fi
+          if ! grep -q "Version 3, 29 June 2007" LICENSE 2>/dev/null; then
+            err LICENSE "LICENSE must be GPL version 3"
+          fi
+          if [ ! -f LICENSE-COMMERCIAL.md ] || ! grep -q "GPL-3.0-or-later" LICENSE-COMMERCIAL.md; then
+            err LICENSE-COMMERCIAL.md "missing commercial-option notice naming GPL-3.0-or-later"
+          fi
+
+          # SPDX headers are optional, but an incompatible declaration is not.
+          while IFS= read -r line; do
+            case "$line" in *"GPL-3.0-or-later"*) continue ;; esac
+            err "${line%%:*}" "conflicting SPDX license: $line"
+          done < <(git grep -H -n "SPDX-License-Identifier" -- \
+            '*.rs' '*.py' '*.c' '*.h' '*.cpp' '*.hpp' '*.js' '*.ts' '*.toml' || true)
+
+          while IFS= read -r line; do
+            case "$line" in *"GPL-3.0-or-later"*) continue ;; esac
+            err "${line%%:*}" "manifest license must be GPL-3.0-or-later: $line"
+          done < <(git grep -H -n -E \
+            '^[[:space:]]*license[[:space:]]*=|^[[:space:]]*"license"[[:space:]]*:' \
+            -- '*.toml' 'package.json' '*/package.json' || true)
+
+          if [ "$fail" -eq 0 ]; then
+            echo "OK: own code is GPL-3.0-or-later, commercial option documented."
+          fi
+          exit "$fail"
+
+  link-check:
+    name: Link checks · local Markdown links resolve
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Local navigation links resolve
+        run: |
+          python3 - <<'PY'
+          import os, re, subprocess, sys, urllib.parse
+
+          # Navigation links (.md/.mdx, directories, site routes) are hard-gated.
+          # Media/PDF assets are served from docs/public/ or generated at build
+          # time, so a source-tree path is not authoritative for those.
+          ASSET_EXT = {".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp",
+                       ".pdf", ".ico", ".woff", ".woff2", ".mp4"}
+          LINK = re.compile(r'!?\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+["\'][^"\']*["\'])?\s*\)')
+          REF = re.compile(r'^\s*\[[^\]]+\]:\s*<?([^\s>]+)>?', re.M)
+          SITE_ROOT = "/potok-m/"
+          CONTENT = os.path.join("docs", "src", "content", "docs")
+
+          def resolve(path, source):
+              if path.startswith(SITE_ROOT):
+                  roots = [os.path.join(CONTENT, path[len(SITE_ROOT):].lstrip("/"))]
+              elif path.startswith("/"):
+                  rel = path.lstrip("/")
+                  roots = [rel, os.path.join(CONTENT, rel)]
+              else:
+                  roots = [os.path.normpath(os.path.join(os.path.dirname(source), path))]
+              options = []
+              for r in roots:
+                  options += [r, r.rstrip("/") + ".md", r.rstrip("/") + ".mdx",
+                              os.path.join(r, "index.md")]
+              return options
+
+          files = subprocess.check_output(
+              ["git", "ls-files", "*.md", "*.mdx"], text=True).split()
+          broken, checked, skipped = [], 0, 0
+          for f in files:
+              with open(f, encoding="utf-8", errors="replace") as fh:
+                  text = fh.read()
+              # Examples inside code fences/spans are not links.
+              text = re.sub(r'```.*?```', '', text, flags=re.S)
+              text = re.sub(r'`[^`\n]*`', '', text)
+              targets = [m.group(1) for m in LINK.finditer(text)]
+              targets += [m.group(1) for m in REF.finditer(text)]
+              for target in targets:
+                  if re.match(r'^(?:https?:|mailto:|tel:|data:|#)', target):
+                      continue
+                  raw = target.split("#", 1)[0].split("?", 1)[0]
+                  if not raw or urllib.parse.urlparse(raw).scheme:
+                      continue
+                  options = resolve(urllib.parse.unquote(raw), f)
+                  if os.path.splitext(options[0])[1].lower() in ASSET_EXT:
+                      skipped += 1
+                      continue
+                  checked += 1
+                  if not any(os.path.exists(o) for o in options):
+                      broken.append((f, target, options[0]))
+
+          for f, target, option in broken:
+              print(f"::error file={f}::broken link '{target}' (looked for {option})")
+          print(f"checked {checked} local navigation links, skipped {skipped} asset links")
+          sys.exit(1 if broken else 0)
+          PY

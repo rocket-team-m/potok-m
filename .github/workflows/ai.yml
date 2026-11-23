@@ -1,0 +1,86 @@
+name: ai
+
+on: [push, pull_request]
+
+jobs:
+  python:
+    name: Python · обучение
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: src
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync
+      - run: uv run ruff check src tests
+      - run: uv run pytest -q
+
+  edge:
+    name: Rust · инференс на Pi
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: edge
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo apt-get update && sudo apt-get install -y libudev-dev
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --all-targets
+      - run: cargo test --release --all-targets
+
+  tui:
+    name: Rust · training TUI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --all --manifest-path ai/tui/Cargo.toml -- --check
+      - run: cargo clippy --all-targets --manifest-path ai/tui/Cargo.toml
+      - run: cargo test --all-targets --manifest-path ai/tui/Cargo.toml
+
+  plots:
+    name: SVG · отчётные графики
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Render deterministic plots
+        run: |
+          cargo run --release --manifest-path ai/tui/Cargo.toml -- \
+            out/final_100 --plot-only --model loopwm \
+            --ab-report ab_report.json --plots-out artifacts/plots
+          test -s artifacts/plots/rmse_curve.svg
+          test -s artifacts/plots/ece_curve.svg
+          test -s artifacts/plots/ab_comparison.svg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: training-plots
+          path: artifacts/plots
+
+  guard:
+    name: Guard · тяжёлые файлы
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Reject binaries and files over 2 MB
+        run: |
+          forbidden='\.(sldprt|sldasm|slddrw|cas|dat|trn|msh|zip|7z|tar|gz|bin|trajectory)$'
+          if git ls-files | grep -Ei "$forbidden"; then
+            echo "binary artifact in git" >&2
+            exit 1
+          fi
+          while IFS= read -r f; do
+            [ -f "$f" ] || continue
+            size=$(stat -c%s "$f")
+            if [ "$size" -gt 2097152 ]; then
+              echo "$f is larger than 2 MB" >&2
+              exit 1
+            fi
+          done < <(git ls-files)

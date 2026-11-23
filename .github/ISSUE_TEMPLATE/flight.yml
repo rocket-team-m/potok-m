@@ -1,0 +1,39 @@
+name: Полёт
+description: Пуск и его разбор
+title: "[полёт] "
+labels: ["flight"]
+body:
+  - type: input
+    id: date
+    attributes:
+      label: Дата пуска
+      placeholder: 15.11.2026
+    validations:
+      required: true
+  - type: input
+    id: height
+    attributes:
+      label: Высота, м
+    validations:
+      required: false
+  - type: textarea
+    id: result
+    attributes:
+      label: Что произошло
+      description: Кратко, без интерпретаций
+    validations:
+      required: true
+  - type: textarea
+    id: artifacts
+    attributes:
+      label: Артефакты
+      description: Ссылка на Release flight-NN (лог, отчёт, графики)
+    validations:
+      required: false
+  - type: textarea
+    id: lessons
+    attributes:
+      label: Выводы
+      description: Что меняем в следующий раз
+    validations:
+      required: false

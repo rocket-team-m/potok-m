@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+name: Cross-language
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  golden:
+    name: Golden wire bytes · C / Python / Rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Script self-test
+        run: bash scripts/check_golden.sh self-test
+
+      - name: License and foreign-code gate
+        run: bash scripts/check_golden.sh license
+
+      - name: Workflow YAML valid
+        run: bash scripts/check_golden.sh yaml
+
+      - name: C harness from stm32/protocol_ref
+        run: bash scripts/check_golden.sh c
+
+      - name: Python golden check
+        run: bash scripts/check_golden.sh python
+
+      - name: Rust golden check
+        run: bash scripts/check_golden.sh rust

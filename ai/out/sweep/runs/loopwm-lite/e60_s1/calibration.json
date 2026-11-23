@@ -1,0 +1,15 @@
+{
+  "threshold": 0.4423150047183174,
+  "ece": 0.03423939297322355,
+  "raw_ece": 0.14551330288351913,
+  "temperature_ece": 0.03423939297322355,
+  "coverage": 0.498104755341144,
+  "temperature": 5.0,
+  "method": "temperature",
+  "loops": 1,
+  "n": 5804,
+  "target_ece": 0.05,
+  "model": "loopwm-lite",
+  "seed": 1,
+  "config_hash": "b0a5bef72cbb3949"
+}
