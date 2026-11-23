@@ -21,6 +21,7 @@ No certificate is implied: the filter here is a box projection on the command.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -28,6 +29,42 @@ import torch
 from torch import nn
 
 from .student import CommandEnvelope
+
+# Authoritative v3 target range in m/s^2 (ai/docs/TRAINING_RECIPE.md:10-13):
+# train RMS 7.70, max 10.0. The typed envelope is the simulator's command clamp.
+TARGET_RMS_MPS2 = 7.70
+TARGET_MAX_MPS2 = 10.0
+# Pre-v3 student head: explicit opt-in only, never a default (AITRAINIDEAL B1).
+LEGACY_BOUND_MPS2 = 1.0
+
+
+def assert_command_bound_covers(
+    bound: float, *, target: torch.Tensor | None = None, name: str = "command bound"
+) -> None:
+    """LOUD: refuse a bound that cannot represent the v3 command range.
+
+    With ``target`` (``[..., 2]`` m/s^2) the observed max is checked too, so a
+    dataset whose commands exceed the bound dies before it trains a head that
+    cannot represent them.
+    """
+    if not math.isfinite(bound) or bound <= 0.0:
+        raise ValueError(f"{name} must be finite and positive m/s^2, got {bound!r}")
+    if bound < TARGET_MAX_MPS2:
+        raise AssertionError(
+            f"{name} = {bound} m/s^2 cannot represent the v3 target "
+            f"(max {TARGET_MAX_MPS2}, RMS {TARGET_RMS_MPS2} m/s^2)"
+        )
+    if target is not None:
+        if target.shape[-1] != 2:
+            raise ValueError(f"{name}: target must have two command channels")
+        finite = target[torch.isfinite(target)]
+        if finite.numel() == 0:
+            raise AssertionError(f"{name}: no finite observed command target")
+        observed_max = float(finite.abs().max())
+        if bound < observed_max:
+            raise AssertionError(
+                f"{name} = {bound} m/s^2 is below observed target max {observed_max} m/s^2"
+            )
 
 
 class GateReason(str, Enum):
@@ -49,6 +86,7 @@ class ResidualConfig:
     def __post_init__(self) -> None:
         if not isinstance(self.envelope, CommandEnvelope):
             raise TypeError(f"envelope must be a CommandEnvelope, got {self.envelope!r}")
+        assert_command_bound_covers(self.envelope.accel, name="teacher command envelope")
 
 
 @dataclass(frozen=True)

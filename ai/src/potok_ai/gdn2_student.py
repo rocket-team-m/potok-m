@@ -10,6 +10,10 @@ channel-wise write gate commits a new key/value association. The readout is a
 matrix-vector product against the updated state. There is no attention over a
 window, no convolution and no history buffer: history lives only in the state.
 
+The correction head is bounded by the typed v3 command envelope (10 m/s^2);
+the pre-v3 +/-1 head is available only through the explicit ``legacy_bound``
+opt-in, never by default (AITRAINIDEAL B1).
+
 This is a research candidate, not a result. It makes NO accuracy, latency or
 "beats LRS-TCN / LoopWM-lite" claim: such a claim needs an A/B on held-out data
 with 3 seeds at the same MAC budget (WORLD07 §6). Pure PyTorch, CPU, no
@@ -23,11 +27,14 @@ L2 key normalisation, scalar decay and the rank-1 outer products are not MACs.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import torch
 from torch import nn
 from torch.nn import functional as F
+
+from .residual_policy import LEGACY_BOUND_MPS2
+from .student import CommandEnvelope
 
 FRAME_FEATURES = 14  # 8 raw sensors + 6 physics features (SPEC_SMART.md)
 COND_FEATURES = 6  # mass, area, cd0, static margin, thrust, gyro noise
@@ -46,7 +53,10 @@ class GDN2StudentConfig:
     head_dim: int = 16
     n_blocks: int = 2
     out_features: int = 3  # g_roll, g_pitch, confidence
-    g_max: float = 1.0
+    # Bound in m/s^2, no tanh compression: the typed v3 envelope (10.0), not
+    # the pre-v3 +/-1 head that could not represent the target.
+    g_max: float = field(default_factory=lambda: CommandEnvelope().accel)
+    legacy_bound: bool = False  # explicit opt-in to the pre-v3 +/-1 m/s^2 head
     decay: float = 0.9
     seed: int = 0
 
@@ -63,6 +73,8 @@ class GDN2StudentConfig:
             raise ValueError("out_features must be 3: two corrections and one confidence")
         if not 0.0 < self.decay < 1.0:
             raise ValueError("decay must be in (0, 1) for bounded state")
+        if self.legacy_bound:
+            self.g_max = LEGACY_BOUND_MPS2
         if self.g_max <= 0.0:
             raise ValueError("g_max must be positive")
 

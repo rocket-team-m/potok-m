@@ -50,7 +50,14 @@ from .data import Episode, SmartWindowDataset, load_episodes
 from .loopwm import LoopWM, LoopWMConfig
 from .optim import K3Config, MuonPlus
 from .physics import final_command, physics_baseline
-from .residual_policy import ResidualConfig, ResidualDecision, ResidualPolicy
+from .residual_policy import (
+    LEGACY_BOUND_MPS2,
+    ResidualConfig,
+    ResidualDecision,
+    ResidualPolicy,
+    assert_command_bound_covers,
+)
+from .student import CommandEnvelope
 from .train_smart import generalisation_ratio, normalized_correction_loss
 
 # ---------------------------------------------------------------------------
@@ -169,6 +176,9 @@ class TeacherV2Config:
     spectral_residual: bool = False
     spectral_bound: float = 1.0
     residual_policy: bool = True  # SHIELD02: bounded superposition in teacher stages
+    # Explicit opt-in to the pre-v3 +/-1 m/s^2 student head (AITRAINIDEAL B1).
+    # Default off: the student must be able to represent the v3 target.
+    legacy_student_bound: bool = False
     jepa_weight: float = 0.05
     entropy_weight: float = 1.0
     dagger_rounds: int = 1
@@ -595,8 +605,9 @@ class _LocalEMATeacher(nn.Module):
 class _LocalStudent(nn.Module):
     """Tiny deterministic student when gdn2_student is unavailable."""
 
-    def __init__(self, seed: int) -> None:
+    def __init__(self, seed: int, bound: float = CommandEnvelope().accel) -> None:
         super().__init__()
+        self.bound = bound
         generator = torch.Generator().manual_seed(seed)
         self.net = nn.Sequential(nn.Linear(20, 32), nn.Tanh(), nn.Linear(32, 3))
 
@@ -612,7 +623,8 @@ class _LocalStudent(nn.Module):
             raise ValueError(f"expected (batch, time, 14) frames, got {tuple(window.shape)}")
         conds = cond.unsqueeze(1).expand(-1, window.shape[1], -1)
         raw = self.net(torch.cat([window, conds], dim=-1))
-        return torch.cat([torch.tanh(raw[..., :2]), torch.sigmoid(raw[..., 2:3])], dim=-1)
+        corrections = torch.tanh(raw[..., :2]) * self.bound
+        return torch.cat([corrections, torch.sigmoid(raw[..., 2:3])], dim=-1)
 
 
 @dataclass(frozen=True)
@@ -1038,11 +1050,25 @@ def _stage_rlvr(
     return StageReport(RLVR_STAGE, 0, train, held, ratio, ece, 0.0, False, details)
 
 
+def _student_bound(cfg: TeacherV2Config) -> float:
+    """Typed command bound: v3 envelope by default, +/-1 only when opted in."""
+    if cfg.legacy_student_bound:
+        return LEGACY_BOUND_MPS2
+    bound = CommandEnvelope().accel
+    assert_command_bound_covers(bound, name="student command bound")
+    return bound
+
+
 def _build_student(cfg: TeacherV2Config, device: torch.device) -> StudentLike:
+    bound = _student_bound(cfg)
     if _UpstreamStudent is not None and _UpstreamStudentConfig is not None:
-        scfg = _UpstreamStudentConfig(seed=child_seed(cfg.seed, "student"))
+        scfg = _UpstreamStudentConfig(
+            seed=child_seed(cfg.seed, "student"),
+            g_max=bound,
+            legacy_bound=cfg.legacy_student_bound,
+        )
         return _UpstreamStudent(scfg).to(device)
-    return _LocalStudent(child_seed(cfg.seed, "student")).to(device)
+    return _LocalStudent(child_seed(cfg.seed, "student"), bound).to(device)
 
 
 def _stage_distill(
@@ -1053,12 +1079,19 @@ def _stage_distill(
     device: torch.device,
 ) -> StageReport:
     student = _build_student(cfg, device)
+    bound = _student_bound(cfg)
     optimizer = _build_optimizer(
         list(student.named_parameters()),
         cfg,
         cfg.student_lr,  # type: ignore[attr-defined]
     )
     batches = _window_batches(fit, cfg)
+    if not cfg.legacy_student_bound:
+        assert_command_bound_covers(
+            bound,
+            target=torch.cat([batch[2] for batch in batches]),
+            name="student command bound",
+        )
     steps = 0
     teacher.eval()
     student.train()  # type: ignore[attr-defined]
@@ -1101,6 +1134,8 @@ def _stage_distill(
         "student_source": STUDENT_SOURCE,
         "student_file": "student.pt",
         "residual_policy_target": cfg.residual_policy,
+        "student_command_bound": bound,
+        "legacy_student_bound": cfg.legacy_student_bound,
     }
     return StageReport("distill", steps, train, held, ratio, ece, 0.0, False, details)
 
@@ -1228,6 +1263,11 @@ def build_parser() -> argparse.ArgumentParser:
         dest="residual_policy",
         action="store_false",
         help="keep the pre-SHIELD02 teacher: raw head correction on the physics baseline",
+    )
+    parser.add_argument(
+        "--legacy-student-bound",
+        action="store_true",
+        help="explicitly restore the pre-v3 +/-1 m/s^2 student head (too small for v3)",
     )
     parser.add_argument("--jepa-weight", type=float, default=0.05)
     parser.add_argument("--entropy-weight", type=float, default=1.0)
