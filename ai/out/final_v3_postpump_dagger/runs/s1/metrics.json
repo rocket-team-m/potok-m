@@ -1,0 +1,139 @@
+{
+  "config_hash": "7bb5bc69ca995bb6",
+  "conformal_coverage": 0.9545454545454546,
+  "data_provenance": {
+    "config_sha256": "9c34e71f9d10bcf081c31f15f5332f7bb2fac04dddb28009a27cd30987ab5e91",
+    "heldout_sha256": "fdc1d1400b1c5f111e21f79dead37afa1dd9f058fe457edb78037dc6ebe89807",
+    "train_sha256": "34b35e0ff67f7eeecbd895b2efde8bebcfa159c1a3e78379da6750338b6930b6"
+  },
+  "ece": 0.4205283191647936,
+  "ece_held_out": 0.025942813717108437,
+  "ece_source": "held-out",
+  "entropy": 0.0,
+  "entropy_enabled": false,
+  "model": "teacher_v2",
+  "module_sources": {
+    "dagger": "dagger",
+    "jepa": "jepa_v2",
+    "privileged": "privileged_teacher",
+    "residual_policy": "residual_policy",
+    "student": "gdn2_student"
+  },
+  "ratio": 1.0608508537082701,
+  "recipe": {
+    "batch": 64,
+    "calib_tol": 0.15,
+    "dagger_rounds": 1,
+    "data": "/home/sehaxe/potok-m/ai/out/final_v3_postpump/train_only/train_validation.bin",
+    "device": "cpu",
+    "entropy_weight": 1.0,
+    "epochs": 100,
+    "exit_entropy_alpha": 0.01,
+    "exit_gate_threshold": 0.5,
+    "heads": 2,
+    "jepa_weight": 0.05,
+    "k3_per_head": 0,
+    "k3_qk_clip": false,
+    "k3_qk_clip_tau": 100.0,
+    "learned_exit": false,
+    "limit": 1451,
+    "lr": 0.002,
+    "max_iters": 2,
+    "n_inner_held_out": 2,
+    "opt": "adamw",
+    "out": "/home/sehaxe/potok-m/ai/out/final_v3_postpump_dagger/runs/s1",
+    "rlvr_samples": 4,
+    "rlvr_temperature": 0.05,
+    "spectral_bound": 1.0,
+    "spectral_residual": false,
+    "stage": "all",
+    "student_lr": 0.001,
+    "truth_sidecar": null,
+    "width": 16,
+    "window": 12
+  },
+  "residual_policy": {
+    "enabled": true,
+    "gain": -11.179696083068848,
+    "gate_reasons": {
+      "clamped": 547106,
+      "disabled": 0,
+      "non_finite": 0,
+      "ok": 1700778,
+      "zero_gain": 64
+    },
+    "source": "residual_policy"
+  },
+  "reward_provenance": {},
+  "rmse_held_out": 7.572275015983932,
+  "rmse_train": 7.137926117997241,
+  "seed": 1,
+  "stage": "distill",
+  "stages": {
+    "dagger": {
+      "details": {
+        "dagger_source": "dagger",
+        "dataset_fingerprint": "da283b3175f6c62f254f6e37094e5c3307f1a6be7dfce1b0b844cfe7655b67bf",
+        "fit_samples": 17430,
+        "held_out_samples": 2490,
+        "label_source": "reference_optimizer_v3:slots22..25"
+      },
+      "ece": 0.31068049702212824,
+      "entropy": 0.0,
+      "entropy_enabled": false,
+      "ratio": 0.6056338596349643,
+      "rmse_held_out": 0.878401539520345,
+      "rmse_train": 1.4503838012785264,
+      "stage": "dagger",
+      "steps": 27300
+    },
+    "distill": {
+      "details": {
+        "residual_policy_target": true,
+        "student_file": "student.pt",
+        "student_source": "gdn2_student"
+      },
+      "ece": 0.4205283191647936,
+      "entropy": 0.0,
+      "entropy_enabled": false,
+      "ratio": 1.0608508537082701,
+      "rmse_held_out": 7.572275015983932,
+      "rmse_train": 7.137926117997241,
+      "stage": "distill",
+      "steps": 2300
+    },
+    "privileged": {
+      "details": {
+        "jepa_source": "jepa_v2",
+        "privileged_batches": 0,
+        "privileged_source": "privileged_teacher"
+      },
+      "ece": 0.31755102396992724,
+      "entropy": 0.0,
+      "entropy_enabled": false,
+      "ratio": 1.0558325010578802,
+      "rmse_held_out": 7.915424074242115,
+      "rmse_train": 7.496855861428153,
+      "stage": "privileged",
+      "steps": 2300
+    },
+    "sft": {
+      "details": {},
+      "ece": 0.24574114399738095,
+      "entropy": 0.0,
+      "entropy_enabled": false,
+      "ratio": 1.0538798322043281,
+      "rmse_held_out": 7.845542497373489,
+      "rmse_train": 7.444437456368727,
+      "stage": "sft",
+      "steps": 2300
+    }
+  },
+  "stages_completed": [
+    "sft",
+    "privileged",
+    "dagger",
+    "distill"
+  ],
+  "steps": 2300
+}

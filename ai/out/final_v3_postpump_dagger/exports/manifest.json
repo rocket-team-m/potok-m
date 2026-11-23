@@ -1,0 +1,38 @@
+{
+  "claim": "artifacts only; no closed-loop A/B was run and no win is claimed",
+  "export_format": "student.pt (torch state_dict of the distill-stage student)",
+  "measurement": "distilled students from the post-FIXPUMP four-stage default teacher",
+  "rlvr": "not run (opt-in checkpoint selection only)",
+  "stage_order": [
+    "sft",
+    "privileged",
+    "dagger",
+    "distill"
+  ],
+  "students": {
+    "1": {
+      "config_hash": "7bb5bc69ca995bb6",
+      "ece_source": "held-out",
+      "file": "teacher_v2_s1.pt",
+      "rmse_held_out": 7.572275015983932,
+      "sha256": "372c49a26d833f694be7de77bc85c00df81a13c36369f643161ee0dda1985bf7",
+      "student_source": "gdn2_student"
+    },
+    "2": {
+      "config_hash": "852f14851e8c745c",
+      "ece_source": "held-out",
+      "file": "teacher_v2_s2.pt",
+      "rmse_held_out": 7.659803894832822,
+      "sha256": "278a9aa2cd4f107aecd1ad2fa60efd0254d996832bd5583a82d383a80b3a8b48",
+      "student_source": "gdn2_student"
+    },
+    "3": {
+      "config_hash": "aafe4d567d73f945",
+      "ece_source": "held-out",
+      "file": "teacher_v2_s3.pt",
+      "rmse_held_out": 8.476669004178591,
+      "sha256": "42343b043137358119e037304bfcb5d30f340aa9aa577a66a5b141b3cda0423e",
+      "student_source": "gdn2_student"
+    }
+  }
+}

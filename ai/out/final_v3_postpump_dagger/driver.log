@@ -1,0 +1,60 @@
+REUSE seed 1
+DONE seed 1 held=7.572275 ratio=1.0609 ece=0.0259
+REUSE seed 2
+DONE seed 2 held=7.659804 ratio=1.0418 ece=0.0108
+REUSE seed 3
+DONE seed 3 held=8.476669 ratio=1.0714 ece=0.0028
+{
+  "ab_win_claimed": false,
+  "comparison": {
+    "baseline": "ai/out/final_v3_postpump (five-stage consistency pass)",
+    "baseline_rmse_held_out_mean": 8.039882863503607,
+    "baseline_rmse_held_out_std": 0.18631197466074087,
+    "claim": "two measurements on the same data; no A/B win claimed",
+    "confound": "SHIELD02 residual policy enabled by default here, absent from the baseline",
+    "delta_mean": -0.1369668918384921
+  },
+  "data_provenance": {
+    "config_sha256": "9c34e71f9d10bcf081c31f15f5332f7bb2fac04dddb28009a27cd30987ab5e91",
+    "heldout_sha256": "fdc1d1400b1c5f111e21f79dead37afa1dd9f058fe457edb78037dc6ebe89807",
+    "train_sha256": "34b35e0ff67f7eeecbd895b2efde8bebcfa159c1a3e78379da6750338b6930b6"
+  },
+  "gates": {
+    "ece": {
+      "detail": "three disjoint ECE scores <= 0.05 with coverage in [0, 1]",
+      "name": "ece",
+      "passed": true
+    },
+    "ece_source": {
+      "detail": "three seeds labelled with a disjoint source ['disjoint', 'held-out', 'held_out']",
+      "name": "ece_source",
+      "passed": true
+    },
+    "rmse_ratio": {
+      "detail": "three seeds, held-out/train ratio <= 1.25",
+      "name": "rmse_ratio",
+      "passed": true
+    }
+  },
+  "measurement": "post-FIXPUMP four-stage default teacher v2, 100 epochs, CPU",
+  "residual_policy": "enabled by trainer default (SHIELD02)",
+  "rlvr_used": false,
+  "rmse_held_out_by_seed": {
+    "1": 7.572275015983932,
+    "2": 7.659803894832822,
+    "3": 8.476669004178591
+  },
+  "rmse_held_out_mean": 7.902915971665115,
+  "rmse_held_out_std": 0.49880831277850946,
+  "seeds": [
+    1,
+    2,
+    3
+  ],
+  "stage_order": [
+    "sft",
+    "privileged",
+    "dagger",
+    "distill"
+  ]
+}

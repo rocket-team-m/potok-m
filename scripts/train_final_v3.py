@@ -1,12 +1,16 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""TRAIN-FINAL driver: post-FIXPUMP staged teacher v2, 100 epochs, 3 seeds.
+"""RETRAIN-DAGGER driver: post-POSTPIVOT default teacher v2, 3 seeds.
 
-Runs the five-stage teacher-v2 CLI (``sft -> privileged -> dagger -> rlvr ->
-distill``) on the regenerated v3 train split, then adds the honest confidence
-provenance the evaluation contract asks for.  Nothing here tunes physics,
-gates, thresholds or model knobs: every CLI value below is fixed and recorded
-in each seed's ``metrics.json``.  Closed-loop A/B is a separate step; this
-driver only writes the student exports it would consume.
+Runs the new four-stage default (``sft -> privileged -> dagger -> distill``)
+on the same frozen post-FIXPUMP train split, then adds the honest confidence
+provenance the evaluation contract asks for.  RLVR is opt-in checkpoint
+selection in the trainer and is NOT enabled here: no reward gradient and no
+verifier checkpoint selection run.  Nothing here tunes physics, gates,
+thresholds or model knobs: every CLI value is fixed and recorded in each
+seed's ``metrics.json``.  The result is compared to the earlier five-stage
+consistency pass without claiming an A/B win.  The trainer default also gained
+SHIELD02's residual policy while this work ran; it is enabled here and recorded
+as a confound in the comparison, not tuned away.
 """
 
 from __future__ import annotations
@@ -43,26 +47,35 @@ from potok_ai.train_teacher_v2 import (
     config_hash,
     partition_episodes,
 )
+from potok_ai.train_teacher_v2 import (
+    STAGE_ORDER as TRAINER_STAGE_ORDER,
+)
 
 from potok_ai.data import load_episodes
 
 DATA = AI / "out" / "final_v3_postpump" / "train_only" / "train_validation.bin"
 HELDOUT = AI / "out" / "final_v3_postpump" / "data" / "held-out" / "validation.bin"
 SOURCE_CONFIG = AI / "out" / "v3_final" / "sim.toml"
-OUT = AI / "out" / "final_v3_postpump"
+OUT = AI / "out" / "final_v3_postpump_dagger"
 RUNS = OUT / "runs"
 EXPORTS = OUT / "exports"
 DOC = AI / "docs" / "TRAINING_RESULTS.md"
 PYTHON = AI / ".venv" / "bin" / "python"
 EPOCHS = 100
-# The five-stage contract this run executed. Kept local: a concurrent edit to
-# the trainer's STAGE_ORDER must not silently reclassify an existing artifact.
-EXPECTED_STAGES = ("sft", "privileged", "dagger", "rlvr", "distill")
+# The four-stage default this run executes (POSTPIVOT). Kept local: a
+# concurrent edit to the trainer's STAGE_ORDER must not silently reclassify an
+# existing artifact; verify_inputs() refuses a trainer that moved again.
+EXPECTED_STAGES = ("sft", "privileged", "dagger", "distill")
+# The earlier five-stage consistency pass, same data/knobs, RLVR as a gradient
+# stage: ai/out/final_v3_postpump/summary.json (mean, sample std, m/s^2).
+BASELINE_MEAN = 8.039882863503607
+BASELINE_STD = 0.18631197466074087
 
-# Fixed recipe.  ``limit`` caps WINDOWS per batch builder, not episodes: the
-# 80-episode train file is loaded in full and partitioned by scenario for every
-# seed (partition_episodes), and the DAgger stage uses all of it.  The cap keeps
-# a 100-epoch CPU run tractable and is recorded verbatim in every report.
+# Same knobs as the five-stage consistency pass except the stage order.
+# ``limit`` caps WINDOWS per batch builder, not episodes: the 80-episode file
+# is loaded in full and partitioned by scenario, and DAgger uses all of it.
+# ``rlvr_samples``/``rlvr_temperature`` stay recorded but are inert without
+# --rlvr (the trainer's RLVR is opt-in checkpoint selection only).
 WINDOW_CAP = 1451  # one full episode of 12-tick windows at stride 1
 CFG_KWARGS = {
     "data": DATA,
@@ -108,7 +121,12 @@ def sha256(path: Path) -> str:
 
 
 def verify_inputs() -> dict[str, str]:
-    """Loud refusal of stale/missing data; no silent substitution."""
+    """Loud refusal of stale data or a moved trainer order; no substitution."""
+    if tuple(TRAINER_STAGE_ORDER) != EXPECTED_STAGES:
+        raise ValueError(
+            f"trainer STAGE_ORDER {tuple(TRAINER_STAGE_ORDER)} != pinned "
+            f"{EXPECTED_STAGES}; retrain under a new output directory"
+        )
     digests = {}
     for label, path, expected in (
         ("train", DATA, TRAIN_SHA256),
@@ -189,7 +207,7 @@ def run_trainer(seed: int, out: Path) -> dict:
         if (
             tuple(report.get("stages_completed", ())) == EXPECTED_STAGES
             and report.get("seed") == seed
-            and report.get("reward_provenance")
+            and report.get("reward_provenance") == {}
         ):
             print(f"REUSE seed {seed}", flush=True)
             return report
@@ -215,8 +233,11 @@ def run_trainer(seed: int, out: Path) -> dict:
             f"seed {seed}: stages_completed {report.get('stages_completed')} != "
             f"{list(EXPECTED_STAGES)}; the trainer API changed, do not relabel the artifact"
         )
-    if not report.get("reward_provenance"):
-        raise ValueError(f"seed {seed}: no reward_provenance; RLVR stage did not run")
+    if report.get("reward_provenance") != {}:
+        raise ValueError(
+            f"seed {seed}: non-empty reward_provenance; RLVR was not opted into, "
+            "do not relabel a checkpoint-selection run as the default"
+        )
     if not (out / "student.pt").is_file():
         raise FileNotFoundError(f"seed {seed}: distill stage wrote no student.pt")
     return report
@@ -249,7 +270,7 @@ def honest_confidence(seed: int, out: Path, cfg: TeacherV2Config) -> tuple[float
     with torch.no_grad():
         for batch in _window_batches(inner, cfg):
             window, cond, target = (t.to("cpu") for t in batch[:3])
-            _command, logit, error = _predict(student, window, cond, target, student=True)
+            _command, logit, error = _predict(student, window, cond, target, cfg=cfg, student=True)
             logits.extend(logit.tolist())
             errors.extend(error.tolist())
     if not logits or not np.isfinite(logits).all() or not np.isfinite(errors).all():
@@ -266,16 +287,16 @@ def honest_confidence(seed: int, out: Path, cfg: TeacherV2Config) -> tuple[float
 
 def enrich(seed: int, out: Path, report: dict, digests: dict[str, str]) -> dict:
     """Add the evaluation-contract fields without altering measured numbers."""
-    # Re-running on a finished output directory must be a no-op for the
-    # measurement, not a second (different) trainer-version hash comparison.
-    if report.get("ece_source") == "held-out" and "ece_held_out" in report:
-        return report
+    # Re-running on a finished output directory must leave the measurement
+    # untouched; only the guard above validates its provenance.
     cfg = TeacherV2Config(**{**CFG_KWARGS, "out": out, "seed": seed})
     if config_hash(cfg) != report["config_hash"]:
         raise ValueError(
             f"seed {seed}: config_hash {report['config_hash']} != "
             f"{config_hash(cfg)}; the recipe recorded in metrics.json differs"
         )
+    if report.get("ece_source") == "held-out" and "ece_held_out" in report:
+        return report
     ece_held_out, coverage = honest_confidence(seed, out, cfg)
     enriched = {
         "model": "teacher_v2",
@@ -297,6 +318,7 @@ def enrich(seed: int, out: Path, report: dict, digests: dict[str, str]) -> dict:
         "entropy": report["entropy"],
         "entropy_enabled": report["entropy_enabled"],
         "reward_provenance": report["reward_provenance"],
+        "residual_policy": report["residual_policy"],
         "module_sources": report["module_sources"],
         "stages": report["stages"],
         "recipe": {
@@ -317,8 +339,10 @@ def export_students(seeds: list[int], metrics: dict[int, dict]) -> None:
     """Copy each distilled student beside a provenance manifest (no A/B claim)."""
     EXPORTS.mkdir(parents=True, exist_ok=True)
     manifest = {
-        "measurement": "distilled students from the post-FIXPUMP staged teacher",
+        "measurement": "distilled students from the post-FIXPUMP four-stage default teacher",
         "claim": "artifacts only; no closed-loop A/B was run and no win is claimed",
+        "stage_order": list(EXPECTED_STAGES),
+        "rlvr": "not run (opt-in checkpoint selection only)",
         "export_format": "student.pt (torch state_dict of the distill-stage student)",
         "students": {},
     }
@@ -339,6 +363,7 @@ def export_students(seeds: list[int], metrics: dict[int, dict]) -> None:
 
 
 def write_doc(seeds: list[int], metrics: dict[int, dict], gates: dict, digests: dict) -> None:
+    """Write the results page: new four-stage default vs the old five-stage pass."""
     held = [metrics[seed]["rmse_held_out"] for seed in seeds]
     mean = statistics.mean(held)
     std = statistics.stdev(held) if len(held) > 1 else 0.0
@@ -358,22 +383,46 @@ def write_doc(seeds: list[int], metrics: dict[int, dict], gates: dict, digests: 
         for name, result in gates.items()
     )
     DOC.write_text(
-        "# Post-FIXPUMP teacher-v2 training results (TRAIN-FINAL)\n\n"
-        "Staged teacher v2 (`sft -> privileged -> dagger -> rlvr -> distill`), "
+        "# Post-FIXPUMP teacher-v2 training results (POSTPIVOT default)\n\n"
+        "Staged teacher v2 now runs the four-stage default "
+        f"(`{' -> '.join(EXPECTED_STAGES)}`); RLVR is opt-in checkpoint "
+        "selection and was **not** enabled here, so no reward gradient and no "
+        "verifier checkpoint selection ran. "
         f"**{EPOCHS} epochs**, CPU only, seeds {list(seeds)}. "
-        "Physics is the post-FIXPUMP simulator; the train split is the full "
-        "80-episode v3 file, partitioned by scenario with a disjoint "
-        "2-scenario inner hold-out per seed. Held-out scenarios 16-19 are "
-        "never passed to a training batch. No physics constant, gate or "
-        "threshold was changed. `--limit 1451` caps WINDOWS per batch builder "
-        "(one episode-equivalent), not episodes: DAgger uses all 80 episodes "
-        "and every scenario is scored. This is not the old `--limit 2` "
+        "Physics is the same post-FIXPUMP simulator and the train split is the "
+        "same full 80-episode v3 file as the earlier five-stage pass, "
+        "partitioned by scenario with a disjoint 2-scenario inner hold-out per "
+        "seed. Held-out scenarios 16-19 are never passed to a training batch. "
+        "No physics constant, gate, weight or threshold was changed. "
+        f"`--limit {WINDOW_CAP}` caps WINDOWS per batch builder (one "
+        "episode-equivalent), not episodes: DAgger uses all 80 episodes and "
+        "every scenario is scored. This is not the old `--limit 2` "
         "two-episode recipe.\n\n"
         f"Held-out RMSE over three seeds: **{mean:.6f} +/- {std:.6f} m/s^2** "
         "(sample standard deviation).\n\n"
         "| seed | train RMSE | held-out RMSE | ratio | disjoint ECE | conformal coverage |\n"
         "|---:|---:|---:|---:|---:|---:|\n"
         f"{rows}\n\n"
+        "## Comparison to the earlier five-stage pass (no win claimed)\n\n"
+        "| run | stages | held-out RMSE, mean +/- std (m/s^2) |\n"
+        "|---|---|---:|\n"
+        f"| this run | {' -> '.join(EXPECTED_STAGES)} | {mean:.6f} +/- {std:.6f} |\n"
+        "| earlier consistency pass | sft -> privileged -> dagger -> rlvr -> distill | "
+        f"{BASELINE_MEAN:.6f} +/- {BASELINE_STD:.6f} |\n\n"
+        f"Difference of means: {mean - BASELINE_MEAN:+.6f} m/s^2. "
+        "The two runs share data, seeds, epochs and every recorded knob except "
+        "the trainer's stage order (RLVR was a fifth gradient stage then, an "
+        "opt-in selection stage now). This is a description of two "
+        "measurements, not an A/B verdict: no closed-loop harness, no "
+        "flight-truth sidecar, no positive control, and seed spread alone does "
+        "not establish an improvement. No win is claimed.\n\n"
+        "A second trainer change landed while this run was prepared: SHIELD02 "
+        "added a bounded, zero-initialised residual policy that is enabled by "
+        "default in teacher stages. It is enabled here (see `residual_policy` "
+        "in each `metrics.json`) and absent from the earlier pass, so the "
+        "difference of means confounds stage order with residual policy and "
+        "cannot be attributed to the DAgger ordering. `--no-residual-policy` "
+        "keeps the pre-SHIELD02 teacher; that isolating run was not performed.\n\n"
         "## Gate verdict (teacher gates only)\n\n"
         "| check | verdict | detail |\n|---|---|---|\n"
         f"{gate_rows}\n\n"
@@ -390,14 +439,23 @@ def write_doc(seeds: list[int], metrics: dict[int, dict], gates: dict, digests: 
         f"({mean:.3f} m/s^2) is close to the v3 target's own RMS (~8 m/s^2), "
         "so this student has not learned the command to useful accuracy. "
         "The low disjoint ECE reflects a well-behaved confidence head, not a "
-        "small command error. No claim about closed-loop flight benefit is "
-        "made here.\n\n"
+        "small command error. Seed spread grew to "
+        f"{std:.6f} m/s^2 from {BASELINE_STD:.6f} in the earlier pass, so the "
+        f"{mean - BASELINE_MEAN:+.6f} m/s^2 mean difference is smaller than "
+        "one run's scatter and isolates no effect. No claim about closed-loop "
+        "flight benefit is made here.\n\n"
         "## Provenance\n\n"
         f"- train `validation.bin` sha256: `{digests['train_sha256']}`\n"
         f"- held-out `validation.bin` sha256: `{digests['heldout_sha256']}` "
         "(matches the post-FIXPUMP zero-command baseline)\n"
         f"- simulation config sha256: `{digests['config_sha256']}`\n"
-        "- all knobs per seed are in `ai/out/final_v3_postpump/runs/s*/metrics.json`.\n",
+        "- all knobs per seed are in "
+        "`ai/out/final_v3_postpump_dagger/runs/s*/metrics.json`; exports and "
+        "their digests are in `ai/out/final_v3_postpump_dagger/exports/manifest.json`.\n"
+        "- the trainer default includes SHIELD02 `residual_policy` (enabled); "
+        "its gain and gate counts are in each `metrics.json`.\n"
+        "- the earlier five-stage artifacts remain untouched in "
+        "`ai/out/final_v3_postpump/`.\n",
         encoding="utf-8",
     )
 
@@ -420,14 +478,28 @@ def main() -> None:
         "ece_source": check_ece_source(metrics),
         "ece": check_ece(metrics),
     }
+    held_mean = statistics.mean(metrics[s]["rmse_held_out"] for s in SEEDS)
     summary = {
-        "measurement": "post-FIXPUMP staged teacher v2, 100 epochs, CPU",
+        "measurement": "post-FIXPUMP four-stage default teacher v2, 100 epochs, CPU",
+        "stage_order": list(EXPECTED_STAGES),
+        "rlvr_used": False,
+        "residual_policy": "enabled by trainer default (SHIELD02)",
         "seeds": list(SEEDS),
         "rmse_held_out_by_seed": {str(s): metrics[s]["rmse_held_out"] for s in SEEDS},
-        "rmse_held_out_mean": statistics.mean(metrics[s]["rmse_held_out"] for s in SEEDS),
+        "rmse_held_out_mean": held_mean,
         "rmse_held_out_std": statistics.stdev(metrics[s]["rmse_held_out"] for s in SEEDS),
         "gates": {name: asdict(report) for name, report in gates.items()},
         "ab_win_claimed": False,
+        "comparison": {
+            "baseline": "ai/out/final_v3_postpump (five-stage consistency pass)",
+            "baseline_rmse_held_out_mean": BASELINE_MEAN,
+            "baseline_rmse_held_out_std": BASELINE_STD,
+            "delta_mean": held_mean - BASELINE_MEAN,
+            "claim": "two measurements on the same data; no A/B win claimed",
+            "confound": (
+                "SHIELD02 residual policy enabled by default here, absent from the baseline"
+            ),
+        },
         "data_provenance": digests,
     }
     (OUT / "summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
