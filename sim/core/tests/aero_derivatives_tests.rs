@@ -13,8 +13,11 @@ mod aero_derivatives;
 
 use std::path::{Path, PathBuf};
 
+// The module below is included by path, so its `crate::` paths resolve here.
+pub use potok_sim::{aero, error, AeroCard, AeroCoeffs};
+
 use aero_derivatives::{bilinear, Derivative, DerivativeGrid, DerivativeSlots, FlightCard};
-use potok_sim::{config::AeroSource, AeroCard, AeroChannel, Config, SimError, Simulator};
+use potok_sim::{config::AeroSource, AeroChannel, Config, SimError, Simulator};
 
 const CARD: &str = "../config/aero_card.toml";
 // Clean cd0 stencil used by the existing OR card gates.

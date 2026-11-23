@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use potok_sim::{
     firmware_adapter::{Command, FirmwareAdapter, MockAdapter},
     firmware_dataset::{
-        generate_dataset, indices_for, CommandProvider, CommandProvenanceMeta,
+        generate_dataset, indices_for, CommandProvenanceMeta, CommandProvider,
         FirmwareDatasetOutput, FirmwareDatasetSpec,
     },
     quality::{check_dataset, check_split_disjoint},
@@ -111,7 +111,8 @@ where
     }
     let train_idx = indices_for(Split::Train, args.train_episodes);
     let held_idx = indices_for(Split::HeldOut, args.held_out_episodes);
-    if train_idx.len() < args.min_episodes_per_split || held_idx.len() < args.min_episodes_per_split {
+    if train_idx.len() < args.min_episodes_per_split || held_idx.len() < args.min_episodes_per_split
+    {
         return Err(SimError::Dataset(format!(
             "need {} episodes per split; got train={} held-out={}",
             args.min_episodes_per_split,

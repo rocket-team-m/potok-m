@@ -4,6 +4,7 @@
 //! There is no global RNG, no wall-clock dependence, and no host/GPU coupling.
 
 pub mod aero;
+pub mod aero_derivatives;
 pub mod atmosphere;
 pub mod config;
 pub mod control;
@@ -11,11 +12,17 @@ pub mod dynamics;
 pub mod episode;
 pub mod error;
 pub mod firmware_adapter;
+pub mod firmware_dataset;
+pub mod flight_replay;
+pub mod identification;
 pub mod manifest;
 pub mod math;
 pub mod optimizer;
 pub mod physics;
+pub mod playback3d;
 pub mod quality;
+pub mod reward;
+pub mod rollout;
 pub mod scenario;
 pub mod sensor;
 pub mod trajectory;

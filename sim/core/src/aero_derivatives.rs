@@ -11,7 +11,7 @@
 //! [`AeroCard`] with those slots and refuses to produce coefficients until all
 //! three have been supplied.
 
-use potok_sim::{
+use crate::{
     aero::AeroChannel,
     error::{Result, SimError},
     AeroCard, AeroCoeffs,

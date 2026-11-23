@@ -39,8 +39,8 @@ use crate::{
     control::validate_command,
     episode::{ControlContext, Episode},
     error::{Result, SimError},
-    firmware_adapter::FirmwareAdapter,
     file_record,
+    firmware_adapter::FirmwareAdapter,
     manifest::{write_manifest, DatasetManifest, SCHEMA_VERSION},
     math::episode_seed,
     optimizer::ReferenceOptimizer,
@@ -163,7 +163,7 @@ impl ProvenanceSet {
 }
 
 fn check_name(name: &str) -> Result<()> {
-    if name.is_empty() || name.as_bytes().len() > ADAPTER_NAME_MAX || name.as_bytes().contains(&0) {
+    if name.is_empty() || name.len() > ADAPTER_NAME_MAX || name.contains('\0') {
         return Err(SimError::Dataset(format!(
             "adapter name {name:?} must be 1..={ADAPTER_NAME_MAX} UTF-8 bytes without NUL"
         )));
@@ -456,18 +456,23 @@ pub fn generate_reference_episode(
     index: u64,
 ) -> Result<(Episode, Vec<FirmwareSample>)> {
     let opt = ReferenceOptimizer::new(sim.config());
-    generate_episode_inner(sim, index, &CommandProvenanceMeta::offline_optimizer(), |ctx| {
-        let [ax, ay] = opt.world_accel_command(ctx.state, ctx.wind, ctx.phase, ctx.frame);
-        let healthy = ctx.frame.ai_input_valid() && ctx.phase.ai_allowed();
-        Proposed {
-            world_ay: ay as f32,
-            world_ax: ax as f32,
-            fin_roll: ay,
-            fin_pitch: -ax,
-            ai_healthy: healthy,
-            valid: true,
-        }
-    })
+    generate_episode_inner(
+        sim,
+        index,
+        &CommandProvenanceMeta::offline_optimizer(),
+        |ctx| {
+            let [ax, ay] = opt.world_accel_command(ctx.state, ctx.wind, ctx.phase, ctx.frame);
+            let healthy = ctx.frame.ai_input_valid() && ctx.phase.ai_allowed();
+            Proposed {
+                world_ay: ay as f32,
+                world_ax: ax as f32,
+                fin_roll: ay,
+                fin_pitch: -ax,
+                ai_healthy: healthy,
+                valid: true,
+            }
+        },
+    )
 }
 
 /// Episode indices of one scenario split, ascending. Shared with the CLI so a

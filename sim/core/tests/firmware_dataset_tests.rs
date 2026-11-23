@@ -16,7 +16,7 @@ use potok_sim::{
     firmware_adapter::{Command, FirmwareAdapter},
     firmware_dataset::{
         generate_dataset, generate_episode, generate_reference_episode, indices_for,
-        read_provenance, write_provenance, CommandProvider, CommandProvenanceMeta, CommandSource,
+        read_provenance, write_provenance, CommandProvenanceMeta, CommandProvider, CommandSource,
         EpisodeProvenance, FirmwareDatasetSpec, ProvenanceSet, RECORD_SIZE,
     },
     manifest::read_manifest,
@@ -95,8 +95,14 @@ fn offline_reference_arm_reproduces_standard_v3_bytes() {
     let reference_t = sidecar_path(&ref_validation);
     write_trajectory_v3(&generated_t, &cfg, &[episode]).unwrap();
     write_trajectory_v3(&reference_t, &cfg, &[reference]).unwrap();
-    assert_eq!(fs::read(&generated).unwrap(), fs::read(&ref_validation).unwrap());
-    assert_eq!(fs::read(&generated_t).unwrap(), fs::read(&reference_t).unwrap());
+    assert_eq!(
+        fs::read(&generated).unwrap(),
+        fs::read(&ref_validation).unwrap()
+    );
+    assert_eq!(
+        fs::read(&generated_t).unwrap(),
+        fs::read(&reference_t).unwrap()
+    );
 
     let frames = cfg.frames_per_episode();
     assert_eq!(samples.len(), frames);
@@ -168,10 +174,7 @@ fn provenance_roundtrip_and_loud_corruption() {
     let (_, samples) = generate_episode(&sim, 1, &mut adapter, &meta).unwrap();
     let set = ProvenanceSet {
         frames_per_episode: cfg.frames_per_episode() as u32,
-        episodes: vec![EpisodeProvenance {
-            index: 1,
-            samples,
-        }],
+        episodes: vec![EpisodeProvenance { index: 1, samples }],
     };
     let dir = temp_dir("prov");
     let path = dir.join("validation.command_provenance");
@@ -256,20 +259,21 @@ fn firmware_split_preserves_v3_layout_manifest_truth_and_is_deterministic() {
     assert_eq!(m.files[2].name, "validation.command_provenance");
     assert_eq!(
         m.target_names,
-        TARGET_NAMES.iter().map(|s| s.to_string()).collect::<Vec<_>>()
+        TARGET_NAMES
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>()
     );
     check_dataset("train", &cfg, &v, &t, 3).unwrap();
 
-    assert_eq!(
-        out.provenance,
-        cli_firmware_dataset::provenance_path(&dir)
-    );
+    assert_eq!(out.provenance, cli_firmware_dataset::provenance_path(&dir));
     let p = read_provenance(&out.provenance).unwrap();
     assert_eq!(p.episodes.len(), 3);
     assert_eq!(p.tick_count(), 3 * cfg.frames_per_episode() as u64);
-    assert!(p.episodes.iter().all(|e| e.samples.iter().all(|s| {
-        s.source == CommandSource::Firmware && s.adapter == "scripted_v1"
-    })));
+    assert!(p.episodes.iter().all(|e| e
+        .samples
+        .iter()
+        .all(|s| { s.source == CommandSource::Firmware && s.adapter == "scripted_v1" })));
 
     let dir2 = temp_dir("split-b");
     let out2 = generate_dataset(FirmwareDatasetSpec {
@@ -289,7 +293,12 @@ fn firmware_split_preserves_v3_layout_manifest_truth_and_is_deterministic() {
         (&out.provenance, &out2.provenance),
         (&out.manifest, &out2.manifest),
     ] {
-        assert_eq!(fs::read(a).unwrap(), fs::read(b).unwrap(), "{}", a.display());
+        assert_eq!(
+            fs::read(a).unwrap(),
+            fs::read(b).unwrap(),
+            "{}",
+            a.display()
+        );
     }
 }
 
@@ -308,15 +317,22 @@ fn cli_helper_generates_both_splits_with_a_pluggable_adapter() {
     for split in [&out.train, &out.held_out] {
         let v = read_validation(&split.validation).unwrap();
         assert!(v.episodes.iter().all(|e| {
-            e.targets.rows().into_iter().all(|r| r[4] == 0.0 && r[5] == 0.0)
+            e.targets
+                .rows()
+                .into_iter()
+                .all(|r| r[4] == 0.0 && r[5] == 0.0)
         }));
         let p = read_provenance(&split.provenance).unwrap();
-        assert!(p.episodes.iter().all(|e| e.samples.iter().all(|s| {
-            s.adapter == "firmware_zero" && s.source == CommandSource::Firmware
-        })));
+        assert!(p.episodes.iter().all(|e| e
+            .samples
+            .iter()
+            .all(|s| { s.adapter == "firmware_zero" && s.source == CommandSource::Firmware })));
     }
     assert_eq!(read_manifest(&out.train.manifest).unwrap().split, "train");
-    assert_eq!(read_manifest(&out.held_out.manifest).unwrap().split, "held-out");
+    assert_eq!(
+        read_manifest(&out.held_out.manifest).unwrap().split,
+        "held-out"
+    );
 
     // RLVR01's MockAdapter is pluggable through the same CLI entry point.
     let mock = run_with_builtin(
@@ -328,7 +344,10 @@ fn cli_helper_generates_both_splits_with_a_pluggable_adapter() {
     )
     .unwrap();
     let p = read_provenance(&mock.train.provenance).unwrap();
-    assert!(p.episodes.iter().all(|e| e.samples.iter().all(|s| s.adapter == "firmware_mock")));
+    assert!(p
+        .episodes
+        .iter()
+        .all(|e| e.samples.iter().all(|s| s.adapter == "firmware_mock")));
 
     let reference = run_with_builtin(
         &FirmwareDatasetArgs {
@@ -339,9 +358,10 @@ fn cli_helper_generates_both_splits_with_a_pluggable_adapter() {
     )
     .unwrap();
     let p = read_provenance(&reference.train.provenance).unwrap();
-    assert!(p.episodes.iter().all(|e| e.samples.iter().all(|s| {
-        s.source == CommandSource::OfflineOptimizer
-    })));
+    assert!(p.episodes.iter().all(|e| e
+        .samples
+        .iter()
+        .all(|s| { s.source == CommandSource::OfflineOptimizer })));
 
     // A caller-supplied adapter plugs in through `run` with a provider factory.
     let plugged = run(
@@ -356,7 +376,10 @@ fn cli_helper_generates_both_splits_with_a_pluggable_adapter() {
     )
     .unwrap();
     let p = read_provenance(&plugged.train.provenance).unwrap();
-    assert!(p.episodes.iter().all(|e| e.samples.iter().all(|s| s.adapter == "plugged_in")));
+    assert!(p
+        .episodes
+        .iter()
+        .all(|e| e.samples.iter().all(|s| s.adapter == "plugged_in")));
 }
 
 #[test]
