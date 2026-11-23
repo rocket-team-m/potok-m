@@ -208,7 +208,7 @@
     </section>
 
     <div class="strip wrap">
-      <div class="stat"><div class="v mono">+125.12 м</div><div class="l">апогей · AI assist</div></div>
+      <div class="stat"><div class="v mono" style="color:var(--warn)">FAIL</div><div class="l">v3 A/B · oracle TC 2/3</div></div>
       <div class="stat"><div class="v mono">1.86 %</div><div class="l">OpenRocket parity</div></div>
       <div class="stat"><div class="v mono">500 Гц</div><div class="l">контур управления</div></div>
       <div class="stat"><div class="v mono">GPL-3.0</div><div class="l">собственный код</div></div>
@@ -229,51 +229,51 @@
     </section>
 
     <section class="section wrap" id="telemetry">
-      <div class="sec-head"><span class="idx mono">03</span><h2>Замкнутый контур в числах</h2><span class="note mono">ab_report.json · seed 1 · loopwm · 20 эпизодов</span></div>
+      <div class="sec-head"><span class="idx mono">03</span><h2>Замкнутый контур в числах</h2><span class="note mono">ab_report.json · post-FIXPUMP · seed 1 · loopwm · 20 эпизодов · FAIL</span></div>
       <div class="telemetry">
         <div class="telem-head mono"><span>Боковое СКО · v3 flown-truth · 30 с</span><span>POTOKTRJ v3 / 6-DoF</span></div>
         <div class="rail">
-          <div class="rail-val mono">1528.366<small>м · zero command</small></div>
+          <div class="rail-val mono">1309.409<small>м · zero command</small></div>
           <div class="rail-line" aria-hidden="true"><span class="rail-dot"></span></div>
-          <div class="rail-val mono accent">1502.180<small>м · AI assist</small></div>
+          <div class="rail-val mono accent">1267.367<small>м · AI assist</small></div>
         </div>
         <div class="rail-meta mono">
-          <span>Δ −26.186 м</span><span>98.287 % от baseline</span><span>апогей +125.12 м</span><span>OR-parity 1.86 % / лимит 2 %</span>
+          <span>Δ −42.042 м</span><span>96.789 % от baseline</span><span>апогей +104.041 м</span><span style="color:var(--warn)">FAIL · oracle TC 2/3 · не засчитано</span><span>OR-parity 1.86 % / лимит 2 %</span>
         </div>
       </div>
       <div class="graphs">
         <figure class="graph">
           <figcaption class="mono">01 / Боковое СКО по сценариям · м</figcaption>
-          <svg viewBox="0 0 520 175" role="img" aria-label="Боковое СКО: baseline 1532.165–1599.463 м против assist 1443.865–1582.775 м в сценариях 16–19">
+          <svg viewBox="0 0 520 175" role="img" aria-label="Боковое СКО post-FIXPUMP: baseline 1268.064–1376.938 м против assist 1220.899–1342.997 м в сценариях 16–19">
             <line class="gridline" x1="50" y1="46" x2="510" y2="46"/>
             <line class="gridline" x1="50" y1="98" x2="510" y2="98"/>
             <line class="gridline" x1="50" y1="150" x2="510" y2="150"/>
-            <text x="6" y="49">1600</text><text x="6" y="101">1500</text><text x="6" y="153">1400</text>
-            <polyline class="base draw" points="70,81.3 200,107.3 330,46.3 460,99.6"/>
-            <polyline class="assist draw" style="--d:160ms" points="70,92.9 200,127.2 330,55.0 460,114.4"/>
-            <g class="pop"><circle class="base-dot" cx="70" cy="81.3" r="2.5"/><circle class="base-dot" cx="200" cy="107.3" r="2.5"/><circle class="base-dot" cx="330" cy="46.3" r="2.5"/><circle class="base-dot" cx="460" cy="99.6" r="2.5"/></g>
-            <g class="pop" style="--d:160ms"><circle class="assist-dot" cx="70" cy="92.9" r="2.5"/><circle class="assist-dot" cx="200" cy="127.2" r="2.5"/><circle class="assist-dot" cx="330" cy="55.0" r="2.5"/><circle class="assist-dot" cx="460" cy="114.4" r="2.5"/></g>
+            <text x="6" y="49">1400</text><text x="6" y="101">1300</text><text x="6" y="153">1200</text>
+            <polyline class="base draw" points="70,105.0 200,96.2 330,58.0 460,114.6"/>
+            <polyline class="assist draw" style="--d:160ms" points="70,122.5 200,124.3 330,75.6 460,139.1"/>
+            <g class="pop"><circle class="base-dot" cx="70" cy="105.0" r="2.5"/><circle class="base-dot" cx="200" cy="96.2" r="2.5"/><circle class="base-dot" cx="330" cy="58.0" r="2.5"/><circle class="base-dot" cx="460" cy="114.6" r="2.5"/></g>
+            <g class="pop" style="--d:160ms"><circle class="assist-dot" cx="70" cy="122.5" r="2.5"/><circle class="assist-dot" cx="200" cy="124.3" r="2.5"/><circle class="assist-dot" cx="330" cy="75.6" r="2.5"/><circle class="assist-dot" cx="460" cy="139.1" r="2.5"/></g>
             <text x="64" y="170">16</text><text x="194" y="170">17</text><text x="324" y="170">18</text><text x="454" y="170">19</text>
           </svg>
           <div class="legend mono"><span><i></i>zero command</span><span class="a"><i></i>AI assist</span></div>
         </figure>
         <figure class="graph">
           <figcaption class="mono">02 / Апогей по сценариям · м</figcaption>
-          <svg viewBox="0 0 520 175" role="img" aria-label="Апогей: baseline 1495–1962 м против assist 1596–2120 м в сценариях 16–19">
+          <svg viewBox="0 0 520 175" role="img" aria-label="Апогей post-FIXPUMP: baseline 1756.220–2135.255 м против assist 1843.789–2264.592 м в сценариях 16–19">
             <line class="gridline" x1="50" y1="33" x2="510" y2="33"/>
             <line class="gridline" x1="50" y1="92" x2="510" y2="92"/>
             <line class="gridline" x1="50" y1="150" x2="510" y2="150"/>
-            <text x="6" y="36">2200</text><text x="6" y="95">1800</text><text x="6" y="153">1400</text>
-            <polyline class="base draw" points="70,106.5 200,58.7 330,134.5 460,82.6"/>
-            <polyline class="assist draw" style="--d:160ms" points="70,87.8 200,33.0 330,118.1 460,62.0"/>
-            <g class="pop"><circle class="base-dot" cx="70" cy="106.5" r="2.5"/><circle class="base-dot" cx="200" cy="58.7" r="2.5"/><circle class="base-dot" cx="330" cy="134.5" r="2.5"/><circle class="base-dot" cx="460" cy="82.6" r="2.5"/></g>
-            <g class="pop" style="--d:160ms"><circle class="assist-dot" cx="70" cy="87.8" r="2.5"/><circle class="assist-dot" cx="200" cy="33.0" r="2.5"/><circle class="assist-dot" cx="330" cy="118.1" r="2.5"/><circle class="assist-dot" cx="460" cy="62.0" r="2.5"/></g>
+            <text x="6" y="36">2400</text><text x="6" y="95">2000</text><text x="6" y="153">1600</text>
+            <polyline class="base draw" points="70,100.2 200,71.7 330,127.2 460,82.3"/>
+            <polyline class="assist draw" style="--d:160ms" points="70,89.2 200,52.8 330,114.3 460,64.2"/>
+            <g class="pop"><circle class="base-dot" cx="70" cy="100.2" r="2.5"/><circle class="base-dot" cx="200" cy="71.7" r="2.5"/><circle class="base-dot" cx="330" cy="127.2" r="2.5"/><circle class="base-dot" cx="460" cy="82.3" r="2.5"/></g>
+            <g class="pop" style="--d:160ms"><circle class="assist-dot" cx="70" cy="89.2" r="2.5"/><circle class="assist-dot" cx="200" cy="52.8" r="2.5"/><circle class="assist-dot" cx="330" cy="114.3" r="2.5"/><circle class="assist-dot" cx="460" cy="64.2" r="2.5"/></g>
             <text x="64" y="170">16</text><text x="194" y="170">17</text><text x="324" y="170">18</text><text x="454" y="170">19</text>
           </svg>
           <div class="legend mono"><span><i></i>zero command</span><span class="a"><i></i>AI assist</span></div>
         </figure>
       </div>
-      <p class="src mono">Источник: <a href="docs/ai/gates/">гейты ИИ</a> · <a href="docs/sim/validation/">валидация симулятора</a> · <code>ab_report.json</code>, seed 1, экспорт loopwm. Сценарии 16–19, по 5 эпизодов; разница −26.186 м при ULP сидкара 6.1e−05 м.</p>
+      <p class="src mono">Источник: <a href="docs/ai/gates/">гейты ИИ</a> · <a href="docs/sim/validation/">валидация симулятора</a> · <code>ab_report.md/json</code> (post-FIXPUMP), seed 1, экспорт loopwm. Сценарии 16–19, по 5 эпизодов; разница −42.042 м при ULP сидкара 6.1e−05 м. Вердикт FAIL: oracle-положительный контроль провален на 2/3 сидов, результат не засчитан.</p>
     </section>
 
     <section class="section wrap" id="system">
@@ -323,13 +323,13 @@
           <span class="shot-frame"><svg viewBox="0 0 320 180" role="img" aria-label="Схематичный журнал обучения и A/B">
             <line class="hair" x1="0" y1="18" x2="320" y2="18"/>
             <text class="hl" x="10" y="13">AI / CLOSED LOOP</text>
-            <text x="12" y="42">seed 1  loopwm  ep 20</text>
-            <text x="12" y="60">lateral  1528.366 → 1502.180</text>
-            <text class="hl" x="12" y="78">apogee   +125.12 m</text>
-            <text x="12" y="96">gate trips 11596  clip 0</text>
-            <text x="12" y="114">rmse 9.054  ticks 30000</text>
+            <text x="12" y="42">seed 1  loopwm  ep 20  post-FIXPUMP</text>
+            <text x="12" y="60">lateral  1309.409 → 1267.367</text>
+            <text class="hl" x="12" y="78">apogee   +104.04 m  не засчитано</text>
+            <text x="12" y="96">gate trips 11280  clip 0</text>
+            <text x="12" y="114">rmse 9.819  ticks 30000</text>
             <line class="hair" x1="12" y1="132" x2="308" y2="132"/>
-            <text class="hl" x="12" y="152">V3 A/B PASS</text><text x="228" y="152">loopwm 3/3</text>
+            <text x="12" y="152" style="fill:var(--warn)">V3 A/B FAIL</text><text x="228" y="152">TC 2/3</text>
           </svg></span>
           <span class="shot-cap mono"><span>03 / Бортовой ИИ</span><span>гейты и A/B →</span></span>
         </a>
