@@ -1,63 +1,174 @@
-# Potok-M AI stack — model card
+# Поток-М — карта ИИ-модели
 
-Engineering prototype. Every number below comes from reproducible simulation; there is no flight log. Intended use is an advisory stabilization assistant: training happens off-board, inference runs on Raspberry Pi 4 B as a bounded correction under STM32 veto. No network output is allowed during motor burn, and the controller keeps final authority. Not cleared for flight until closed-loop A/B turns positive.
+Инженерный прототип ассистента стабилизации ракеты. Обучение и дистилляция
+происходят вне борта, инференс — на Raspberry Pi 4 B как ограниченная поправка
+под вето STM32. Реального лётного лога нет: все числа ниже получены на
+воспроизводимом симуляторе и не являются измерением в полёте. Модель не
+допущена к управлению до положительного closed-loop A/B.
 
-## Architecture
+## Архитектура
 
-One CLI (`potok_ai.engine`) trains and scores three families:
+CLI `potok_ai.engine` обучает и оценивает три семейства.
 
-| family | role | design | params / MAC / export bytes (seed 1, 100 epochs) |
-|---|---|---|---|
-| `lrs` (`student.py`) | on-board student, LRS-TCN / RMS-TCN (`StatefulTCN`) | one frame per tick, persistent state; causal depthwise dilations 1/2/4/8/16, RMSNorm, low-rank recurrent update, ternary TSCT pointwise maps dequantized at load, fused stem/update; 4-bit FWHT activation quantizer in training only | 22 439 / 58 816 / 78 171 |
-| `loopwm-lite` (`loopwm_lite.py`) | speculative on-board verifier | 50×14 → 16 latent tokens, width 64, rank-8 cross-attention, one parameter-shared block ≤2 passes with adaptive exit; heads for teacher latents at +3/+6 frames plus correction and confidence | 34 819 / 289 984 / 150 095 |
-| `loopwm` (`loopwm.py`) | privileged offline teacher | one shared LoopBlock (causal self-attention + FFN), norm-based exit capped at 6 passes; EMA JEPA heads at +3/+6/+10 frames and KoLeo; true wind is loss-only, never a forward input | 83 075 / 6 231 744 (teacher MAC) / 78 171 (student export) |
+| Семейство | Роль | Конструкция | params / MAC / байты экспорта (seed 1, 100 эпох) |
+| --- | --- | --- | --- |
+| LRS-TCN / RMS-TCN (`StatefulTCN`) | бортовой студент | один кадр за тик, состояние между вызовами; causal depthwise dilation 1/2/4/8/16, RMSNorm, низкоранговое рекуррентное обновление `W = UVᵀ, r=16`, тернарные TSCT-проекции с деквантованием при загрузке, fused stem/update; 4-битный FWHT-квантователь активаций только при обучении | 22 439 / 58 816 / 78 171 |
+| LoopWM-lite | спекулятивный бортовой верификатор | 50×14 → 16 латентных токенов, ширина 64, rank-8 cross-attention, один parameter-shared блок ≤2 проходов с адаптивным выходом; головы латента учителя на +3/+6 кадров плюс поправка и confidence | 34 819 / 289 984 / 150 095 |
+| LoopWM | привилегированный офлайн-учитель | один общий LoopBlock (causal self-attention + FFN), выход по норме обновления, кап 6 проходов; EMA-головы JEPA на +3/+6/+10 кадров и KoLeo; истинный ветер — только в функции потерь, никогда на входе | 83 075 / 6 231 744 (MAC учителя) / 78 171 (экспорт студента) |
 
-All three emit two `g_max·tanh`-bounded corrections and a sigmoid confidence. The training stack uses internal TSCT (low-rank `U diag(s) Vᵀ` with Newton–Schulz polar retraction and factor quantizers, no external paper claimed), Muon+ by default (Jordan NS quintic, ColRow, 5 steps; AdamW only as comparison), JEPA 0.05, MTP K=3 0.02, a physics residual baseline and curriculum, and logit-domain confidence with split-conformal calibration (temperature, then isotonic fallback). The chain is `loopwm → loopwm-lite → lrs → edge`.
+Все три выдают две команды с ограничением `g_max·tanh` и сигмоидную confidence.
+Стек обучения: внутренний TSCT (низкоранговая спектральная параметризация
+`U diag(s) Vᵀ` с полярной ретракцией Ньютона–Шульца и квантователями факторов,
+без чужого arXiv-ID), Muon+ по умолчанию (Jordan NS quintic, ColRow, 5 шагов;
+AdamW только для сравнения), JEPA 0,05, MTP K=3 0,02, физический residual-базис
+и curriculum, confidence в logit-области с temperature и isotonic-fallback
+калибровкой. Цепочка: `LoopWM → LoopWM-lite → LRS-TCN → edge`.
 
-Export is the self-describing v2 binary: little-endian, magic `POTOKM1\0`, header + layer records (ternary codes with scales or fp32 tensors) + raw 32-byte SHA-256 trailer; the reader must verify and refuse a mismatch. `FORMAT.md` is the byte authority and `tests/test_fixture.py` pins it. References for the borrowed ideas: TCN arXiv:1803.01271, RMA arXiv:2107.04034, looped world models arXiv:2606.18208, BitNet b1.58/v2, Muon+ arXiv:2502.16982.
+Экспорт — самописывающийся бинарный формат v2: little-endian, magic `POTOKM1\0`,
+заголовок, записи слоёв (тернарные коды с масштабами или fp32-тензоры) и хвост
+из 32 байт SHA-256; ридер обязан проверить и отвергнуть несовпадение.
+Авторитет байтов — `FORMAT.md`, фиксирующий тест — `tests/test_fixture.py`.
+Заимствованные идеи: TCN arXiv:1803.01271, RMA arXiv:2107.04034, looped world
+models arXiv:2606.18208, BitNet b1.58/v2, Muon+ arXiv:2502.16982.
 
-## v3 target
+## Цель v3
 
-`validation.bin` v3 writes six target columns: `g_roll, g_pitch, confidence, ai_healthy, g_accel_y, g_accel_x`; the `POTOKTRJ` v3 sidecar (stride 26) repeats `g_accel_y`/`g_accel_x` at indices 24–25.
+`validation.bin` v3 пишет шесть колонок на кадр: `g_roll`, `g_pitch`,
+`confidence`, `ai_healthy`, `g_accel_y`, `g_accel_x`; sidecar `POTOKTRJ` v3
+(stride 26) повторяет `g_accel_y`/`g_accel_x` в индексах 24–25.
 
-The authoritative training and actuator target is **`[g_accel_y, -g_accel_x]`**, in m/s², world frame, roll/pitch order — the lateral-acceleration demand the fin solver actually consumes, clamped to ±10 m/s² and zeroed when AI input is invalid or the phase disallows it. `g_theta = [g_roll, g_pitch]` (±0.12 rad) stays a diagnostic angle target and is never promoted to a command. v1/v2 files have no acceleration column: `data_v3.authoritative_target()` and `Episode.authoritative()` raise a loud error with an upgrade instruction, and a version/target-width mismatch is refused on read. No silent angle-for-acceleration substitution exists.
+Авторитетная цель обучения и команда руля — **`[g_accel_y, −g_accel_x]`**,
+м/с², мировая система, порядок roll/pitch; это запрос бокового ускорения,
+который потребляет решатель рулей, с ограничением ±10 м/с² и обнулением при
+невалидном AI-входе или запрещающей фазе полёта. `g_theta = [g_roll, g_pitch]`
+(±0,12 рад) остаётся угловой диагностикой и в команду не повышается.
+Файлы v1/v2 без колонок `g_accel` отвергаются громко: `data_v3.authoritative_target()`
+и `Episode.authoritative()` дают ошибку с указанием апгрейда, подмены углом нет.
 
-This target was introduced because the v2-era models learned `g_theta` while the actuator consumed an acceleration demand — the diagnosed root cause of the negative closed-loop A/B. v2-target and v3-target numbers are **not comparable** (radians vs m/s²): `out/final_100/` still holds the legacy-target exports, `out/v3_final/` is the authoritative-target run.
+Причина смены цели: модели v2-эпохи обучались на `g_theta`, а привод потреблял
+ускорение — это диагностированная первопричина отрицательного closed-loop A/B.
+Числа с целью v2 и v3 **не сравнимы** (радианы против м/с²): `out/final_100/`
+содержит устаревшие экспорты, `out/v3_final/` — авторитетный прогон.
 
-## Training data
+## Безопасность: watchguard и dispatch
 
-Generated by `potok-m-sim`: 6-DoF rigid body with variable mass, RK4 at 2 ms, standard atmosphere, CD(M) table, Dryden turbulence, discrete gusts and shear layers, plus a separate sensor model (noise, bias, delay, quantization, saturation). Mass 10.4–11.4 kg, thrust, CG, Cd0, static margin, sensor noise, wind 0–15 m/s, gusts 5–20 m/s and shear are randomized only within Potok-M tolerances; there are no other vehicle types.
+Watchguard — тотальная детерминированная функция `guard(command, confidence,
+state, config)`: без часов, глобального состояния и мутаций. Проверки идут в
+фиксированном порядке `latched → non_finite → out_of_bounds → low_confidence →
+rate_limit`, поэтому причина отказа однозначна. Отклонение всегда возвращает
+нулевую команду и оставляет `last_command` на последнем принятом значении, так
+что отброшенный выброс не сдвигает опорную точку проверки скорости.
 
-The v3 dataset in `out/v3_final/data` has 80 train episodes (scenarios 0–15) and 20 held-out (16–19), 1500 frames each at 50 Hz (30 s flights), 14 physics features (gyro xyz, acc xyz, baro height, Pitot q, alpha, beta, dynamic pressure, lateral residual acceleration, drag estimate, static margin) plus 6 conditioning numbers = 20 per-frame inputs for the smart student. `train_manifest.json` / `heldout_manifest.json` record config hash `1969edcc…`, seed 1, split, scenario ids, names, observed bounds and SHA-256 of both files; `quality_report.json` reports 14/14 checks passed.
+Три последовательных пропуска защёлкивают `LATCHED`: защёлка липкая, корректный
+следующий кадр её не снимает, сброс — только явным `reset()`. Независимое вето
+на уровне dispatch: `ai_healthy = 0` или невалидные датчики обнуляют команду,
+даже если guard её принял. Логика зеркалируется в edge/firmware; прошивочный
+SIL-гейт (ADR-009) проверяет отказы провода (`watchguard_tests`,
+`safety`, `protocol_link_tests`), защёлку и бюджет тайминга.
 
-Legacy runs 2–4 and the `final_100/` exports used the v2 `g_theta` datasets in `out/run4/data` (same 80/20 scenario split, 1500 frames at 30 s). All training is CPU-only (`torch 2.15.0+cpu`, one thread); no GPU wheels were installed or used.
+## Обучающие данные
 
-## Gates
+Генератор `potok-m-sim`: жёсткое тело переменной массы, RK4 с шагом 2 мс,
+стандартная атмосфера, таблица CD(M), турбулентность Драйдена, дискретные
+порывы и сдвиговые слои, отдельная модель датчиков (шум, смещение, задержка,
+квантование, насыщение). Масса 10,4–11,4 кг, тяга, центровка, Cd0, статический
+запас, шум датчиков, ветер 0–15 м/с, порывы 5–20 м/с и сдвиг рандомизируются
+только в пределах допусков Potok-M.
 
-- **Data** (`SPEC_DATA.md`, simulator quality checks): no NaN/Inf in features, targets or truth; values inside declared bounds; frame count = duration × rate; train and held-out scenario ids disjoint; ≥20 held-out episodes and ≥4 scenarios; byte-identical regeneration with the same seed; SHA-256 in the manifest; LOUD refusal of version/target-count mismatch.
-- **Model** (`SPEC_ENGINE.md`, `engine.py`): held-out/train RMSE `ratio ≤ 1.25` and calibrated `ECE ≤ 0.05` at `tol = 0.1`, with `n` reported. Three seeds per configuration by default. The epoch-selection rule was fixed before reading results: every seed must pass, then pick the lowest mean held-out RMSE.
-- **Export**: SHA-256 trailer verified on load, tamper and wrong-kind rejection, tiny fixture reload asserted equal to its `.npy` reference, isotonic calibration JSON round-trip; the format was version-bumped so an old header cannot be misread.
-- **Closed-loop** (`sim/`): zero command bit-identical to the legacy path, opposite commands move the vehicle in opposite directions, oracle improves pooled lateral RMS on 4 held-out episodes × 3 seeds, wrong-sign oracle worsens, fin-clamp and no-authority paths are COUNTED and zero/negative `Cm_delta` is LOUD.
-- **CI**: python (ruff + pytest, 88 passed), edge (fmt, clippy, `cargo test --release --all-targets`), tui (6 snapshots and deterministic SVG), plots, guard (no binaries or files >2 MB, GPL license gate, local markdown links).
+Набор v3 в `out/v3_final/data`: 80 обучающих эпизодов (сценарии 0–15) и 20
+held-out (16–19) по 1500 кадров на 50 Гц (30 с полёта); 14 физических
+признаков плюс 6 conditioning = 20 входов на кадр. `train_manifest.json` /
+`heldout_manifest.json` фиксируют config hash `1969edcc…`, seed 1, split, id
+сценариев, наблюдаемые границы и SHA-256 обоих файлов; `quality_report.json`
+сообщает 14/14 пройденных проверок. Устаревшие прогоны 2–4 и `final_100/`
+использовали v2 `g_theta`-наборы из `out/run4/data` (тот же split 80/20).
+Обучение CPU-only (`torch 2.15.0+cpu`, один поток); GPU не ставился и не использовался.
 
-## Known limitations
+## Гейты
 
-- No flight data. Every number here is simulation; the simulator is a debug/architecture instrument, not a validated digital twin (placeholder aero card and thrust curve, provisional sensor statistics, no real wind climatology). An OpenRocket apogee check read 6.40 % against a 2 % target and the speed/Mach targets contradict the docs; both remain unresolved.
-- Confidence ECE is in-sample on held-out. `ece ≈ 0` is often isotonic mapping the scoring set to itself: raw v3 ECE is 0.12–0.59 and coverage is 0.17–0.24. Passing the ECE gate is not independent evidence of calibration.
-- Only four held-out scenarios, no re-split control. `ratio < 1` can mean an easier split rather than generalization; selecting the epoch on held-out RMSE spends that set.
-- Pi 4 B p99 latency is unmeasured and the NEON path is compile-checked only; the 0.3–0.6 ms figure is an estimate.
-- The edge runtime emits the uncalibrated sigmoid; applying the calibrated confidence/isotonic map needs an unmade Rust change. Reloading a student export is not bit-exact (about 0.007 difference in the corrections).
-- The v3 open-loop run is uneven: `out/v3_final/results.csv` has `lrs` seeds 1–2 only, `loopwm-lite` and `loopwm` seeds 1–3, one initial `loopwm` seed-1 failure that was rerun, and reused rows. No v3 closed-loop student-vs-zero-command A/B is recorded.
-- `loopwm-lite` was trained against a randomly initialized teacher in private output directories, so its RMSE is not comparable to `loopwm`'s.
-- Model is frozen in flight; no online learning. Safety rests on phase gating, bounded corrections, controller veto and a three-miss watchdog.
+- **Данные** (`SPEC_DATA.md`, quality симулятора): нет NaN/Inf в признаках,
+  целях и truth; значения в объявленных границах; число кадров = длительность ×
+  частота; id train/held-out не пересекаются; ≥20 held-out эпизодов и ≥4
+  сценария; побайтово одинаковая регенерация при том же seed; SHA-256 в
+  манифесте; громкий отказ при рассогласовании версии/числа целей.
+- **Модель** (`SPEC_ENGINE.md`, `engine.py`): отношение held-out/train RMSE
+  `≤ 1.25` и калиброванный `ECE ≤ 0.05` при `tol = 0.1`, с указанием `n`.
+  По умолчанию три seed на конфигурацию. Правило выбора эпохи зафиксировано до
+  просмотра результатов: проходят все seed, затем берётся минимальное среднее
+  held-out RMSE.
+- **Экспорт**: SHA-256 в хвосте проверяется при загрузке, подмена и неверный
+  вид файла отклоняются, маленький fixture при перезагрузке равен `.npy`-эталону,
+  isotonic-калибровка переживает JSON round-trip.
+- **Closed-loop** (`sim/`): zero command побитно совпадает с legacy-путём,
+  противоположные команды двигают ракету в противоположные стороны, oracle
+  улучшает pooled lateral RMS на 4 held-out эпизодах × 3 seed, неверный знак
+  ухудшает, ограничение руля и путь без полномочий COUNTED, нулевой/отрицательный
+  `Cm_delta` — LOUD.
+- **CI**: python (`ruff` + `pytest`), edge (fmt, clippy,
+  `cargo test --release --all-targets`), tui (6 снапшотов и детерминированный
+  SVG), plots, guard (никаких бинарников и файлов >2 МБ, GPL-лицензия,
+  локальные markdown-ссылки).
+- **Ночные гейты** (проход 23.11.2026, `VERIFY-*` и hard-gate тесты): зелёные
+  `ruff`/`pytest` в AI, `cargo test --workspace` + `fmt` + `clippy -D warnings`
+  в симуляторе и протоколе. Добавлены жёсткие тесты v3 export/load round-trip,
+  watchguard → dispatch (защёлка, нефинитные значения, вето `ai_healthy`),
+  дистилляции учитель→студент и инвариантности аугментации (held-out побитно
+  не меняется, детерминированный seed по окну, флаги изменений, отсутствие
+  NaN). Гейты фиксируют контракты, но не заменяют parity и closed-loop A/B.
 
-## Honest A/B status
+## Честный статус A/B
 
-- **Legacy `g_theta` models**: the 3-seed / 40-60-100-epoch sweep passes all open-loop gates; epoch 100 was selected with mean held-out RMSE 0.1798 (`lrs`), 0.1811 (`loopwm-lite`) and 0.1889 (`loopwm`) in radians. In closed-loop 30 s flights these students do **not** beat zero command. No student win is claimed.
-- **Oracle seam**: with the original fabricated fin authority the oracle was 530–590 m worse than zero command. After the physical actuator mapping it improves pooled lateral RMS by 491–515 m on four held-out episodes across three seeds; the wrong sign is +93.7 m worse on seed 1 and an oversized moment arm (+113 m) turns it harmful. These gates validate the simulator/actuator seam, not the student.
-- **v3 target run**: open-loop gates pass (ratio ≈1.039–1.041, calibrated ECE ≈0, held-out RMSE ≈7.61–7.63 m/s²), but the closed-loop zero-command / oracle / student comparison for v3 has not been run or recorded. Fixing the target closes a diagnosed mismatch; it is not evidence that the student now flies better than zero command.
-- No recorded model meets the `SIM_FIDELITY.md` admission criteria (≥3× seed-spread improvement on held-out gust scenarios plus a replayed real flight). The AI remains in observer/advisory mode.
+- **Устаревшие модели `g_theta`**: трёхseed-свип 40/60/100 эпох проходит все
+  open-loop гейты; эпоха 100 выбрана со средним held-out RMSE 0,1798 (`lrs`),
+  0,1811 (`loopwm-lite`), 0,1889 (`loopwm`) в радианах. В closed-loop за 30 с
+  эти студенты **не обыгрывают zero command**. Победы студента не заявлено.
+- **Стык oracle**: с выдуманной полнотой привода oracle был на 530–590 м хуже
+  zero command. После физического отображения привода он улучшает pooled
+  lateral RMS на 491–515 м на 4 held-out эпизодах × 3 seed; неверный знак —
+  на +93,7 м хуже на seed 1, завышенное плечо момента (+113 м) снова делает
+  его вредным. Эти гейты проверяют стык симулятора и привода, **не студента**.
+- **Прогон v3**: open-loop гейты проходят (отношение ≈1,039–1,041, калиброванный
+  ECE ≈0, held-out RMSE ≈7,61–7,63 м/с²), но сравнение zero command / oracle /
+  студент в closed-loop для v3 не запускалось и не записывалось. Исправление
+  цели устраняет диагностированное рассогласование, а не доказывает, что
+  студент теперь летает лучше нулевой команды.
+- Parity с OpenRocket по ADR-008 остаётся красной: апогей 6,40% при лимите 2%,
+  vmax 2,42%, противоречие M=0,5–0,6 против M=0,82 не разрешено. Ни одна
+  модель не выполняет критерии допуска `SIM_FIDELITY.md` (≥3× превышение
+  разброса seed на порывных held-out сценариях плюс проигранный реальный полёт).
+  ИИ остаётся в режиме наблюдателя/советчика.
 
-## License
+## Известные ограничения
 
-Own code is **GPL-3.0-or-later** (root `LICENSE`, ADR-003 in `docs/src/content/docs/process/decisions.md`, enforced by the CI license gate). A separate proprietary commercial license is offered for organizations that do not want to disclose modifications when distributing (`LICENSE-COMMERCIAL.md`); internal use without distribution does not trigger GPL source-release obligations. Third-party components keep their own licenses (Apache-2.0, MIT OR Apache-2.0, OFL-1.1, OpenTUI Mono) and ship with NOTICE / THIRD-PARTY-LICENSES. The `ai/README.md` line still saying MIT is stale and superseded by ADR-003 and the root `LICENSE`.
+- Нет лётных данных; симулятор — инструмент отладки архитектуры, а не
+  валидированный цифровой двойник (placeholder аэрокарточки и кривой тяги,
+  предварительные статистики датчиков, нет реальной климатологии ветра).
+- Confidence ECE считается in-sample на held-out; `ece ≈ 0` часто лишь
+  isotonic-отображение scoring-множества в само себя. Сырой v3 ECE — 0,12–0,59,
+  покрытие 0,17–0,24. Прохождение гейта ECE не является независимым
+  доказательством калибровки.
+- Всего четыре held-out сценария и нет control-ного re-split. `ratio < 1` может
+  означать более лёгкий split, а выбор эпохи по held-out RMSE расходует этот
+  набор.
+- p99 задержки на Pi 4 B не измерен, NEON-путь проверен только компиляцией;
+  цифра 0,3–0,6 мс — оценка. Edge отдаёт некалиброванную сигмоиду: применение
+  калибровочной карты требует отдельной правки на Rust. Повторная загрузка
+  экспорта студента не побитово точна (≈0,007 в поправках).
+- Прогон v3 неровный: в `out/v3_final/results.csv` у `lrs` только seed 1–2, у
+  `loopwm-lite` и `loopwm` seed 1–3, один начальный отказ `loopwm` seed 1 был
+  перезапущен, есть повторные строки. `loopwm-lite` обучался со случайно
+  инициализированным учителем в приватных выходных каталогах, поэтому его RMSE
+  несравним с `loopwm`.
+- Модель в полёте заморожена, онлайн-обучения нет. Безопасность держат фазовая
+  гонка, ограниченные поправки, вето контроллера и трёхпропускный watchguard.
+
+## Лицензия
+
+Собственный код распространяется по `GPL-3.0-or-later` (корневой `LICENSE`,
+ADR-005 в `docs/src/content/docs/process/decisions.md`, проверка лицензии в CI).
+Для организаций, которые не хотят раскрывать модификации при распространении,
+предусмотрена отдельная коммерческая лицензия (`LICENSE-COMMERCIAL.md`);
+внутреннее использование без распространения GPL не обязывает открывать код.
+Сторонние компоненты сохраняют свои лицензии (Apache-2.0, MIT OR Apache-2.0,
+OFL-1.1, OpenTUI Mono) и поставляются с NOTICE / THIRD-PARTY-LICENSES.
+Упоминание MIT в `ai/README.md` устарело и вытеснено ADR-005 и `LICENSE`.
