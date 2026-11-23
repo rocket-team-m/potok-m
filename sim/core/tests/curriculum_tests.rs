@@ -71,6 +71,11 @@ fn training_grid_varies_every_previously_fixed_knob() {
         signs.contains(&-1.0) && signs.contains(&1.0),
         "both gust direction signs must appear in training"
     );
+    let mirrored = signs.iter().filter(|s| **s == -1.0).count();
+    assert!(
+        mirrored > 0 && mirrored * 2 < signs.len(),
+        "the shipped +25 deg nominal must stay the majority sign"
+    );
 
     assert!(lags
         .iter()

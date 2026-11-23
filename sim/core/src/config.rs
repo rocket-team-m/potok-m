@@ -404,7 +404,7 @@ fn default_scale_factor_range() -> Range {
     Range(2.0 / 3.0, 1.5)
 }
 fn default_duration_factor_range() -> Range {
-    Range(0.5, 1.5)
+    Range(0.5, 1.0)
 }
 fn default_heldout_sigma_factor_range() -> Range {
     Range(2.0, 2.5)
@@ -481,7 +481,10 @@ pub fn sample_curriculum(cfg: &Config, index: u64) -> CurriculumKnobs {
         turbulence_scale: cfg.wind.turbulence_scale
             * scale.sample(dr_draw(cfg, index, DR_TURB_SCALE)),
         gust_duration_s: cfg.wind.gust_duration * duration.sample(dr_draw(cfg, index, DR_GUST_DUR)),
-        direction_sign: if dr_draw(cfg, index, DR_GUST_DIR) < 0.5 {
+        // The shipped +25 deg launch-day direction stays the nominal case;
+        // the mirrored sign is a coverage arm at 25% of draws. Both signs are
+        // present in training, so a -25 deg gust is no longer unseen.
+        direction_sign: if dr_draw(cfg, index, DR_GUST_DIR) < 0.25 {
             -1.0
         } else {
             1.0

@@ -39,11 +39,14 @@ turbulence_scale = 60.0    # m, integral scale
 # cells (16-19) use the strictly disjoint OOD ranges. Held-out lag comes from
 # scenario.lag_scale (1.5-2.0) with no extra multiplier, so the training
 # multiplier below must stay under that floor (validated in config.rs).
+# The gust direction sign is a ±25 deg draw with the shipped +25 deg nominal
+# kept as the majority (25% mirrored), so legacy nominal-sign gates stay
+# representative while both lateral signs are covered in training.
 [curriculum]
 lag_scale_range = [1.0, 1.4]                       # sensor lag: 1.0-1.4x
 sigma_factor_range = [0.5, 1.5]                    # 0.1 -> 0.05-0.15 m/s
 scale_factor_range = [0.6666666666666666, 1.5]     # 60 m -> 40-90 m
-duration_factor_range = [0.5, 1.5]                 # 2.0 s -> 1.0-3.0 s
+duration_factor_range = [0.5, 1.0]                 # 2.0 s -> 1.0-2.0 s (swept gradient)
 # Held-out OOD support (disjoint from every training range above):
 heldout_sigma_factor_range = [2.0, 2.5]            # -> 0.20-0.25 m/s
 heldout_scale_factor_range = [0.4, 0.6]            # -> 24-36 m
@@ -365,3 +368,28 @@ truth_metadata = false
 # delay_s = 0.02       # pure transport delay before any fin motion, s (>= 0)
 # rate_per_s = 0.5     # maximum fin slew, rad/s (> 0), from the step response
 # deadband = 0.001     # |deflection demand| <= this produces no motion (>= 0)
+
+# --- Optional two-stage recovery canopy (CHUTE01, opt-in) -------------------
+# OFF by default: the shipped fin-flight trajectory and every existing A/B are
+# bit-identical when this section is left at `enabled = false`. When enabled,
+# a spring-ejected drogue fires on post-apogee descent confirmation and a
+# spring-ejected main fires at 1500 m AGL. There is NO pyro channel and NO AI
+# authority under canopy; descent relaxes to the target rate and horizontal
+# motion follows the TRUE wind. See sim/docs/PARACHUTE.md for the wiring.
+# A canopy flight needs a longer run.duration_s than the 30 s fin-flight
+# default for the landing event to occur.
+[parachute]
+enabled = false
+require_descent_confirm = true
+wind_coupling_s = 3.0        # s, canopy -> true-wind first-order coupling
+landing_altitude_m = 0.0      # m AGL, one-shot landing event
+
+[parachute.drogue]
+trigger = { kind = "time_since_apogee", value = 2.0 }
+target_descent_mps = 25.0    # m/s, settled drogue descent
+inflation_s = 1.2            # s, inflation / descent relaxation time constant
+
+[parachute.main]
+trigger = { kind = "altitude_m", value = 1500.0 }
+target_descent_mps = 6.5     # m/s, settled main descent (must be < drogue)
+inflation_s = 2.0            # s, inflation / descent relaxation time constant
