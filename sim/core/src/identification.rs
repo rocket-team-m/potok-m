@@ -16,6 +16,8 @@
 //!   validated samples — no RNG, no clock, no hidden fallback. Queries outside
 //!   the measured domain are LOUD, never extrapolated.
 
+use std::collections::VecDeque;
+
 use crate::error::{Result, SimError};
 
 fn invalid(message: String) -> SimError {
@@ -376,5 +378,83 @@ impl ServoStepResponse {
     pub fn settle_time_s(&self, command: f64) -> Result<f64> {
         let target = self.effective_command(command)?;
         Ok(self.delay_s + target.abs() / self.rate_per_s)
+    }
+}
+
+// --- Stateful servo actuator -------------------------------------------------
+
+/// A stateful actuator driven by a validated [`ServoStepResponse`].
+///
+/// `response_at` describes a *single* step applied at t=0; actuation is a
+/// stream of commands. One `step` advances the actuator by one `dt` tick: the
+/// new command enters a pure-delay line, the deadband is removed from the
+/// delayed command, and the output slews toward it at the identified rate.
+/// With a constant command held from t=0 the output equals `response_at` at
+/// every tick (up to the delay being quantised to whole ticks), which is what
+/// the wiring gate asserts. No parameter is fitted to a controller outcome.
+#[derive(Debug, Clone)]
+pub struct ServoActuator {
+    response: ServoStepResponse,
+    dt: f64,
+    delay_steps: usize,
+    queue: VecDeque<f64>,
+    current: f64,
+}
+
+impl ServoActuator {
+    /// Build an actuator from a validated step response and a positive `dt`.
+    /// Invalid input is LOUD: it names the field, the value and the fix.
+    pub fn new(response: ServoStepResponse, dt: f64) -> Result<Self> {
+        finite("servo actuator dt", dt)?;
+        if dt <= 0.0 {
+            return Err(invalid(format!(
+                "servo actuator dt={dt} must be > 0; the delay line is quantised to whole dt ticks"
+            )));
+        }
+        let delay_steps = (response.delay_s / dt).ceil() as usize;
+        Ok(Self {
+            response,
+            dt,
+            delay_steps,
+            queue: VecDeque::new(),
+            current: 0.0,
+        })
+    }
+
+    /// Push one new command and advance by one `dt` tick, returning the output.
+    /// A non-finite command is LOUD (via `effective_command`).
+    pub fn step(&mut self, command: f64) -> Result<f64> {
+        // Checked on the arriving command, not on the delayed one: a non-finite
+        // command must be LOUD now rather than after it drains through the
+        // delay line.
+        finite("servo command", command)?;
+        self.queue.push_back(command);
+        let delayed = if self.queue.len() > self.delay_steps {
+            self.queue.pop_front().expect("delay line non-empty")
+        } else {
+            0.0
+        };
+        let target = self.response.effective_command(delayed)?;
+        let max_delta = self.response.rate_per_s * self.dt;
+        self.current += (target - self.current).clamp(-max_delta, max_delta);
+        Ok(self.current)
+    }
+
+    /// Current output in the response's command units.
+    pub fn output(&self) -> f64 {
+        self.current
+    }
+
+    pub fn response(&self) -> &ServoStepResponse {
+        &self.response
+    }
+
+    pub fn dt(&self) -> f64 {
+        self.dt
+    }
+
+    /// Pure delay quantised to whole `dt` ticks (`ceil` of delay_s / dt).
+    pub fn delay_steps(&self) -> usize {
+        self.delay_steps
     }
 }

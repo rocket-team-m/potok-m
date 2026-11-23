@@ -349,3 +349,19 @@ features = ["gyro_x", "gyro_y", "gyro_z", "acc_x", "acc_y", "acc_z", "baro_h", "
 # false writes classic v2 (17 metadata floats). true appends 22 truth floats
 # (true wind, gust, shear and the full 6-DoF state) as v2 metadata (39 total).
 truth_metadata = false
+
+# --- Optional fin servo (measurement-backed, OFF by default) -----------------
+# The shipped simulator has NO measured servo step response, so fin commands are
+# applied by the ideal instantaneous fin. To remove that ideal-fin bias, a caller
+# builds `identification::ServoStepResponse` from its own step-test samples and
+# installs it with `Vehicle::with_servo(response, dt)`. The three fields below
+# are the response's identified parameters; they are documented here so a future
+# measured config has a named home. They are NOT read by `Config` today: no
+# measurement ships with the crate, and an absent measurement must never be
+# silently replaced by a made-up servo. `ServoActuator::new` validates all three
+# LOUD (SimError::Config names the field, value and fix) before use.
+#
+# [servo]
+# delay_s = 0.02       # pure transport delay before any fin motion, s (>= 0)
+# rate_per_s = 0.5     # maximum fin slew, rad/s (> 0), from the step response
+# deadband = 0.001     # |deflection demand| <= this produces no motion (>= 0)

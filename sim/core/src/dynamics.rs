@@ -6,7 +6,7 @@
 //! rocket axis; world +Z is up. Inertia is diagonal and scales with mass.
 
 use std::{
-    cell::Cell,
+    cell::{Cell, RefCell},
     sync::atomic::{AtomicU64, Ordering},
 };
 
@@ -14,7 +14,8 @@ use crate::{
     aero::{AeroCard, AeroCoeffs},
     atmosphere::Atmosphere,
     config::{AeroConfig, Config},
-    error::SimError,
+    error::{Result, SimError},
+    identification::{ServoActuator, ServoStepResponse},
     math::{
         add, clamp, cross, dot, lerp_table, mat_t_vec, mat_vec, norm, quat_normalize, quat_rate,
         quat_to_matrix, scale, sub, Quat, Vec3,
@@ -146,6 +147,17 @@ pub struct Vehicle {
     /// closure; zero on the legacy path. Converted to a fin deflection by the
     /// moment balance in `derivative`.
     pub control_accel: [f64; 2],
+    /// Optional per-fin servo, one channel per lateral axis. When present,
+    /// `rk4` advances both channels once per step and `derivative` applies the
+    /// filtered deflection instead of the instantaneous solve. `None` keeps
+    /// the legacy bit-identical instantaneous fin: no measurement ships with
+    /// the crate, so a servo is only installed once a caller supplies a
+    /// validated `ServoStepResponse` via [`Vehicle::with_servo`].
+    pub servo: Option<[RefCell<ServoActuator>; 2]>,
+    /// Fin deflection actually applied this step, radians `[roll, pitch]`.
+    /// Written by `rk4` from the servo, constant across the four RK4 stages;
+    /// stays zero when no servo is installed.
+    pub fin_output: Cell<[f64; 2]>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -203,7 +215,21 @@ impl Vehicle {
             card_fault: Cell::new(None),
             control_fault: Cell::new(None),
             control_accel: [0.0; 2],
+            servo: None,
+            fin_output: Cell::new([0.0; 2]),
         }
+    }
+
+    /// Install a measurement-backed servo on both fin channels. The step
+    /// response and `dt` are validated LOUD by [`ServoActuator::new`]; an
+    /// invalid configuration never reaches the integrator. Without this call
+    /// the vehicle keeps its ideal instantaneous fin, so every existing
+    /// trajectory and zero-command test stays bit-for-bit unchanged.
+    pub fn with_servo(mut self, response: ServoStepResponse, dt: f64) -> Result<Self> {
+        let roll = ServoActuator::new(response.clone(), dt)?;
+        let pitch = ServoActuator::new(response, dt)?;
+        self.servo = Some([RefCell::new(roll), RefCell::new(pitch)]);
+        Ok(self)
     }
 
     /// Total axial drag coefficient. The placeholder branch is the original
@@ -537,25 +563,40 @@ pub fn derivative(t: f64, s: &State, wind: Vec3, atm: &Atmosphere, v: &Vehicle) 
         moment[1] += cm * v.thrust_dir[1];
     }
     // Aerodynamic fin control: the command is a lateral-acceleration demand
-    // (m/s^2), NOT a deflection. Each axis is converted to a fin deflection by
-    // the moment balance in `solve_fin_deflection`, then the matching moment
-    // is applied. Zero command leaves this block untouched, so the legacy
-    // trajectory is bit-for-bit identical.
-    if v.control_accel[0] != 0.0 || v.control_accel[1] != 0.0 {
+    // (m/s^2), NOT a deflection. Without a servo each axis is converted to a
+    // fin deflection by the moment balance in `solve_fin_deflection` and the
+    // matching moment is applied at once — the legacy, bit-identical path.
+    // With a servo, `rk4` has already advanced both channels this step and the
+    // filtered deflection in `fin_output` is applied instead, so a command no
+    // longer appears at the fin instantaneously. A residual deflection keeps
+    // acting after the command returns to zero until the servo slews home.
+    let servo_delta = v.servo.as_ref().map(|_| v.fin_output.get());
+    let fin_active = match servo_delta {
+        Some(d) => d[0] != 0.0 || d[1] != 0.0,
+        None => v.control_accel[0] != 0.0 || v.control_accel[1] != 0.0,
+    };
+    if fin_active {
         let diameter = 2.0 * (v.aero.area_m2 / std::f64::consts::PI).sqrt();
         let authority = qdyn * v.aero.area_m2 * diameter * cm_delta;
         for axis in 0..2 {
-            match solve_fin_deflection(
-                v.control_accel[axis],
-                mass,
-                qdyn,
-                v.aero.area_m2,
-                cm_delta,
-                v.aero.control_moment_arm_m,
-            ) {
-                Ok(delta) => moment[axis] += authority * delta,
-                Err(fault) => v.control_fault.set(Some(fault)),
-            }
+            let delta = match servo_delta {
+                Some(d) => d[axis],
+                None => match solve_fin_deflection(
+                    v.control_accel[axis],
+                    mass,
+                    qdyn,
+                    v.aero.area_m2,
+                    cm_delta,
+                    v.aero.control_moment_arm_m,
+                ) {
+                    Ok(x) => x,
+                    Err(fault) => {
+                        v.control_fault.set(Some(fault));
+                        continue;
+                    }
+                },
+            };
+            moment[axis] += authority * delta;
         }
     }
 
@@ -605,6 +646,45 @@ fn state_add(s: &State, d: &State, h: f64) -> State {
 
 /// One classical RK4 step; wind is constant across the four sub-stages.
 pub fn rk4(t: f64, s: &State, dt: f64, wind: Vec3, atm: &Atmosphere, v: &Vehicle) -> State {
+    // Advance the fin servos once per step, at the step-start flight condition.
+    // The command is held for the frame, so all four RK4 stages see the same
+    // deflection. Demand solving uses the same moment balance as `derivative`
+    // (step-start qdyn/mass/Cm_delta); only its authority is frozen at t, the
+    // per-stage authority still scales with each sub-stage's qdyn.
+    if v.servo.is_some() {
+        let air = atm.at(s.pos[2]);
+        let speed = norm(sub(s.vel, wind));
+        let qdyn = 0.5 * air.density * speed * speed;
+        let sep_done = if t >= v.stage_sep_time {
+            v.stage_sep_mass
+        } else {
+            0.0
+        };
+        let mass = s.mass[0].max(v.dry_mass - sep_done);
+        let cm_delta = v.effective_cm_delta();
+        let channels = v.servo.as_ref().expect("servo installed");
+        let mut out = [0.0; 2];
+        for axis in 0..2 {
+            match solve_fin_deflection(
+                v.control_accel[axis],
+                mass,
+                qdyn,
+                v.aero.area_m2,
+                cm_delta,
+                v.aero.control_moment_arm_m,
+            ) {
+                Ok(demand) => match channels[axis].borrow_mut().step(demand) {
+                    Ok(delta) => out[axis] = delta,
+                    Err(_) => v.control_fault.set(Some(ControlFault {
+                        reason: "servo_command",
+                        value: v.control_accel[axis],
+                    })),
+                },
+                Err(fault) => v.control_fault.set(Some(fault)),
+            }
+        }
+        v.fin_output.set(out);
+    }
     let k1 = derivative(t, s, wind, atm, v);
     let k2 = derivative(t + 0.5 * dt, &state_add(s, &k1, 0.5 * dt), wind, atm, v);
     let k3 = derivative(t + 0.5 * dt, &state_add(s, &k2, 0.5 * dt), wind, atm, v);
