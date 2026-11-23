@@ -14,7 +14,11 @@
 | --- | --- |
 | [potok-m-ai](https://github.com/rocket-team-m/potok-m-ai) | обучение модели, LoopWM/LRS-RNN, бортовой инференс на Rust |
 | [potok-m-sim](https://github.com/rocket-team-m/potok-m-sim) | 6-DoF симулятор, рандомизация, генерация данных |
-| [potok-m-protocol](https://github.com/rocket-team-m/potok-m-protocol) | UART-протокол, генератор биндингов, план прошивки STM32 |
+| [potok-m-protocol](https://github.com/rocket-team-m/potok-m-protocol) | UART-протокол, генератор биндингов |
+| [potok-m-firmware](https://github.com/rocket-team-m/potok-m-firmware) | прошивка STM32H743 на Rust/Embassy |
+| [potok-m-edge](https://github.com/rocket-team-m/potok-m-edge) | инференс на Raspberry Pi |
+| [potok-m-3d](https://github.com/rocket-team-m/potok-m-3d) | CAD/STEP/STL, аэродинамические входы |
+| potok-m-workbench | приватный RocketCraft: CAD/CFD/FEA/GUI |
 
 Код вынесен в отдельные репозитории; здесь остаются только docs, hardware, vehicle, flights и общие артефакты;
 изменения кодам вносить в канонических репозиториях.
@@ -25,8 +29,8 @@
 | --- | --- | --- |
 | `docs/` | сайт документации (Astro Starlight) | bun |
 | `ai/` | модель, обучение, симулятор, телеметрия | Python, uv |
-| `hardware/` | электроника, авионика, спасение и поиск, прошивка | KiCad, C |
-| `vehicle/` | SolidWorks, чертежи, Ansys и OpenRocket | SolidWorks, Ansys |
+| `hardware/` | электроника, авионика, спасение и поиск | KiCad |
+| `vehicle/` | схемы, аэродинамические входы, OpenRocket | OpenRocket |
 | `flights/` | протоколы, журнал пусков, разборы | — |
 
 ## Правила
