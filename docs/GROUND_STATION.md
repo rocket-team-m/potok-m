@@ -1,0 +1,317 @@
+# Наземная станция Поток-М
+
+Статус: проект. Реализации, прошивки, радиомодема и лётного лога нет. Дата: 2026-11-23.
+Лицензия собственного кода: `GPL-3.0-or-later`, коммерческая лицензия — отдельно
+(`LICENSE`, `LICENSE-COMMERCIAL.md`). Третьи компоненты сохраняют свои лицензии.
+
+Настоящий документ описывает **продукт**, а не результат измерений. Все числа
+помечены как `CALCULATED` (расчёт по формуле), `SPEC` (контракт) или `NOT RUN`.
+
+## 0. Назначение и жесткая граница
+
+Наземная станция — настольное приложение для четырёх задач:
+
+| Вкладка | Задача |
+| --- | --- |
+| `[01] LIVE` | живая телеметрия 915 МГц, кадры, прореженные до 10–20 Гц |
+| `[02] CONTROL` | только предстартовые и послепосадочные команды |
+| `[03] SEARCH 144` | поисковый маяк 144 МГц и жужжалка |
+| `[04] REPLAY` | разбор по `POTOKTRJ` / validation v3 |
+
+Граница, которую нельзя перейти: **станция не управляет полётом**. Ни одна
+команда не может изменить приводы, пиросредства, фазу, motor arming, коэффициенты
+ИИ или сбросить журнал во время полёта. Прошивка сохраняет право вето
+(«STM32 владеет правом вето», `docs/src/content/docs/protocol/uart.md`,
+`PROTOCOL_BUDGET.md`), а наземная станция дополнительно отбрасывает такие команды
+до передачи в эфир.
+
+## 1. Разделение по репозиториям
+
+| Репозиторий | Что принадлежит | Что не принадлежит |
+| --- | --- | --- |
+| `potok-m-protocol` (существует) | Новая схема `ground.yaml` и сгенерированные биндинги шести кадров, CRC, seq-правила. Единственный источник истины по байтам. | UI, ключи, радиодрайвер |
+| `potok-m-firmware` (существует) | Производитель кадров на борту, фазы `Phase`, интерлоки, `SearchBeacon` (144 МГц duty 0/5/10/20 %, жужжалка 880/1047 Гц, приоритет поиска над melody, тишина при boost), вето на команды. | Отображение, разбор лога, HMAC-ключи наземного оператора |
+| `potok-m-edge` (существует) | Источник полей `confidence` / `ai_healthy` через существующий UART-reply; бортовой инференс. | Эфирный кадр, наземная станция |
+| `potok-m-ground` (**новый**) | Приложение: USB-драйвер радиомодема, декодер кадров из `potok-protocol`, проверка HMAC/seq/whitelist, UI, журнал команд, ридер `POTOKTRJ`/validation. | Фазовые переходы, серво, пиро, алгоритм маяка, бортовой радиодрайвер |
+
+Прямой UART-доступ к STM32 из наземной станции **исключён**: станция видит только
+эфирные кадры. Это удерживает интерлоки в одном репозитории и не дублирует
+`lowlat`-профиль.
+
+## 2. Радиоканал и бюджет кадров
+
+### 2.1 Профили
+
+915 МГц ISM, LoRa. Базовый профиль `SF7/BW250/CR4/5`, преамбула 8 символов,
+явный заголовок, CRC в кадре. `SF7/BW500` — режим для 20 Гц. `SF9/BW125` —
+резервный дальний режим с принудительным прореживанием до ≤4 Гц.
+
+Время в эфире посчитано по формуле Semtech (`Ts = 2^SF/BW`,
+`Tpre = (8+4.25)·Ts`, `Npay = 8 + ceil((8·PL − 4·SF + 28 + 16·CRC − 20·IH) /
+(4·(SF−2·DE)))·(CR+4)`), **CALCULATED, не измерено**:
+
+| Профиль | Кадр 24 B | Кадр 16 B | 10 Гц, 24 B | 20 Гц, 24 B |
+| --- | ---: | ---: | ---: | ---: |
+| `SF7/BW125` | 77.06 мс | 61.70 мс | 77.1 % | 154.1 % |
+| `SF7/BW250` | 38.53 мс | 30.85 мс | 38.5 % | 77.1 % |
+| `SF7/BW500` | 19.26 мс | 15.42 мс | 19.3 % | 38.5 % |
+| `SF9/BW125` | 246.78 мс | 185.34 мс | 246.8 % | 493.6 % |
+
+Отсюда два факта, которые нельзя подменить измерением:
+
+1. 10 Гц на `SF7/BW250` реалистичны по заполнению канала; 20 Гц на нём же —
+   нет (77 % только на телеметрии, без ACK и восходящего канала).
+2. `SF9/BW125` физически не тянет 10 Гц: один `TLM` занимает 246.8 мс.
+
+Прореживание: источник 50 Гц (кадр симулятора 0.02 с, `telemetry.md`).
+10 Гц = каждый 5-й кадр; 20 Гц = чередование делителей 2 и 3.
+
+### 2.2 Типы кадров
+
+Все кадры little-endian. Поле `type` — синхромаркёр и направление:
+`0x01..0x7F` — борт → земля, `0x80..0xFF` — земля → борт. CRC-16/CCITT-FALSE
+(полином `0x1021`, init `0xFFFF`, без отражения, без XOR) считается по всем
+байтам до поля CRC — **тот же алгоритм, что в `protocol/uart.yaml`**, переиспользуем
+без нового кода.
+
+| type | имя | размер | назначение | бюджет |
+| --- | --- | ---: | --- | --- |
+| `0x01` | `TLM` | 24 B | снимок телеметрии | 10/20 Гц |
+| `0x02` | `EVT` | 16 B | событие полёта | ≤5 % эфира |
+| `0x03` | `STA` | 12 B | heartbeat / состояние | 1 Гц |
+| `0x04` | `LOG` | ≤48 B | выгрузка журнала | только `LANDED` |
+| `0x05` | `ACK` | 12 B | подтверждение команды | 1 на команду |
+| `0x81` | `CMD` | 24 B | команда с HMAC | ≤1 Гц |
+
+`TLM` (24 B): `type u8`, `seq u16`, `time_ms u32`, `phase u8`, `flags u8`,
+`subframe u8`, `height_dm u16`, `speed_cmd_s u16`, `g_roll i16`, `g_pitch i16`,
+`confidence u8`, `ai_health u8`, `battery_mv u16`, `crc16 u16`.
+`g_roll/g_pitch` — масштаб 0.001, диагностическая угловая пара validation v3;
+ authoritative command — `[g_accel_y, −g_accel_x]`, она едет в `subframe`.
+
+`EVT` (16 B): `type`, `seq`, `time_ms`, `event_id u8`, `phase u8`, `reserved u8`,
+`detail u32`, `crc16`. Имена событий — те же, что в симуляторе: ignition,
+burnout, apogee, deployment, ground hit.
+
+`STA` (12 B): `type`, `seq`, `time_ms`, `state u8`, `flags u8`, `gaps u8`, `crc16`.
+`gaps` — счётчик пропущенных `seq` с последней синхронизации.
+
+`ACK` (12 B): `type`, `seq`, `cmd_seq u16`, `cmd_id u8`, `result u8`, `phase u8`,
+`reserved u8[2]`, `crc16`.
+
+`LOG` (48 B): `type`, `seq`, `chunk_id u16`, `offset u32`, `len u8`,
+`payload[36]`, `crc16`. Вне `LANDED` кадр отвергается loud.
+
+`CMD` (24 B): `type`, `seq u16`, `cmd_id u8`, `arg u32`, `op_id u16`,
+`flags u8`, `reserved u8`, `hmac[8]`, `reserved u8[2]`, `crc16`.
+HMAC покрывает байты `0..11`; CRC покрывает `0..21`, включая HMAC.
+
+### 2.3 Бюджет за 1 с (SPEC, не измерение)
+
+`SF7/BW250`, 10 Гц: `TLM` 385.3 мс + `EVT` ≤50 мс + `STA` 25.7 мс +
+`ACK` 25.7 мс + `CMD` 30.9 мс ≈ **518 мс/с (52 %)**.
+`SF7/BW500`, 20 Гц: ≈ **476 мс/с (48 %)** — единственный профиль, где 20 Гц
+допустимы вместе с восходящим каналом.
+
+Регион и предел duty-cycle не заданы: при старте без `--region` приложение
+падает loud с сообщением, что предел неизвестен. Правила 915 МГц различаются
+(FCC vs ЕС/РБ); молчаливое «autoduty» запрещено.
+
+## 3. Безопасность
+
+1. **CRC не криптография.** CRC-16 ловит случайные искажения; он не защищает от
+   подмены. Об этом прямо сказано в `PROTOCOL_BUDGET.md` — повторяем без оговорок.
+2. **HMAC-SHA256, 8 байт тега** на каждый `CMD`. Ключ сессии:
+   `HKDF-SHA256(PSK, salt=flight_id || node_uid, info="potok-ground-v1")`,
+   32 байта. PSK хранится вне git, в `/etc/potok-ground/keys/<flight_id>.key`,
+   режим `0600`. Нет ключа — loud-ошибка с именем flight_id; анонимного режима
+   нет. Ключ не попадает в логи, дампы и UI.
+3. **Порядок проверки:** `type` → CRC → HMAC (constant-time compare) → `seq` →
+   phased gate → dispatch. Любое несовпадение — COUNTED-отказ со счётчиком и строкой
+   в логе. Тихий fallback на «проверку прошла» — дефект.
+4. **seq u16 с вращением**, окно 64, повторы и старые кадры отвергаются — то же
+   правило, что `SeqTracker` в `potok-protocol`. `flight_id` входит в HMAC, поэтому
+   seq и ключ не переходят между полётами. `ACK` возвращает `cmd_seq`.
+5. **Whitelist с двух сторон.** Земля принимает `TLM/EVT/STA/LOG/ACK` только от
+   node UID из `nodes.toml` (8 байт hex); борт принимает `CMD` только от
+   `op_id` из своей whitelist. Нет «доверия первому услышанному». Неизвестный
+   UID — COUNTED-отказ с именем в логе.
+6. **Никакого управления в полёте.** Link-layer state machine:
+   - `PREFLIGHT` — открывается физическим переключателем безопасности на земле,
+     не радиокомандой; закрывается событием ignition/phase `BURN`.
+   - `IN_FLIGHT` — все `CMD` отбрасываются шлюзом **до передачи**; UI показывает
+     каждую команду как `LOCKED` с причиной. Борт независимо отклоняет команды в
+     фазах `BURN/COAST/APOGEE/DESCENT`.
+   - `LANDED` — открывается по `LANDED` + подтверждению снижения; доступны только
+     послепосадочные команды.
+7. **Разрешённые команды:** `0x10 PING`, `0x11 TIME_SYNC` (PREFLIGHT, LANDED),
+   `0x12 SELF_TEST`, `0x14 CLEAR_LATCH` (только PREFLIGHT), `0x13 CONFIG_QUERY`
+   (PREFLIGHT, LANDED), `0x20 BEACON_SELECT`, `0x21 MELODY_REQUEST`,
+   `0x30 LOG_REQUEST` (только LANDED). Всё остальное — loud reject.
+   Запрещено явно: приводы, пиро, motor arm, запись `Phase`, усиление ИИ,
+   стирание журнала.
+8. **Пасхалка / жужжалка после посадки.** `0x20/0x21` — только *запрос*, не
+   переопределение.Прошивка остаётся авторитетом: `SearchBeacon` даёт приоритет
+   поиска над melody, тишину при boost и ограничения 0/5/10/20 % по батарее
+   (3300/3600/3900 мВ). Станция отображает запрошенное и эффективное состояние
+   отдельно; «команда принята» не означает «маяк включился».
+   Анимация Bad Apple — свойство наземного приложения, запускается по факту
+   `LANDED` из журнала и никогда не участвует в контуре управления
+   (`GUI_PLAN.md:34-46`).
+9. **Журнал команд** append-only: `time, node_uid, op_id, cmd_seq, cmd_id, result`.
+   Секретов в нём нет.
+
+Открытая реализация для `potok-m-firmware`: бортовой latch «запуск был», который
+запрещает commands в PREFLIGHT-окне после ignition. Если его нет, он добавляется
+в прошивке, а не эмуляцией в станции.
+
+## 4. UI: визуальный язык OpenCode
+
+Токены (из `design-md/opencode.ai/DESIGN.md` и `docs/.../rocketcraft/ui.md`):
+моноширинная типографика (Berkeley Mono, свободная замена — JetBrains Mono);
+холст `#fdfcfc`, чернила `#201d1d`, волосяные линии `rgba(15,0,0,0.12)`;
+радиус 4 px только у интерактивных элементов, 0 px у контейнеров; маркеры
+`[+]`, `[-]`, `[x]` вместо иконок; индексы `[01]..[04]`; без эмодзи, без теней,
+без карточек-плашек. Единственная тёмная поверхность `#201d1d` — живой
+видеопорт телеметрии, «visual moment» на экране. Числа — `tabular-nums`,
+отрицательные через U+2212. Статус всегда дублируется словом `OK / WARN / FAIL /
+UNKNOWN / NOT RUN`; цвет не единственный носитель смысла. Долгие операции
+показывают этап, шаг, %, оценку остатка
+и `Cancel`, а не неопределённый индикатор. `Ctrl+K` — палитра команд,
+`Ctrl+T` — тема, `prefers-reduced-motion` — отключение анимаций.
+
+### 4.1 Общий каркас
+
+```
+[00] POTOK-M // GROUND     LIVE:[OK]  RX:10.0 Hz  SEQ:0042  GAP:0  CRC:0  HMAC:0     [?]
+[01] LIVE  [02] CONTROL  [03] SEARCH 144  [04] REPLAY                    Ctrl+K  Ctrl+T
+──────────────────────────────────────────────────────────────────────────────────────
+```
+
+### 4.2 `[01] LIVE`
+
+```
+[+] FLIGHT STATE                 [+] LIVE SIGNAL  (dark viewport)
+ phase ......... DESCENT          height  ▁▂▃▅▇▆▅▃▂▁   1234.5 m
+ time .......... t+00:42.180      g_roll  ···−0.03···   diag
+ battery ....... 3820 mV          g_pitch ···+0.01···   diag
+ flags ......... GPS IMU BARO     seq 0042 (gap 0, crc 0, hmac 0)
+ ai ............ READY / 1
+──────────────────────────────────────────────────────────────────────────────────────
+[+] EVENT LOG      t+00:40.120  EVT 02  apogee        (caption: Fig 1. altitude / 10 Hz)
+[+] LINK           node 0x…  region --  duty 52% CALCULATED   antenna NOT MEASURED
+```
+
+Пустая панель отвечает на четыре вопроса: что здесь должно быть, почему пусто,
+что делать, где узнать больше. `NOT RUN` в поле приёмника, если радио
+не подключено — не «0 пакетов».
+
+### 4.3 `[02] CONTROL`
+
+```
+[+] COMMAND WINDOW: PREFLIGHT      interlock: CLOSED (physical switch)
+ cmd              state   reason / effect
+ PING             READY   link check
+ TIME_SYNC        READY   ground time → vehicle clock
+ SELF_TEST        READY   ground-only, no actuators
+ CLEAR_LATCH      READY   ground-only, preflight only
+ CONFIG_QUERY     READY   read-only
+ BEACON_SELECT    LOCKED  requires LANDED
+ MELODY_REQUEST   LOCKED  requires LANDED; search wins
+ LOG_REQUEST      LOCKED  requires LANDED
+──────────────────────────────────────────────────────────────────────────────────────
+[+] AUDIT   t+00:41.900  seq 0017  PING  ACK OK  op 0002
+```
+
+Каждая command с `danger`-семантикой требует второго подтверждения; при
+`IN_FLIGHT` все строки `LOCKED` и причиной «in flight — no ground actuation».
+
+### 4.4 `[03] SEARCH 144`
+
+```
+[+] LAST KNOWN POINT   t+00:42.180   x/y/z from POTOKTRJ replay slot, NOT A FIX
+[+] BEACON HINT        144 MHz  duty 10%  slots 2/20   (from FW14 scheduler, hint only)
+[+] BUZZER            pattern SEARCH 880/1047 Hz    battery band 3820 mV = NOMINAL
+[+] RADIO LINK         RSSI -- (NOT MEASURED)   range -- (NOT MEASURED)
+[+] POST-LANDING       BEACON_SELECT [READY]  MELODY_REQUEST [READY, search wins]
+```
+
+Поле «последняя известная точка» честно называет источник: это снимок из
+телеметрии/реплея, а не измеренное местоположение приёмника. Наземный приёмник
+не притворяется источником пеленга без реального measurements.
+
+### 4.5 `[04] REPLAY`
+
+```
+[+] SOURCE  POTOKTRJ v3 · validation.bin v3 · stride 26 · 50 Hz · 20 episodes
+[+] PROVENANCE  config hash …  seed …  window …  manifest.json SHA-256 …
+[+] TIMELINE  0 ├─────┼─────┼─────┼─────┤ 1500 ticks      [play] [step] [1x]
+[+] OVERLAY  truth x/y/z  |  student g_roll/g_pitch  |  flags        Fig 2. trajectory
+```
+
+Подпись над графиком обязательна: `SIMULATION / NOT A FLIGHT LOG`. Числа из
+симулятора и лётные не смешиваются без конфигурации и окна измерения
+(`docs/.../flights/log.md`). Если `manifest.json` или config hash не совпадает
+с sidecar — loud-ошибка, не «похожий эпизод».
+
+## 5. Честные ограничения
+
+- **Нет замеров радио.** Все времена в эфире — `CALCULATED` по формуле Semtech;
+  нет RSSI, PER, дальности, задержки, чувствительности и реального спектра. Нет
+  совместимости с `LoRa1262F30`, подтверждённой на железе: драйвера радио в
+  прошивке нет, пункт помечен заблокированным (`hardware/search.md:11-13`).
+- **Нет лётного лога.** `flights/README.md` и `docs/.../flights/log.md`: пусков
+  не было, таблица пустая. `[04] REPLAY` читает только синтетические/sim sidecar.
+- **Нет платы и HIL.** Прошивка не вводилась в строй; 144 МГц scheduler существует
+  как host-тестированный модуль (10 тестов, FW14 report), не как работающий
+  передатчик. Buzzer 880/1047 Гц и уровни 3300/3600/3900 мВ описаны в документации
+  прошивки, не измерены на пине.
+- **Регион радио не выбран.** Duty-cycle предел unknown → loud-старт запрещён.
+- **A/B не проводился.** Ни одна из команд не имеет лётной проверки; интерлоки
+  остаются ответственностью прошивки.
+- **Нет скриншотов продукта.** UI выше — спецификация в ASCII, не снятый экран;
+  визуальный гейт для этого продукта не запускался (`NOT RUN`).
+- **Ни один сервис не обязан работать без ключа** — отсутствие PSK loud-ошибка.
+
+## 6. Сборка и проверка
+
+### 6.1 Проверка этого документа в `potok-m` (выполнимо сейчас)
+
+```sh
+cd /home/sehaxe/potok-m
+git diff --check
+bash .github/scripts/guard.sh
+cd docs
+bun install --frozen-lockfile
+bun run build
+cd ..
+python3 - <<'PY'
+import re, pathlib, textwrap
+src = pathlib.Path('.github/workflows/guard.yml').read_text(encoding='utf-8')
+m = re.search(r"python3 - <<'PY'\n(.*?)\n\s+PY", src, re.S)
+pathlib.Path('/tmp/opencode/guard-link-check.py').write_text(
+    textwrap.dedent(m.group(1)), encoding='utf-8')
+PY
+python3 /tmp/opencode/guard-link-check.py
+```
+
+### 6.2 Обязательные гейты будущего `potok-m-ground` (пока `NOT RUN`)
+
+```sh
+cd potok-m-ground
+bun install --frozen-lockfile
+bun run lint && bun run typecheck && bun run test && bun run build
+cargo fmt --all -- --check
+cargo test --workspace --offline
+cargo clippy --workspace --all-targets --offline -- -D warnings
+cargo run --offline -p potok-protocol --bin potok-generator -- --check
+bash scripts/check_license.sh     # GPL-3.0-or-later во всех манифестах
+```
+
+Минимальный набор проверок логики, без которых продукт не считается готовым:
+golden-байты для всех шести кадров, отказ по CRC/HMAC/seq/whitelist, отказ любой
+`CMD` в `IN_FLIGHT`, отказ несовпадения config hash в реплее. Каждая проверка —
+один маленький тест, без framework-слоя.
+
+Собственный код — `GPL-3.0-or-later`, подробности — в `LICENSE` и
+`docs/src/content/docs/project/licenses/`.
