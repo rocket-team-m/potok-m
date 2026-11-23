@@ -10,6 +10,7 @@ pub mod control;
 pub mod dynamics;
 pub mod episode;
 pub mod error;
+pub mod firmware_adapter;
 pub mod manifest;
 pub mod math;
 pub mod optimizer;
