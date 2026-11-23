@@ -116,7 +116,12 @@ def train_episode(
         if mtp_head is not None and tick + 1 + args.mtp_k <= len(frames):
             block = np.asarray(frames, dtype=np.float32)[:, :SENSOR_FEATURES]
             mu, sd = block.mean(axis=0), np.maximum(block.std(axis=0), 1e-3)
-            future = (np.asarray(frames[tick + 1 : tick + 1 + args.mtp_k, :SENSOR_FEATURES], dtype=np.float32) - mu) / sd
+            future = (
+                np.asarray(
+                    frames[tick + 1 : tick + 1 + args.mtp_k, :SENSOR_FEATURES], dtype=np.float32
+                )
+                - mu
+            ) / sd
             prediction = mtp_head(student.last_z).view(args.mtp_k, SENSOR_FEATURES)
             future_t = torch.as_tensor(future, dtype=prediction.dtype, device=device)
             loss = loss + args.mtp_weight * F.mse_loss(prediction, future_t)
@@ -139,11 +144,15 @@ def run(args: argparse.Namespace) -> float:
         torch.set_num_threads(1)
 
     teacher = load_teacher(args.teacher_checkpoint, device)
-    student = StatefulTCN(
-        StudentConfig(seed=args.seed, loops=args.loops)
-    ).to(device)
-    mtp_head = torch.nn.Linear(student.cfg.width, args.mtp_k * SENSOR_FEATURES).to(device) if args.mtp_k > 0 else None
-    params = list(student.parameters()) + (list(mtp_head.parameters()) if mtp_head is not None else [])
+    student = StatefulTCN(StudentConfig(seed=args.seed, loops=args.loops)).to(device)
+    mtp_head = (
+        torch.nn.Linear(student.cfg.width, args.mtp_k * SENSOR_FEATURES).to(device)
+        if args.mtp_k > 0
+        else None
+    )
+    params = list(student.parameters()) + (
+        list(mtp_head.parameters()) if mtp_head is not None else []
+    )
     optimizer = AdamW(params, lr=args.lr)
     episodes = load_episodes(args.data)
 
@@ -190,10 +199,7 @@ def main() -> None:
         if args.out.suffix != ".bin"
         else args.out.with_name(args.out.stem + "_student.bin")
     )
-    print(
-        f"stage=student epochs={args.epochs} loss={loss:.6f} "
-        f"out={args.out} export={export_path}"
-    )
+    print(f"stage=student epochs={args.epochs} loss={loss:.6f} out={args.out} export={export_path}")
 
 
 if __name__ == "__main__":

@@ -59,7 +59,11 @@ def _batches(dataset, batch: int):
     conditions = torch.stack([sample[1] for sample in samples])
     targets = torch.stack([sample[2] for sample in samples])
     for start in range(0, len(windows), batch):
-        yield windows[start : start + batch], conditions[start : start + batch], targets[start : start + batch]
+        yield (
+            windows[start : start + batch],
+            conditions[start : start + batch],
+            targets[start : start + batch],
+        )
 
 
 class _TeacherEMA:
@@ -252,9 +256,13 @@ def run(args: argparse.Namespace) -> dict:
 
     episodes = load_episodes(args.data)
     groups = group_by_scenario(episodes)
-    held_out = {name for name, group in groups.items() if any(episode.held_out for episode in group)}
+    held_out = {
+        name for name, group in groups.items() if any(episode.held_out for episode in group)
+    }
     if not held_out or len(held_out) == len(groups):
-        raise ValueError("validation data must mark at least one held-out and one training scenario")
+        raise ValueError(
+            "validation data must mark at least one held-out and one training scenario"
+        )
     train_groups = {name: group for name, group in groups.items() if name not in held_out}
     train_episodes = [episode for group in train_groups.values() for episode in group]
 

@@ -50,7 +50,8 @@ def physics_baseline(features: torch.Tensor) -> torch.Tensor:
     return torch.stack((roll, pitch), dim=-1)
 
 
-def final_command(prediction: torch.Tensor, baseline: torch.Tensor,
-                  residual: bool = True) -> torch.Tensor:
+def final_command(
+    prediction: torch.Tensor, baseline: torch.Tensor, residual: bool = True
+) -> torch.Tensor:
     """Map a network output to the command compared with the reference."""
     return baseline + prediction if residual else prediction

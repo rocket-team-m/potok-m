@@ -151,9 +151,7 @@ class LiteModel(nn.Module):
         self.encoder = PerceiverEncoder(c)
         self.block = LiteBlock(c)  # ONE module, reused on every pass
         self.norm = nn.LayerNorm(c.width)
-        self.latent_heads = nn.ModuleDict(
-            {str(h): nn.Linear(c.width, c.width) for h in c.horizons}
-        )
+        self.latent_heads = nn.ModuleDict({str(h): nn.Linear(c.width, c.width) for h in c.horizons})
         self.head_corr = nn.Linear(c.width, 2)
         self.head_conf = nn.Linear(c.width, 1)
         self.target_proj: nn.Linear | None = None
@@ -167,9 +165,7 @@ class LiteModel(nn.Module):
         object.__setattr__(self, "teacher", teacher.eval())
         for parameter in self.teacher.parameters():
             parameter.requires_grad_(False)
-        self.target_proj = nn.Linear(width, self.cfg.width).to(
-            next(self.parameters()).device
-        )
+        self.target_proj = nn.Linear(width, self.cfg.width).to(next(self.parameters()).device)
 
     def refine(
         self, window: torch.Tensor, cond: torch.Tensor, threshold: float | None = None

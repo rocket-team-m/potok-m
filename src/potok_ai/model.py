@@ -169,9 +169,7 @@ class CausalDSBlock(nn.Module):
         act4bit: bool,
     ) -> None:
         super().__init__()
-        self.dw = nn.Conv1d(
-            width, width, kernel, dilation=dilation, groups=width, padding=0
-        )
+        self.dw = nn.Conv1d(width, width, kernel, dilation=dilation, groups=width, padding=0)
         self.pw = TSCTLinear(width, width, rank, ternary=ternary, act4bit=act4bit)
         self.norm = nn.LayerNorm(width)
 
@@ -205,10 +203,7 @@ class PotokModel(nn.Module):
         c = self.cfg
         self.stem = nn.Conv1d(c.in_features, c.width, 1)
         self.blocks = nn.ModuleList(
-            [
-                CausalDSBlock(c.width, d, c.kernel, c.rank, c.ternary, c.act4bit)
-                for d in c.dilations
-            ]
+            [CausalDSBlock(c.width, d, c.kernel, c.rank, c.ternary, c.act4bit) for d in c.dilations]
         )
         self.norm = nn.LayerNorm(c.width)
         self.head = nn.Linear(c.width, c.out_features)
@@ -236,7 +231,9 @@ class PotokModel(nn.Module):
             if isinstance(module, TernarySTE):
                 module.set_anneal(value)
 
-    def quantized_factors(self) -> dict[str, tuple[torch.Tensor, float, torch.Tensor, float, torch.Tensor]]:
+    def quantized_factors(
+        self,
+    ) -> dict[str, tuple[torch.Tensor, float, torch.Tensor, float, torch.Tensor]]:
         """Return exportable factors per TSCT map: (U codes, alpha_u, s, V codes, alpha_v)."""
         result = {}
         for name, module in self.named_modules():
@@ -312,8 +309,7 @@ class SmartTeacher(nn.Module):
             nn.Linear(2 * c.width, 2 * c.width),
         )
         self.blocks = nn.ModuleList(
-            CausalDSBlock(c.width, d, c.kernel, c.rank, c.ternary, c.act4bit)
-            for d in c.dilations
+            CausalDSBlock(c.width, d, c.kernel, c.rank, c.ternary, c.act4bit) for d in c.dilations
         )
         self.norm = nn.LayerNorm(c.width)
         self.key = nn.Linear(c.width, c.width, bias=False)
@@ -323,7 +319,9 @@ class SmartTeacher(nn.Module):
         self.last_alloc: torch.Tensor | None = None
         nn.init.normal_(self.query, std=c.width**-0.5)
 
-    def forward_features(self, window: torch.Tensor, cond: torch.Tensor | None = None) -> torch.Tensor:
+    def forward_features(
+        self, window: torch.Tensor, cond: torch.Tensor | None = None
+    ) -> torch.Tensor:
         """Return the allocated per-frame latent ``(B, T, width)``."""
         if window.ndim != 3 or window.shape[-1] != self.cfg.in_features:
             raise ValueError(f"expected a window of shape (batch, time, {self.cfg.in_features})")

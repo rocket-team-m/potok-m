@@ -38,7 +38,9 @@ def test_order_is_deterministic_and_seed_dependent():
     other = [e.index for e in Curriculum(seed=9).select(episodes, 2)]
     assert first == repeat
     assert first != other
-    assert all(stage_of(episode) in STAGES[:3] for episode in Curriculum(seed=7).select(episodes, 2))
+    assert all(
+        stage_of(episode) in STAGES[:3] for episode in Curriculum(seed=7).select(episodes, 2)
+    )
 
 
 def test_inclusion_is_monotonic_and_pacing_is_configurable():

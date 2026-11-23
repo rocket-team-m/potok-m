@@ -10,8 +10,17 @@ from potok_ai.data import SIM_MAGIC, WindowDataset, load_episodes, read_validati
 def _pack_validation(seed: int, count: int, frames: int, features: int) -> bytes:
     header = struct.pack(
         "<8sIQ4I3f32s",
-        SIM_MAGIC, 1, seed, count, frames, features, 4,
-        50.0, 0.02, 0.06, b"\0" * 32,
+        SIM_MAGIC,
+        1,
+        seed,
+        count,
+        frames,
+        features,
+        4,
+        50.0,
+        0.02,
+        0.06,
+        b"\0" * 32,
     )
     raw = bytearray(header)
     for episode in range(count):
@@ -41,7 +50,9 @@ def test_reads_potoksim_validation_exactly(tmp_path):
 
     episode = data.episodes[1]
     assert episode.index == 1
-    assert np.array_equal(episode.metadata, np.array([2.0, 1.5, 2.0, 3.0, -1.0, 0.5, 4.0, 5.0, 6.0], np.float32))
+    assert np.array_equal(
+        episode.metadata, np.array([2.0, 1.5, 2.0, 3.0, -1.0, 0.5, 4.0, 5.0, 6.0], np.float32)
+    )
     assert episode.frames.shape == (3, 8)
     assert episode.targets is not None and episode.targets.shape == (3, 4)
     assert episode.frames[1, 0] == 1.0

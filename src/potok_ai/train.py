@@ -141,10 +141,7 @@ def run(args: argparse.Namespace) -> float:
 def main() -> None:
     args = build_parser().parse_args()
     loss = run(args)
-    print(
-        f"stage={args.stage} opt={args.opt} epochs={args.epochs} "
-        f"loss={loss:.6f} out={args.out}"
-    )
+    print(f"stage={args.stage} opt={args.opt} epochs={args.epochs} loss={loss:.6f} out={args.out}")
 
 
 if __name__ == "__main__":

@@ -95,8 +95,12 @@ class ExportedModel:
         state = model.state_dict()
         for name, layer in self.layers.items():
             if layer.kind == TSCT_LAYER:
-                u = torch.from_numpy(layer.u_codes.astype(np.float32).reshape(layer.in_features, layer.rank))
-                v = torch.from_numpy(layer.v_codes.astype(np.float32).reshape(layer.out_features, layer.rank))
+                u = torch.from_numpy(
+                    layer.u_codes.astype(np.float32).reshape(layer.in_features, layer.rank)
+                )
+                v = torch.from_numpy(
+                    layer.v_codes.astype(np.float32).reshape(layer.out_features, layer.rank)
+                )
                 state[f"{name}.U"].copy_(u * layer.alpha_u)
                 state[f"{name}.V"].copy_(v * layer.alpha_v)
                 state[f"{name}.s"].copy_(torch.from_numpy(layer.scales.copy()))
@@ -180,7 +184,8 @@ def export_model(model: PotokModel, path: str | Path) -> Path:
 
     factors = model.quantized_factors()
     owned = {
-        name for name, parameter in model.named_parameters()
+        name
+        for name, parameter in model.named_parameters()
         if any(name.startswith(module + ".") for module in factors)
     }
     others = {
@@ -235,9 +240,7 @@ def load_export(path: str | Path) -> ExportedModel:
     version = reader.u32()
     if version != VERSION:
         raise ValueError(f"unsupported export version {version}")
-    in_features, width, out_features, rank, kernel, n_blocks = (
-        reader.u32() for _ in range(6)
-    )
+    in_features, width, out_features, rank, kernel, n_blocks = (reader.u32() for _ in range(6))
     g_max = reader.f32()
     dilations = tuple(reader.u32() for _ in range(n_blocks))
     flags = reader.u32()
@@ -276,8 +279,17 @@ def load_export(path: str | Path) -> ExportedModel:
     if reader.offset != len(payload):
         raise ValueError("trailing bytes in export")
     return ExportedModel(
-        version, in_features, width, out_features, rank, kernel, g_max, dilations, flags,
-        layers, checksum,
+        version,
+        in_features,
+        width,
+        out_features,
+        rank,
+        kernel,
+        g_max,
+        dilations,
+        flags,
+        layers,
+        checksum,
     )
 
 
@@ -325,8 +337,12 @@ class ExportedStudent:
         state = model.state_dict()
         for name, layer in self.layers.items():
             if layer.kind == TSCT_LAYER:
-                u = torch.from_numpy(layer.u_codes.astype(np.float32).reshape(layer.in_features, layer.rank))
-                v = torch.from_numpy(layer.v_codes.astype(np.float32).reshape(layer.out_features, layer.rank))
+                u = torch.from_numpy(
+                    layer.u_codes.astype(np.float32).reshape(layer.in_features, layer.rank)
+                )
+                v = torch.from_numpy(
+                    layer.v_codes.astype(np.float32).reshape(layer.out_features, layer.rank)
+                )
                 state[f"{name}.U"].copy_(u * layer.alpha_u)
                 state[f"{name}.V"].copy_(v * layer.alpha_v)
                 state[f"{name}.s"].copy_(torch.from_numpy(layer.scales.copy()))
@@ -341,8 +357,10 @@ class ExportedStudent:
         bias = self.layers["head_conf.bias"].tensor
         if weight is None or bias is None:
             raise ValueError("export is missing the confidence head weights")
-        return float(np.asarray(weight).reshape(-1) @ np.asarray(z).reshape(-1)
-                     + np.asarray(bias).reshape(-1)[0])
+        return float(
+            np.asarray(weight).reshape(-1) @ np.asarray(z).reshape(-1)
+            + np.asarray(bias).reshape(-1)[0]
+        )
 
 
 def export_student(model: StatefulTCN, path: str | Path) -> Path:
@@ -364,7 +382,8 @@ def export_student(model: StatefulTCN, path: str | Path) -> Path:
 
     factors = model.quantized_factors()
     owned = {
-        name for name, _ in model.named_parameters()
+        name
+        for name, _ in model.named_parameters()
         if any(name.startswith(module + ".") for module in factors)
     }
     others = {
@@ -422,9 +441,7 @@ def load_student_export(path: str | Path) -> ExportedStudent:
     model_kind = reader.u32()
     if model_kind != MODEL_KIND_STUDENT:
         raise ValueError(f"not a student export (model_kind={model_kind})")
-    in_features, width, out_features, rank, n_blocks, loops = (
-        reader.u32() for _ in range(6)
-    )
+    in_features, width, out_features, rank, n_blocks, loops = (reader.u32() for _ in range(6))
     decay, g_max = reader.f32(), reader.f32()
     flags, count = reader.u32(), reader.u32()
 
@@ -461,6 +478,17 @@ def load_student_export(path: str | Path) -> ExportedStudent:
     if reader.offset != len(payload):
         raise ValueError("trailing bytes in export")
     return ExportedStudent(
-        version, model_kind, in_features, width, out_features, rank, n_blocks, loops,
-        decay, g_max, flags, layers, checksum,
+        version,
+        model_kind,
+        in_features,
+        width,
+        out_features,
+        rank,
+        n_blocks,
+        loops,
+        decay,
+        g_max,
+        flags,
+        layers,
+        checksum,
     )

@@ -87,9 +87,7 @@ def train_teacher(episodes, args: argparse.Namespace, device: torch.device) -> L
             latent, _ = model.refine(windows, conditions)
             raw = model.head_logits(latent)
             output = model.head_output(raw)
-            command = final_command(
-                output[:, :2], physics_baseline(windows[:, -1, :]), residual
-            )
+            command = final_command(output[:, :2], physics_baseline(windows[:, -1, :]), residual)
             # `targets` are the privileged reference corrections (true wind).
             main = normalized_correction_loss(command, targets)
             latent_loss = model.latent_prediction_loss(
@@ -98,7 +96,9 @@ def train_teacher(episodes, args: argparse.Namespace, device: torch.device) -> L
             error = (command - targets).abs().max(dim=1).values.detach()
             confidence = F.mse_loss(raw[:, 2], confidence_target(error))
             loss = (
-                main + config.latent_weight * latent_loss + 0.1 * confidence
+                main
+                + config.latent_weight * latent_loss
+                + 0.1 * confidence
                 + confidence_spread_loss(raw[:, 2], error)
             )
             optimizer.zero_grad(set_to_none=False)
@@ -111,7 +111,9 @@ def train_teacher(episodes, args: argparse.Namespace, device: torch.device) -> L
 def run(args: argparse.Namespace) -> dict:
     """Full pipeline: scenario split, train, evaluate, distil, export."""
     if args.epochs < 1 or args.batch < 1 or args.window <= max(LoopWMConfig().horizons):
-        raise ValueError("epochs and batch must be positive; window must exceed the latent horizons")
+        raise ValueError(
+            "epochs and batch must be positive; window must exceed the latent horizons"
+        )
     torch.manual_seed(args.seed)
     torch.set_num_threads(1)
     device = torch.device(args.device)
@@ -120,7 +122,9 @@ def run(args: argparse.Namespace) -> dict:
     groups = group_by_scenario(episodes)
     held_out = {name for name, group in groups.items() if any(e.held_out for e in group)}
     if not held_out or len(held_out) == len(groups):
-        raise ValueError("validation data must mark at least one held-out and one training scenario")
+        raise ValueError(
+            "validation data must mark at least one held-out and one training scenario"
+        )
     train_episodes = [
         episode for name, group in groups.items() if name not in held_out for episode in group
     ]

@@ -86,9 +86,7 @@ def _pack(episodes: list) -> bytes:
 
 
 def _teacher() -> SmartTeacher:
-    return SmartTeacher(
-        SmartConfig(width=16, rank=8, dilations=(1, 2, 4, 8), loops=2)
-    ).eval()
+    return SmartTeacher(SmartConfig(width=16, rank=8, dilations=(1, 2, 4, 8), loops=2)).eval()
 
 
 def test_smart_validation_reader_and_scenario_split(tmp_path):
@@ -154,7 +152,16 @@ def test_generalisation_ratio_and_evaluate(tmp_path):
     model = _teacher()
     groups = group_by_scenario(_episodes())
     args = build_parser().parse_args(
-        ["--data", str(tmp_path / "unused.bin"), "--window", "12", "--batch", "2", "--eval-limit", "4"]
+        [
+            "--data",
+            str(tmp_path / "unused.bin"),
+            "--window",
+            "12",
+            "--batch",
+            "2",
+            "--eval-limit",
+            "4",
+        ]
     )
     rmse = evaluate(model, groups, args, torch.device("cpu"))
     assert set(rmse) == set(groups)
@@ -191,16 +198,26 @@ def test_tiny_cpu_training_step(tmp_path):
     out = tmp_path / "smart.pt"
     args = build_parser().parse_args(
         [
-            "--data", str(data),
-            "--out", str(out),
-            "--epochs", "1",
-            "--seed", "1",
-            "--window", "12",
-            "--batch", "2",
-            "--limit", "4",
-            "--eval-limit", "4",
-            "--width", "16",
-            "--rank", "8",
+            "--data",
+            str(data),
+            "--out",
+            str(out),
+            "--epochs",
+            "1",
+            "--seed",
+            "1",
+            "--window",
+            "12",
+            "--batch",
+            "2",
+            "--limit",
+            "4",
+            "--eval-limit",
+            "4",
+            "--width",
+            "16",
+            "--rank",
+            "8",
         ]
     )
     result = run(args)

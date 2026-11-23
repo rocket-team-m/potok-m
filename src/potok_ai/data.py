@@ -119,7 +119,9 @@ def read_validation(path: str | Path) -> ValidationData:
         index, *meta = fields
         if smart:
             metadata = np.asarray(meta[:SIM_META_V1], np.float32)
-            conditioning = np.asarray(meta[SIM_META_V1 : SIM_META_V1 + SMART_COND_FEATURES], np.float32)
+            conditioning = np.asarray(
+                meta[SIM_META_V1 : SIM_META_V1 + SMART_COND_FEATURES], np.float32
+            )
             scenario_value, split = meta[-2], meta[-1]
             if not float(scenario_value).is_integer() or not 0 <= scenario_value <= 65535:
                 raise ValueError("bad scenario id")
@@ -137,13 +139,17 @@ def read_validation(path: str | Path) -> ValidationData:
         target_bytes = frames * targets * 4
         if len(raw) < offset + frame_bytes + target_bytes:
             raise ValueError("validation file truncated at episode data")
-        frame_data = np.frombuffer(
-            raw, dtype="<f4", count=frames * features, offset=offset
-        ).reshape(frames, features).copy()
+        frame_data = (
+            np.frombuffer(raw, dtype="<f4", count=frames * features, offset=offset)
+            .reshape(frames, features)
+            .copy()
+        )
         offset += frame_bytes
-        target_data = np.frombuffer(
-            raw, dtype="<f4", count=frames * targets, offset=offset
-        ).reshape(frames, targets).copy()
+        target_data = (
+            np.frombuffer(raw, dtype="<f4", count=frames * targets, offset=offset)
+            .reshape(frames, targets)
+            .copy()
+        )
         offset += target_bytes
         episodes.append(
             Episode(
@@ -189,7 +195,9 @@ def write_episode(path: str | Path, episode: Episode) -> None:
     frames, features = episode.frames.shape
     targets = episode.targets
     stride = features + (0 if targets is None else targets.shape[1])
-    payload = episode.frames if targets is None else np.concatenate([episode.frames, targets], axis=1)
+    payload = (
+        episode.frames if targets is None else np.concatenate([episode.frames, targets], axis=1)
+    )
     header = HEADER.pack(MAGIC, VERSION, frames, features, stride)
     Path(path).write_bytes(header + np.asarray(payload, dtype="<f4").tobytes())
 
@@ -201,16 +209,16 @@ def load_episodes(path: str | Path, n_features: int = 8) -> list[Episode]:
     older ``POTOK1`` / bare-float32 fixture reader.
     """
     source = Path(path)
-    files = (
-        sorted(p for p in source.iterdir() if p.is_file())
-        if source.is_dir()
-        else [source]
-    )
+    files = sorted(p for p in source.iterdir() if p.is_file()) if source.is_dir() else [source]
     episodes: list[Episode] = []
     for file in files:
         with file.open("rb") as handle:
             magic = handle.read(len(SIM_MAGIC))
-        loaded = read_validation(file).episodes if magic == SIM_MAGIC else [read_episode(file, n_features)]
+        loaded = (
+            read_validation(file).episodes
+            if magic == SIM_MAGIC
+            else [read_episode(file, n_features)]
+        )
         for episode in loaded:
             episode.source = file.stem
         episodes.extend(loaded)

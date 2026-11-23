@@ -179,16 +179,26 @@ def test_tiny_cpu_end_to_end(tmp_path):
     out = tmp_path / "loopwm.pt"
     args = build_parser().parse_args(
         [
-            "--data", str(data),
-            "--out", str(out),
-            "--epochs", "1",
-            "--seed", "1",
-            "--window", "12",
-            "--batch", "2",
-            "--limit", "4",
-            "--eval-limit", "4",
-            "--width", "16",
-            "--heads", "4",
+            "--data",
+            str(data),
+            "--out",
+            str(out),
+            "--epochs",
+            "1",
+            "--seed",
+            "1",
+            "--window",
+            "12",
+            "--batch",
+            "2",
+            "--limit",
+            "4",
+            "--eval-limit",
+            "4",
+            "--width",
+            "16",
+            "--heads",
+            "4",
         ]
     )
     result = run(args)

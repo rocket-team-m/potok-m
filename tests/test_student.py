@@ -103,9 +103,7 @@ def test_student_export_rejects_tampering_and_wrong_kind(tmp_path):
     with pytest.raises(ValueError, match="checksum"):
         load_student_export(path)
 
-    teacher_path = export_model(
-        PotokModel(ModelConfig(width=16, rank=8)), tmp_path / "t.bin"
-    )
+    teacher_path = export_model(PotokModel(ModelConfig(width=16, rank=8)), tmp_path / "t.bin")
     assert teacher_path.read_bytes()[: len(MAGIC)] == MAGIC
     with pytest.raises(ValueError, match="model_kind"):
         load_student_export(teacher_path)
@@ -126,13 +124,20 @@ def test_tiny_cpu_distillation_step(tmp_path):
 
     args = build_parser().parse_args(
         [
-            "--teacher-checkpoint", str(checkpoint),
-            "--data", str(data),
-            "--out", str(tmp_path / "student.pt"),
-            "--epochs", "1",
-            "--seed", "1",
-            "--loops", "2",
-            "--limit", "3",
+            "--teacher-checkpoint",
+            str(checkpoint),
+            "--data",
+            str(data),
+            "--out",
+            str(tmp_path / "student.pt"),
+            "--epochs",
+            "1",
+            "--seed",
+            "1",
+            "--loops",
+            "2",
+            "--limit",
+            "3",
         ]
     )
     loss = run(args)
@@ -167,7 +172,5 @@ def test_phase_change_resets_state(tmp_path):
     )
     student = StatefulTCN(StudentConfig(seed=1, width=16, rank=8))
     optimizer = torch.optim.AdamW(student.parameters(), lr=1e-3)
-    _, resets, _ = train_episode(
-        student, teacher, None, frames_with_phase, optimizer, args
-    )
+    _, resets, _ = train_episode(student, teacher, None, frames_with_phase, optimizer, args)
     assert resets == 2  # episode start plus the single phase change

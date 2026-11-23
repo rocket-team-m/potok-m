@@ -123,9 +123,7 @@ class LoopWM(nn.Module):
         )
         self.block = LoopBlock(c)  # ONE module, reused on every iteration
         self.norm = nn.LayerNorm(c.width)
-        self.latent_heads = nn.ModuleDict(
-            {str(h): nn.Linear(c.width, c.width) for h in c.horizons}
-        )
+        self.latent_heads = nn.ModuleDict({str(h): nn.Linear(c.width, c.width) for h in c.horizons})
         self.head = nn.Linear(c.width, c.out_features)
 
     def refine(
@@ -163,9 +161,7 @@ class LoopWM(nn.Module):
 
     def latent_predictions(self, latent: torch.Tensor) -> dict[int, torch.Tensor]:
         """Predicted encoder latents at each horizon, one (B, T-h, width) per h."""
-        return {
-            h: self.latent_heads[str(h)](latent[:, :-h]) for h in self.cfg.horizons
-        }
+        return {h: self.latent_heads[str(h)](latent[:, :-h]) for h in self.cfg.horizons}
 
     def latent_prediction_loss(
         self,

@@ -76,8 +76,9 @@ def sigmoid(logits: np.ndarray) -> np.ndarray:
     return 1.0 / (1.0 + np.exp(-z))
 
 
-def expected_calibration_error(confidence: np.ndarray, correct: np.ndarray,
-                               bins: int = BINS) -> float:
+def expected_calibration_error(
+    confidence: np.ndarray, correct: np.ndarray, bins: int = BINS
+) -> float:
     """Standard equal-width ECE between predicted confidence and correctness."""
     conf = np.asarray(confidence, dtype=np.float64).ravel()
     ok = np.asarray(correct, dtype=np.float64).ravel()
@@ -125,8 +126,9 @@ def isotonic_calibration(confidence: np.ndarray, correct: np.ndarray) -> np.ndar
     return result
 
 
-def isotonic_step_map(confidence: np.ndarray, correct: np.ndarray
-                      ) -> tuple[list[float], list[float]]:
+def isotonic_step_map(
+    confidence: np.ndarray, correct: np.ndarray
+) -> tuple[list[float], list[float]]:
     """Collapse the PAVA fit into upper edges and values an edge reader can apply.
 
     ``isotonic_calibration`` returns one fitted value per sample, constant inside
@@ -182,11 +184,14 @@ def apply_calibration(payload: dict, logits: np.ndarray) -> np.ndarray:
     raise ValueError(f"unknown calibration method {method!r}")
 
 
-def conformal_calibrate(logits: np.ndarray, error: np.ndarray,
-                        tol: float = DEFAULT_TOL,
-                        target_ece: float = DEFAULT_TARGET_ECE,
-                        max_loops: int = DEFAULT_MAX_LOOPS,
-                        bins: int = BINS) -> CalibrationResult:
+def conformal_calibrate(
+    logits: np.ndarray,
+    error: np.ndarray,
+    tol: float = DEFAULT_TOL,
+    target_ece: float = DEFAULT_TARGET_ECE,
+    max_loops: int = DEFAULT_MAX_LOOPS,
+    bins: int = BINS,
+) -> CalibrationResult:
     """Fit temperature (then isotonic if needed) and derive the threshold.
 
     The temperature search is bounded by ``max_loops`` passes. Isotonic is only
@@ -270,9 +275,12 @@ def confidence_target(
     return torch.exp(-e / s)
 
 
-def confidence_spread_loss(confidence: torch.Tensor, error: torch.Tensor,
-                           tol: float = DEFAULT_TOL,
-                           weight: float = MAX_SPREAD_WEIGHT) -> torch.Tensor:
+def confidence_spread_loss(
+    confidence: torch.Tensor,
+    error: torch.Tensor,
+    tol: float = DEFAULT_TOL,
+    weight: float = MAX_SPREAD_WEIGHT,
+) -> torch.Tensor:
     """Reward confidence spread on uncertain cells, with a hard weight cap."""
     if not 0.0 <= weight <= MAX_SPREAD_WEIGHT:
         raise ValueError(f"spread weight must be in [0, {MAX_SPREAD_WEIGHT}]")

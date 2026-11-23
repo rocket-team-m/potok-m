@@ -71,13 +71,9 @@ class _StateBlock(nn.Module):
         super().__init__()
         self.rec_h = nn.Linear(width, width, bias=True)
         self.rec_x = nn.Linear(width, width, bias=True)
-        self.proj = TSCTLinear(
-            width, width, rank, ternary=ternary, act4bit=act4bit
-        )
+        self.proj = TSCTLinear(width, width, rank, ternary=ternary, act4bit=act4bit)
 
-    def forward(
-        self, x: torch.Tensor, h_prev: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, x: torch.Tensor, h_prev: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         if x.shape != h_prev.shape:
             raise ValueError("block input and hidden state must have the same shape")
         candidate = torch.tanh(self.rec_x(x) + self.rec_h(h_prev))
@@ -99,8 +95,7 @@ class StatefulTCN(nn.Module):
 
         self.stem = nn.Linear(c.in_features, c.width, bias=True)
         self.blocks = nn.ModuleList(
-            _StateBlock(c.width, c.rank, c.ternary, c.act4bit)
-            for _ in range(c.n_blocks)
+            _StateBlock(c.width, c.rank, c.ternary, c.act4bit) for _ in range(c.n_blocks)
         )
         self.norm = nn.LayerNorm(c.width)
         self.alloc_logits = nn.Parameter(torch.empty(MAX_LOOPS))
@@ -201,7 +196,9 @@ class StatefulTCN(nn.Module):
             for frame in frames:
                 self.step(frame)
 
-    def quantized_factors(self) -> dict[str, tuple[torch.Tensor, float, torch.Tensor, float, torch.Tensor]]:
+    def quantized_factors(
+        self,
+    ) -> dict[str, tuple[torch.Tensor, float, torch.Tensor, float, torch.Tensor]]:
         """Return exportable TSCT factors: (U codes, alpha_u, s, V codes, alpha_v)."""
         result = {}
         for name, module in self.named_modules():

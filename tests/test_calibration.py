@@ -87,9 +87,9 @@ def test_isotonic_calibration_json_round_trip(tmp_path):
     multi-bin step map.
     """
     logits = np.repeat(np.array([-20.0, -4.0, 4.0, 20.0]), 40)
-    correct = np.concatenate([
-        np.r_[np.ones(count), np.zeros(40 - count)] for count in (12, 20, 28, 36)
-    ])
+    correct = np.concatenate(
+        [np.r_[np.ones(count), np.zeros(40 - count)] for count in (12, 20, 28, 36)]
+    )
     error = np.where(correct > 0, 0.01, 0.5)
 
     result = conformal_calibrate(logits, error, tol=0.1, target_ece=0.05, max_loops=3)
@@ -150,7 +150,9 @@ def test_confidence_target_tracks_uncertainty():
     assert confidence_target(torch.tensor(0.0)).item() == pytest.approx(1.0)
     assert confidence_target(torch.tensor(0.1)).item() == pytest.approx(np.exp(-1))
     # A single large error no longer collapses to ~0: the scale follows the data.
-    assert confidence_target(torch.tensor(1.0, requires_grad=True)).item() == pytest.approx(np.exp(-1))
+    assert confidence_target(torch.tensor(1.0, requires_grad=True)).item() == pytest.approx(
+        np.exp(-1)
+    )
 
 
 def test_confidence_target_spreads_when_errors_exceed_tolerance():

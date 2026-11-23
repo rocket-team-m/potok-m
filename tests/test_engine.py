@@ -26,22 +26,38 @@ def _data(tmp_path: Path) -> Path:
 
 def _argv(model: str, data: Path, out: Path, *extra: str) -> list[str]:
     return [
-        "--model", model,
-        "--stage", "train",
-        "--data", str(data),
-        "--out", str(out),
-        "--epochs", "1",
-        "--seed", "1",
-        "--device", "cpu",
-        "--window", "12",
-        "--batch", "2",
-        "--limit", "4",
-        "--eval-limit", "4",
-        "--width", "16",
-        "--rank", "8",
-        "--heads", "4",
-        "--lite-width", "16",
-        "--attn-rank", "4",
+        "--model",
+        model,
+        "--stage",
+        "train",
+        "--data",
+        str(data),
+        "--out",
+        str(out),
+        "--epochs",
+        "1",
+        "--seed",
+        "1",
+        "--device",
+        "cpu",
+        "--window",
+        "12",
+        "--batch",
+        "2",
+        "--limit",
+        "4",
+        "--eval-limit",
+        "4",
+        "--width",
+        "16",
+        "--rank",
+        "8",
+        "--heads",
+        "4",
+        "--lite-width",
+        "16",
+        "--attn-rank",
+        "4",
         *extra,
     ]
 
@@ -58,8 +74,17 @@ def test_engine_cli_help():
         cwd=Path(__file__).resolve().parents[1],
     )
     assert result.returncode == 0, result.stderr
-    for token in ("--model", "--stage", "--data", "--out", "--epochs", "--seed",
-                  "--device", "{lrs,loopwm-lite,loopwm}", "{train,distill,eval}"):
+    for token in (
+        "--model",
+        "--stage",
+        "--data",
+        "--out",
+        "--epochs",
+        "--seed",
+        "--device",
+        "{lrs,loopwm-lite,loopwm}",
+        "{train,distill,eval}",
+    ):
         assert token in result.stdout
 
 
@@ -77,9 +102,9 @@ def test_adapter_registry_and_dispatch(tmp_path, monkeypatch):
             {"model_config": config.__dict__, "state_dict": LoopWM(config).state_dict()},
             args.out,
         )
-        export_student(StatefulTCN(smart_student_config()), args.out.with_name(
-            "loopwm_student.bin"
-        ))
+        export_student(
+            StatefulTCN(smart_student_config()), args.out.with_name("loopwm_student.bin")
+        )
         return {
             "rmse": {"scenario_00": 0.5, "scenario_01": 0.6, "scenario_16": 0.7},
             "ratio": 0.7 / 0.55,
@@ -218,9 +243,7 @@ def test_curriculum_drives_each_epoch(tmp_path, monkeypatch):
     assert seen == [0, 1, 2, 3]
 
     seen.clear()
-    engine.main(
-        _argv("loopwm-lite", data, tmp_path / "flat", "--epochs", "4", "--no-curriculum")
-    )
+    engine.main(_argv("loopwm-lite", data, tmp_path / "flat", "--epochs", "4", "--no-curriculum"))
     assert seen == []
 
 
