@@ -169,13 +169,13 @@ fn seq_window_is_bounded() {
 #[test]
 fn flag_helpers() {
     let mut f = 0u8;
-    flag_set(&mut f, flags::GPS_FIX);
+    flag_set(&mut f, flags::BARO_OK);
     flag_set(&mut f, flags::FAULT);
-    assert!(flag_has(f, flags::GPS_FIX));
+    assert!(flag_has(f, flags::BARO_OK));
     assert!(flag_has(f, flags::FAULT));
     assert!(!flag_has(f, flags::IMU_OK));
-    flag_clear(&mut f, flags::GPS_FIX);
-    assert!(!flag_has(f, flags::GPS_FIX));
+    flag_clear(&mut f, flags::BARO_OK);
+    assert!(!flag_has(f, flags::BARO_OK));
     assert_eq!(f, flags::FAULT);
     assert_eq!(flags::FAULT, 1 << 7);
 }

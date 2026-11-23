@@ -25,7 +25,7 @@ pub const PHASE_FLIGHT: u8 = 2;
 pub const PHASE_LANDING: u8 = 3;
 pub const PHASE_FAULT: u8 = 4;
 
-pub const FLAG_GPS_FIX: u8 = 1 << 0;
+// bit 0 is reserved (unassigned)
 pub const FLAG_IMU_OK: u8 = 1 << 1;
 pub const FLAG_BARO_OK: u8 = 1 << 2;
 pub const FLAG_PITOT_OK: u8 = 1 << 3;

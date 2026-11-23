@@ -28,7 +28,6 @@ class Phase(IntEnum):
     DESCENT = 3
     LANDED = 4
 
-FLAG_GPS_FIX = 1 << 0
 FLAG_IMU_OK = 1 << 1
 FLAG_BARO_OK = 1 << 2
 FLAG_PITOT_OK = 1 << 3

@@ -184,12 +184,12 @@ fn lowlat_wrong_magic_crc_phase_and_version() {
 fn lowlat_flag_helpers() {
     let mut frame = sample_request();
     frame.flags = 0;
-    flag_set(&mut frame.flags, flags::GPS_FIX);
+    flag_set(&mut frame.flags, flags::BARO_OK);
     flag_set(&mut frame.flags, flags::MOTOR_ARMED);
-    assert!(flag_has(frame.flags, flags::GPS_FIX));
+    assert!(flag_has(frame.flags, flags::BARO_OK));
     assert!(flag_has(frame.flags, flags::MOTOR_ARMED));
     assert!(!flag_has(frame.flags, flags::FAULT));
-    flag_clear(&mut frame.flags, flags::GPS_FIX);
+    flag_clear(&mut frame.flags, flags::BARO_OK);
     assert_eq!(frame.flags, flags::MOTOR_ARMED);
     let mut buf = [0u8; LOWLAT_REQUEST_SIZE];
     encode_lowlat_request(&frame, &mut buf).unwrap();

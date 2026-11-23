@@ -856,7 +856,7 @@ mod tests {
             time_us: 42,
             phase: Phase::DESCENT,
             version: REQUEST_VERSION,
-            flags: flags::GPS_FIX,
+            flags: flags::BARO_OK,
             reserved: 0,
             gyro: [1.0, 2.0, 3.0],
             accel: [4.0, 5.0, 6.0],

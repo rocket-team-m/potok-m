@@ -35,8 +35,8 @@ addition of `lowlat`.
 The numeric codes are the wire contract and are unchanged by the rename;
 `uart.yaml` validation rejects any other phase vocabulary.
 
-Flags (bit index): `0` GPS_FIX, `1` IMU_OK, `2` BARO_OK, `3` PITOT_OK,
-`4` AI_READY, `5` CALIBRATED, `6` MOTOR_ARMED, `7` FAULT.
+Flags (bit index): `0` reserved (unassigned), `1` IMU_OK, `2` BARO_OK,
+`3` PITOT_OK, `4` AI_READY, `5` CALIBRATED, `6` MOTOR_ARMED, `7` FAULT.
 
 #### Reply (AI → STM32), 14 bytes, magic `0x5250`
 

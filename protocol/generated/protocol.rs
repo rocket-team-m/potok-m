@@ -40,7 +40,6 @@ impl From<Phase> for u8 {
 }
 
 pub mod flags {
-    pub const GPS_FIX: u8 = 1u8 << 0;
     pub const IMU_OK: u8 = 1u8 << 1;
     pub const BARO_OK: u8 = 1u8 << 2;
     pub const PITOT_OK: u8 = 1u8 << 3;

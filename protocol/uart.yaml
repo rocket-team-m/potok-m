@@ -26,7 +26,7 @@ protocol:
   flags:
     width: 1
     bits:
-      - { name: GPS_FIX, bit: 0 }
+      # bit 0 is reserved (unassigned)
       - { name: IMU_OK, bit: 1 }
       - { name: BARO_OK, bit: 2 }
       - { name: PITOT_OK, bit: 3 }

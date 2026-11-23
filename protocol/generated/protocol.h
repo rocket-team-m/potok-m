@@ -28,7 +28,6 @@ enum PotokPhase {
 };
 
 enum PotokFlags {
-    POTOK_FLAG_GPS_FIX = (1u << 0),
     POTOK_FLAG_IMU_OK = (1u << 1),
     POTOK_FLAG_BARO_OK = (1u << 2),
     POTOK_FLAG_PITOT_OK = (1u << 3),

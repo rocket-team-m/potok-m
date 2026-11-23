@@ -40,7 +40,7 @@ pub fn smoke() -> Result<(), Error> {
         time_us: 2,
         phase: Phase::DESCENT,
         version: protocol::REQUEST_VERSION,
-        flags: protocol::flags::GPS_FIX,
+        flags: protocol::flags::BARO_OK,
         reserved: 0,
         gyro: [1.0, 2.0, 3.0],
         accel: [4.0, 5.0, 6.0],
