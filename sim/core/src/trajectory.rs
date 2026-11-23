@@ -28,6 +28,13 @@
 //! The fin command is `[g_accel_y, -g_accel_x]` in `[roll, pitch]` seam order.
 //! v1 and v2 bytes and readers are unchanged; the version and stride in the
 //! header are the authority.
+//!
+//! No canopy exists in this simulator, so the flown trace cannot say where
+//! the chute opened or where the vehicle landed. The split lateral metrics
+//! (`lateral_rms_at_deployment_m`, `landing_dispersion_m`) therefore read their
+//! phase boundary from the optional `POTOKDPL` v1 sidecar owned by
+//! `validation::DeploymentTruth`; without it they are a LOUD error, never a
+//! guessed deployment tick. The legacy `lateral_rms_m` is untouched.
 
 use std::{
     fs::File,
@@ -39,6 +46,7 @@ use crate::{
     config::Config,
     episode::Episode,
     error::{Result, SimError},
+    validation::DeploymentTruth,
 };
 
 pub const MAGIC: &[u8; 8] = b"POTOKTRJ";
@@ -251,6 +259,23 @@ impl EpisodeTrajectory {
     pub fn lateral_rms_m(&self) -> f64 {
         lateral_rms_m(&self.ticks)
     }
+
+    /// Fin-flight RMS up to canopy deployment. LOUD without deployment truth.
+    pub fn lateral_rms_at_deployment_m(&self, truth: Option<&DeploymentTruth>) -> Result<f64> {
+        lateral_rms_at_deployment_m(&self.ticks, truth)
+    }
+
+    /// Post-canopy horizontal drift from deployment to landing. LOUD without truth.
+    pub fn landing_dispersion_m(&self, truth: Option<&DeploymentTruth>) -> Result<f64> {
+        landing_dispersion_m(&self.ticks, truth)
+    }
+
+    pub fn lateral_flight_contributions(
+        &self,
+        truth: &DeploymentTruth,
+    ) -> Result<LateralFlightContributions> {
+        lateral_flight_contributions(&self.ticks, truth)
+    }
 }
 
 pub fn apogee_m(ticks: &[TrajectoryTick]) -> f64 {
@@ -260,7 +285,8 @@ pub fn apogee_m(ticks: &[TrajectoryTick]) -> f64 {
         .fold(0.0_f64, f64::max)
 }
 
-/// RMS of horizontal displacement over the flown ticks, metres.
+/// RMS of horizontal displacement over the flown ticks, metres. Legacy
+/// metric: kept bit-for-bit and covering the whole trace, canopy or not.
 pub fn lateral_rms_m(ticks: &[TrajectoryTick]) -> f64 {
     if ticks.is_empty() {
         return 0.0;
@@ -270,6 +296,102 @@ pub fn lateral_rms_m(ticks: &[TrajectoryTick]) -> f64 {
         .map(|t| (t.pos[0] as f64).powi(2) + (t.pos[1] as f64).powi(2))
         .sum();
     (sum / ticks.len() as f64).sqrt()
+}
+
+fn require_deployment_truth(truth: Option<&DeploymentTruth>) -> Result<&DeploymentTruth> {
+    truth.ok_or_else(|| {
+        SimError::Trajectory(
+            "missing canopy deployment truth for a split lateral metric: read the \
+             validation.deployment sidecar with validation::read_deployment_truth, or write one \
+             with validation::write_deployment_truth. Refusing to invent a deployment tick or a \
+             landing point from a trace that has no canopy phase."
+                .into(),
+        )
+    })
+}
+
+/// Additive decomposition of the fin-flight RMS² by AI authority. Both fields
+/// are r² summed over their ticks divided by ALL fin-flight ticks, so they add
+/// exactly to `lateral_rms_at_deployment_m`².
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LateralFlightContributions {
+    /// AI-forbidden powered segment; small by construction on this vehicle.
+    pub boost_m2: f64,
+    /// AI-influenceable fin-active segment (post-burnout, pre-canopy).
+    pub fin_active_m2: f64,
+}
+
+impl LateralFlightContributions {
+    pub fn at_deployment_m(&self) -> f64 {
+        (self.boost_m2 + self.fin_active_m2).sqrt()
+    }
+}
+
+/// RMS² contributions over `[0, deployment_tick]`, split at `boost_end_tick`.
+/// Out-of-range ticks or malformed truth are LOUD errors.
+pub fn lateral_flight_contributions(
+    ticks: &[TrajectoryTick],
+    truth: &DeploymentTruth,
+) -> Result<LateralFlightContributions> {
+    truth.validate()?;
+    let deploy = truth.deployment_tick as usize;
+    if deploy >= ticks.len() {
+        return Err(SimError::Trajectory(format!(
+            "deployment tick {} is outside the {} flown ticks; the canopy phase is not in \
+             this sidecar — supply matching deployment truth",
+            deploy,
+            ticks.len()
+        )));
+    }
+    let boost_end = truth.boost_end_tick as usize;
+    let mut boost = 0.0_f64;
+    let mut fin = 0.0_f64;
+    for (i, t) in ticks.iter().enumerate().take(deploy + 1) {
+        let r2 = (t.pos[0] as f64).powi(2) + (t.pos[1] as f64).powi(2);
+        if i <= boost_end {
+            boost += r2;
+        } else {
+            fin += r2;
+        }
+    }
+    let n = (deploy + 1) as f64;
+    Ok(LateralFlightContributions {
+        boost_m2: boost / n,
+        fin_active_m2: fin / n,
+    })
+}
+
+/// Lateral RMS (m) at canopy deployment, pooled over fin-flight ticks up to and
+/// including `deployment_tick`. This is the AI-influenceable part of the old
+/// `lateral_rms_m`; the canopy drift that follows is measured separately.
+pub fn lateral_rms_at_deployment_m(
+    ticks: &[TrajectoryTick],
+    truth: Option<&DeploymentTruth>,
+) -> Result<f64> {
+    let truth = require_deployment_truth(truth)?;
+    Ok(lateral_flight_contributions(ticks, truth)?.at_deployment_m())
+}
+
+/// Horizontal distance (m) from the deployment point to the landing point,
+/// i.e. canopy wind drift the AI cannot touch. The deployment point comes from
+/// flown truth at `deployment_tick`, the landing point from the sidecar.
+pub fn landing_dispersion_m(
+    ticks: &[TrajectoryTick],
+    truth: Option<&DeploymentTruth>,
+) -> Result<f64> {
+    let truth = require_deployment_truth(truth)?;
+    truth.validate()?;
+    let deploy = truth.deployment_tick as usize;
+    if deploy >= ticks.len() {
+        return Err(SimError::Trajectory(format!(
+            "deployment tick {} is outside the {} flown ticks; cannot anchor landing dispersion",
+            deploy,
+            ticks.len()
+        )));
+    }
+    let dx = truth.landing_xy[0] as f64 - ticks[deploy].pos[0] as f64;
+    let dy = truth.landing_xy[1] as f64 - ticks[deploy].pos[1] as f64;
+    Ok(dx.hypot(dy))
 }
 
 #[derive(Debug, Clone)]

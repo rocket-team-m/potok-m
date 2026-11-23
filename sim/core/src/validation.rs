@@ -23,11 +23,19 @@
 //!   Y is written first to match the fin seam's roll-then-pitch order.
 //!   Readers auto-detect the row width from the header version and
 //!   `target_count`; a mismatch is a LOUD error, never a zero-fill.
+//!
+//! Canopy deployment truth lives in a SEPARATE optional sidecar
+//! (`validation.deployment`, `POTOKDPL` v1), because the simulator has no
+//! canopy: adding these fields to `validation.bin` would break the v1/v2/v3
+//! byte contract. The three lateral metrics split on that truth:
+//! `lateral_rms_m` (legacy, whole trace), `lateral_rms_at_deployment_m`
+//! (fin-flight, AI-influenceable) and `landing_dispersion_m` (post-canopy wind
+//! drift, not AI-influenceable). The latter two LOUD when truth is absent.
 
 use std::{
     fs::File,
     io::{BufReader, BufWriter, Read, Write},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use ndarray::Array2;
@@ -468,4 +476,155 @@ pub fn read_validation(path: &Path) -> Result<ValidationSet> {
         version: vh.version,
         episodes,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Optional deployment-truth sidecar (typed extra block, version 1).
+//
+// NOT part of validation.bin. The canonical file keeps its v1/v2/v3 bytes;
+// this block is a separate `validation.deployment` file, so old readers never
+// see it and no layout changes. The simulator has no canopy, so no deployment
+// tick or landing point can be invented from flown state — consumers that ask
+// for a split lateral metric must supply this truth or get a LOUD error.
+// ---------------------------------------------------------------------------
+
+pub const DEPLOYMENT_MAGIC: &[u8; 8] = b"POTOKDPL";
+/// Wire version of the new sidecar. Bumping it is the only way to extend this
+/// block; v1/v2/v3 of `validation.bin` and the trajectory sidecar are frozen.
+pub const DEPLOYMENT_VERSION: u32 = 1;
+pub const DEPLOYMENT_HEADER_SIZE: usize = 64;
+pub const DEPLOYMENT_RECORD_SIZE: usize = 32;
+pub const DEPLOYMENT_SUFFIX: &str = "deployment";
+const _: () = assert!(8 + 4 + 4 + 48 == DEPLOYMENT_HEADER_SIZE);
+const _: () = assert!(8 + 4 + 4 + 2 * 4 + 2 * 4 == DEPLOYMENT_RECORD_SIZE);
+
+/// Ground truth for the canopy phase of one episode, from the recovery logic
+/// (which the AI cannot command) or an offline annotator. Never inferred from
+/// the flown 30 s trace: that trace ends before canopy flight in every shipped
+/// split (LATERAL01 §0).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DeploymentTruth {
+    /// Episode index, matching `ValidationEpisode::index`.
+    pub index: u64,
+    /// Last AI-forbidden boost tick, inclusive (0-based 50 Hz tick).
+    pub boost_end_tick: u32,
+    /// First canopy-borne tick (0-based). Fin flight is `[0, deployment_tick]`.
+    pub deployment_tick: u32,
+    /// World-frame landing position (x, y, m) after canopy drift.
+    pub landing_xy: [f32; 2],
+    /// Mean world-frame horizontal wind under canopy (m/s, x/y). Provenance:
+    /// this is the drift source, not an input to the metric arithmetic.
+    pub wind_mean_xy: [f32; 2],
+}
+
+impl DeploymentTruth {
+    pub fn as_array(self) -> [u8; DEPLOYMENT_RECORD_SIZE] {
+        let mut b = [0u8; DEPLOYMENT_RECORD_SIZE];
+        b[0..8].copy_from_slice(&self.index.to_le_bytes());
+        b[8..12].copy_from_slice(&self.boost_end_tick.to_le_bytes());
+        b[12..16].copy_from_slice(&self.deployment_tick.to_le_bytes());
+        b[16..20].copy_from_slice(&self.landing_xy[0].to_le_bytes());
+        b[20..24].copy_from_slice(&self.landing_xy[1].to_le_bytes());
+        b[24..28].copy_from_slice(&self.wind_mean_xy[0].to_le_bytes());
+        b[28..32].copy_from_slice(&self.wind_mean_xy[1].to_le_bytes());
+        b
+    }
+
+    pub fn from_array(b: [u8; DEPLOYMENT_RECORD_SIZE]) -> Self {
+        let u32_at = |off: usize| u32::from_le_bytes(b[off..off + 4].try_into().unwrap());
+        let f32_at = |off: usize| f32::from_le_bytes(b[off..off + 4].try_into().unwrap());
+        Self {
+            index: u64::from_le_bytes(b[0..8].try_into().unwrap()),
+            boost_end_tick: u32_at(8),
+            deployment_tick: u32_at(12),
+            landing_xy: [f32_at(16), f32_at(20)],
+            wind_mean_xy: [f32_at(24), f32_at(28)],
+        }
+    }
+
+    /// LOUD structural validation: no fin-active window, non-finite truth or a
+    /// reversed gate is a hard error, never a zero-filled metric.
+    pub fn validate(self) -> Result<()> {
+        if self.boost_end_tick >= self.deployment_tick {
+            return Err(SimError::InvalidValidation(format!(
+                "deployment truth for episode {}: boost_end_tick {} must be < deployment_tick {}",
+                self.index, self.boost_end_tick, self.deployment_tick
+            )));
+        }
+        if !self.landing_xy.iter().chain(self.wind_mean_xy.iter()).all(|v| v.is_finite()) {
+            return Err(SimError::InvalidValidation(format!(
+                "deployment truth for episode {}: non-finite landing or wind value",
+                self.index
+            )));
+        }
+        Ok(())
+    }
+}
+
+/// `dir/validation.bin` -> `dir/validation.deployment`.
+pub fn deployment_sidecar_path(validation_path: &Path) -> PathBuf {
+    validation_path.with_extension(DEPLOYMENT_SUFFIX)
+}
+
+/// Writes the optional deployment-truth block. Each record is validated first.
+pub fn write_deployment_truth(path: &Path, records: &[DeploymentTruth]) -> Result<()> {
+    for r in records {
+        r.validate()?;
+    }
+    if records.len() > u32::MAX as usize {
+        return Err(SimError::InvalidValidation(
+            "deployment truth has too many episodes".into(),
+        ));
+    }
+    let mut w = BufWriter::new(File::create(path)?);
+    let mut b = [0u8; DEPLOYMENT_HEADER_SIZE];
+    b[0..8].copy_from_slice(DEPLOYMENT_MAGIC);
+    b[8..12].copy_from_slice(&DEPLOYMENT_VERSION.to_le_bytes());
+    b[12..16].copy_from_slice(&(records.len() as u32).to_le_bytes());
+    w.write_all(&b)?;
+    for r in records {
+        w.write_all(&r.as_array())?;
+    }
+    w.flush()?;
+    Ok(())
+}
+
+/// Reads the optional deployment-truth block. A bad magic, unknown version,
+/// truncated/extra bytes or an invalid record is a LOUD error.
+pub fn read_deployment_truth(path: &Path) -> Result<Vec<DeploymentTruth>> {
+    let mut r = BufReader::new(File::open(path)?);
+    let mut b = [0u8; DEPLOYMENT_HEADER_SIZE];
+    r.read_exact(&mut b)?;
+    if &b[0..8] != DEPLOYMENT_MAGIC {
+        return Err(SimError::InvalidValidation(format!(
+            "{}: bad deployment truth magic (write it with write_deployment_truth)",
+            path.display()
+        )));
+    }
+    let version = u32::from_le_bytes(b[8..12].try_into().unwrap());
+    if version != DEPLOYMENT_VERSION {
+        return Err(SimError::InvalidValidation(format!(
+            "{}: unsupported deployment truth version {version}, expected {}",
+            path.display(),
+            DEPLOYMENT_VERSION
+        )));
+    }
+    let count = u32::from_le_bytes(b[12..16].try_into().unwrap()) as usize;
+    let expected = DEPLOYMENT_HEADER_SIZE + count * DEPLOYMENT_RECORD_SIZE;
+    let actual = std::fs::metadata(path)?.len() as usize;
+    if actual != expected {
+        return Err(SimError::InvalidValidation(format!(
+            "{}: deployment truth has {actual} bytes, expected {expected} for {count} episodes",
+            path.display()
+        )));
+    }
+    let mut out = Vec::with_capacity(count);
+    for _ in 0..count {
+        let mut rec = [0u8; DEPLOYMENT_RECORD_SIZE];
+        r.read_exact(&mut rec)?;
+        let truth = DeploymentTruth::from_array(rec);
+        truth.validate()?;
+        out.push(truth);
+    }
+    Ok(out)
 }
