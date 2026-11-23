@@ -1,8 +1,10 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """100-epoch v3 training driver: exact sweep recipe, new g_accel data.
 
-Identical flags to out/sweep/driver.py, only DATA/RUNS change. Residual and
-curriculum are explicit (also defaults); --calibrate is always on. Each
-(model, seed) gets a private --out so no teacher checkpoint leaks.
+The lrs arm trains on the FULL v3 train split (all 16 scenarios, no ``--limit``)
+with a deterministic per-epoch scenario shuffle and three seeds. Held-out
+scenarios 16-19 are read only by the evaluator. The windowed arms keep their
+original flags so the v3 recipe change is scoped to the stateful student.
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ RUNS = HERE / "runs"
 PYTHON = AI / ".venv" / "bin" / "python"
 
 MODELS = ("lrs", "loopwm-lite", "loopwm")
+SEEDS = (1, 2, 3)  # pre-registered minimum for any v3 recipe claim
 SHARED = (
     "--stage", "train",
     "--window", "50", "--batch", "8",
@@ -32,7 +35,7 @@ SHARED = (
     "--residual", "--curriculum", "--calibrate",
 )
 PER_MODEL = {
-    "lrs": ("--limit", "2", "--eval-limit", "1451", "--lr", "0.03"),
+    "lrs": ("--eval-limit", "1451", "--lr", "0.03", "--no-curriculum"),
     "loopwm-lite": ("--limit", "1451", "--eval-limit", "1451"),
     "loopwm": ("--limit", "1451", "--eval-limit", "1451"),
 }
@@ -91,7 +94,7 @@ def run_one(model: str, seed: int) -> dict | None:
     env = dict(os.environ)
     env["PYTHONPATH"] = str(AI / "src")
     with log.open("w") as handle:
-        proc = subprocess.run(command(model, seed, out), cwd=AI, env=env,
+        proc = subprocess.run(command(model, seed, out), check=False, cwd=AI, env=env,
                               stdout=handle, stderr=subprocess.STDOUT)
     elapsed = time.perf_counter() - started
     if proc.returncode != 0:
@@ -107,7 +110,7 @@ def run_one(model: str, seed: int) -> dict | None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--seeds", type=int, nargs="+", default=[1])
+    parser.add_argument("--seeds", type=int, nargs="+", default=list(SEEDS))
     parser.add_argument("--workers", type=int, default=3)
     args = parser.parse_args()
     results = HERE / "results.csv"

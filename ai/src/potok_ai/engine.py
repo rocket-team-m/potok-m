@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Unified training engine (SPEC_ENGINE.md v1).
 
 One CLI, one TrainConfig and one metrics report for all three model families.
@@ -15,8 +16,10 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
+import random
 from abc import ABC, abstractmethod
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -52,7 +55,7 @@ from .loopwm import LoopWM, LoopWMConfig
 from .loopwm_lite import LiteConfig, LiteModel
 from .loopwm_lite import analytical_mac as lite_analytical_mac
 from .physics import final_command, physics_baseline
-from .student import StatefulTCN, smart_student_config
+from .student import CommandEnvelope, StatefulTCN, smart_student_config
 from .train_loopwm import run as run_loopwm
 from .train_smart import _batches, generalisation_ratio, normalized_correction_loss
 from .train_smart import evaluate as window_evaluate
@@ -102,11 +105,18 @@ class TrainConfig:
     calibrate: bool = False
     ece_target: float = DEFAULT_TARGET_ECE
     calib_tol: float = DEFAULT_TOL
+    # Typed v3 command envelope. Default is the simulator's +/-10 m/s^2 limit,
+    # not a gate threshold and not a tuning knob.
+    command_envelope: CommandEnvelope = field(default_factory=CommandEnvelope)
+    # Optional smoke subset: N episodes per training scenario, all kept. None
+    # (production) uses the full v3 train split.
+    episodes_per_scenario: int | None = None
 
     @classmethod
     def from_args(cls, args: argparse.Namespace) -> TrainConfig:
-        fields = {name: getattr(args, name) for name in cls.__dataclass_fields__}
-        return cls(**fields)
+        values = {name: getattr(args, name) for name in cls.__dataclass_fields__}
+        values["command_envelope"] = CommandEnvelope(values["command_envelope"])
+        return cls(**values)
 
     def legacy_args(self, out: Path) -> argparse.Namespace:
         """Adapt to the existing train_smart / train_loopwm CLI helpers."""
@@ -333,11 +343,16 @@ class ModelAdapter(ABC):
             if name not in held_out
             for episode in group
         ]
+        train_episodes = _stratified_subset(train_episodes, cfg.episodes_per_scenario, cfg.seed)
         curriculum = self._curriculum(cfg)
         model = self.build(cfg, device)
         optimizer = AdamW(model.parameters(), lr=cfg.lr)
         for epoch in range(cfg.epochs):
-            chosen = curriculum.select(train_episodes, epoch) if curriculum else train_episodes
+            chosen = (
+                curriculum.select(train_episodes, epoch)
+                if curriculum
+                else _shuffled_episodes(train_episodes, cfg.seed, epoch)
+            )
             if not chosen:
                 continue
             for batch in self.batches(chosen, cfg):
@@ -371,6 +386,28 @@ def seed_everything(seed: int) -> None:
     torch.manual_seed(seed)
     np.random.seed(seed)
     torch.set_num_threads(1)
+
+
+def _shuffled_episodes(episodes: list, seed: int, epoch: int) -> list:
+    """Per-epoch scenario order when the staged curriculum is disabled."""
+    chosen = list(episodes)
+    random.Random(f"{seed}:{epoch}").shuffle(chosen)
+    return chosen
+
+
+def _stratified_subset(episodes: list, per_scenario: int | None, seed: int) -> list:
+    """Keep N episodes from every training scenario (smoke only; None = all)."""
+    if per_scenario is None:
+        return episodes
+    if per_scenario < 1:
+        raise ValueError("episodes_per_scenario must be positive or None")
+    groups = group_by_scenario(episodes)
+    chosen: list = []
+    for name in sorted(groups):
+        group = list(groups[name])
+        random.Random(f"{seed}:{name}").shuffle(group)
+        chosen.extend(group[:per_scenario])
+    return chosen
 
 
 def _smart_frames(
@@ -426,13 +463,29 @@ class LRSAdapter(ModelAdapter):
     name = "lrs"
 
     def build(self, cfg: TrainConfig, device: torch.device) -> StatefulTCN:
-        return StatefulTCN(smart_student_config(seed=cfg.seed)).to(device)
+        return StatefulTCN(
+            smart_student_config(
+                seed=cfg.seed,
+                g_max=cfg.command_envelope.accel,
+                command_ceiling=cfg.command_envelope.accel,
+            )
+        ).to(device)
 
     def batches(self, episodes: list, cfg: TrainConfig):
         data = [
             _smart_frames(episode, allow_diagnostic_target=cfg.allow_diagnostic_target)
             for episode in episodes
         ]
+        if data:
+            # Loud seam check (MUON02 rank 1): a target outside the head's
+            # envelope cannot be fitted, whatever the optimizer or epoch count.
+            references = np.concatenate([t for _, t in data if t is not None])
+            rms = float(np.sqrt(np.mean(references.astype(np.float64) ** 2)))
+            if not math.isfinite(rms) or rms > cfg.command_envelope.accel:
+                raise ValueError(
+                    f"v3 target RMS {rms:.3f} m/s^2 exceeds the command envelope "
+                    f"+/-{cfg.command_envelope.accel:g} m/s^2; the student cannot fit it"
+                )
         if cfg.limit is not None:
             data = data[: cfg.limit]
         yield from data
@@ -869,6 +922,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--ece-target", type=float, default=DEFAULT_TARGET_ECE)
     parser.add_argument("--calib-tol", type=float, default=DEFAULT_TOL)
+    parser.add_argument(
+        "--command-envelope", type=float, default=CommandEnvelope().accel,
+        help="authoritative v3 command envelope in m/s^2 (default: 10, the sim limit)",
+    )
+    parser.add_argument(
+        "--episodes-per-scenario", type=int, default=None,
+        help="smoke only: keep N episodes per training scenario (default: full split)",
+    )
     return parser
 
 

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Stateful student for speculative dispatch (SPEC_STUDENT.md, v1).
 
 One frame per call: 8 sensor floats plus a phase code and a flags word. Two
@@ -13,7 +14,8 @@ header records the full width, so an edge reader sees 20 instead of 10.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import math
+from dataclasses import dataclass, field
 
 import torch
 from torch import nn
@@ -28,6 +30,26 @@ PHYSICS_FEATURES = 14  # smart: 8 raw + 6 physics features
 COND_FEATURES = 6  # mass, area, cd0, static margin, thrust, gyro noise
 SMART_FRAME_FEATURES = PHYSICS_FEATURES + COND_FEATURES  # 20
 MAX_LOOPS = 3
+
+
+@dataclass(frozen=True)
+class CommandEnvelope:
+    """Authoritative v3 fin-command envelope in m/s^2.
+
+    The simulator clamps the flown command to +/-10 m/s^2
+    (``sim/core/src/control.rs`` MAX_COMMAND_MPS2). A correction head bounded
+    by ``tanh(|g_max|)`` is strictly below 1 m/s^2, so the v3 target (train RMS
+    7.70, max 10.0) was unreachable (MUON02 rank 1). This value is a unit
+    contract from the simulator, not a tuning knob.
+    """
+
+    accel: float = 10.0
+
+    def __post_init__(self) -> None:
+        if not math.isfinite(self.accel) or self.accel <= 0.0:
+            raise ValueError(
+                f"command envelope must be finite and positive m/s^2, got {self.accel!r}"
+            )
 
 
 def smart_student_config(seed: int = 0, **overrides) -> StudentConfig:
@@ -58,7 +80,12 @@ class StudentConfig:
     max_loops: int = MAX_LOOPS
     loops: int = MAX_LOOPS
     decay: float = 0.8
+    # Per-model command bound in m/s^2. The legacy spec keeps +/-1; the v3
+    # engine overrides this from the typed envelope below.
     g_max: float = 1.0
+    # Ceiling of the typed v3 envelope, as a plain float so a saved config
+    # stays loadable with torch.load(weights_only=True).
+    command_ceiling: float = field(default_factory=lambda: CommandEnvelope().accel)
     ternary: bool = True
     act4bit: bool = True
     seed: int = 0
@@ -96,6 +123,8 @@ class StatefulTCN(nn.Module):
             raise ValueError("a frame needs at least the 8 sensor features")
         if c.n_blocks < 1 or c.loops < 1 or c.loops > MAX_LOOPS:
             raise ValueError("n_blocks must be >=1 and loops must be in 1..3")
+        if not math.isfinite(c.g_max) or c.g_max <= 0.0:
+            raise ValueError(f"g_max must be finite and positive m/s^2, got {c.g_max!r}")
 
         self.stem = nn.Linear(c.in_features, c.width, bias=True)
         self.blocks = nn.ModuleList(
@@ -174,7 +203,9 @@ class StatefulTCN(nn.Module):
 
         z = self.norm(current + 0.25 * (total + source))
         self.last_z = z
-        bound = torch.tanh(self.g_max.abs())
+        # g_max IS the command bound in m/s^2 (no tanh compression), capped by
+        # the typed v3 envelope. The old tanh(|g_max|) could never exceed 1.
+        bound = self.g_max.abs().clamp(max=self.cfg.command_ceiling)
         corrections = torch.tanh(self.head_corr(z)) * bound
         logit = self.head_conf(z).squeeze(-1)
         self.last_conf_logit = logit
