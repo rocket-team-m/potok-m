@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Training CLI.
 
 Stage 1 (pretrain): masked Fast-JEPA prediction of a full shifted latent window.
@@ -19,7 +20,7 @@ from torch.optim import AdamW, Optimizer
 from .data import WindowDataset, load_episodes, make_synthetic_dataset
 from .jepa import EMATeacher, JEPAPredictor, jepa_loss
 from .model import ModelConfig, PotokModel
-from .optim import MuonPlus
+from .optim import K3Config, MuonPlus
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -41,6 +42,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--jerk-weight", type=float, default=0.01)
     parser.add_argument("--opt", choices=["muon", "adamw"], default="muon")
     parser.add_argument("--ns-steps", type=int, default=5)
+    parser.add_argument(
+        "--k3-per-head", type=int, default=0, help="K3 per-head QKV NS heads (0 = off)"
+    )
+    parser.add_argument(
+        "--k3-qk-clip",
+        action="store_true",
+        help="K3/K2 QK-Clip (requires --k3-per-head > 0 and named Q/K projections)",
+    )
+    parser.add_argument(
+        "--k3-qk-clip-tau", type=float, default=100.0, help="QK-Clip tau (K2 default 100)"
+    )
     return parser
 
 
@@ -60,10 +72,19 @@ def _batches(dataset: WindowDataset, batch: int) -> Iterator[tuple[torch.Tensor,
         yield windows[start : start + batch], targets[start : start + batch]
 
 
-def _optimizer(parameters, args: argparse.Namespace) -> Optimizer:
+def k3_config(args: argparse.Namespace) -> K3Config:
+    """Typed K3 config from CLI flags; defaults reproduce the historical Muon+ path."""
+    return K3Config(
+        num_heads=args.k3_per_head,
+        qk_clip=args.k3_qk_clip,
+        qk_clip_tau=args.k3_qk_clip_tau,
+    )
+
+
+def _optimizer(parameters: list[tuple[str, torch.Tensor]], args: argparse.Namespace) -> Optimizer:
     if args.opt == "adamw":
-        return AdamW(parameters, lr=args.lr)
-    return MuonPlus(parameters, lr=args.lr, ns_steps=args.ns_steps)
+        return AdamW([p for _name, p in parameters], lr=args.lr)
+    return MuonPlus(parameters, lr=args.lr, ns_steps=args.ns_steps, k3=k3_config(args))
 
 
 def _save(model: PotokModel, args: argparse.Namespace, stage: str, loss: float) -> None:
@@ -87,7 +108,11 @@ def pretrain(args: argparse.Namespace) -> float:
     model = PotokModel(config).to(device)
     teacher = EMATeacher(model, momentum=args.ema_momentum)
     predictor = JEPAPredictor(config.width).to(device)
-    optimizer = _optimizer(list(model.parameters()) + list(predictor.parameters()), args)
+    optimizer = _optimizer(
+        list(model.named_parameters())
+        + [(f"predictor.{name}", p) for name, p in predictor.named_parameters()],
+        args,
+    )
 
     model.train()
     predictor.train()
@@ -109,7 +134,7 @@ def distill(args: argparse.Namespace) -> float:
     torch.manual_seed(args.seed)
     device = torch.device(args.device)
     model = PotokModel(ModelConfig(width=args.width, rank=args.rank)).to(device)
-    optimizer = _optimizer(model.parameters(), args)
+    optimizer = _optimizer(list(model.named_parameters()), args)
 
     model.train()
     final_loss = float("nan")
@@ -141,10 +166,7 @@ def run(args: argparse.Namespace) -> float:
 def main() -> None:
     args = build_parser().parse_args()
     loss = run(args)
-    print(
-        f"stage={args.stage} opt={args.opt} epochs={args.epochs} "
-        f"loss={loss:.6f} out={args.out}"
-    )
+    print(f"stage={args.stage} opt={args.opt} epochs={args.epochs} loss={loss:.6f} out={args.out}")
 
 
 if __name__ == "__main__":

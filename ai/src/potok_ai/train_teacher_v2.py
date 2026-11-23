@@ -31,11 +31,12 @@ import numpy as np
 import torch
 from torch import nn
 from torch.nn import functional as F
-from torch.optim import AdamW
+from torch.optim import AdamW, Optimizer
 
 from .calibration import confidence_target, correctness, expected_calibration_error, sigmoid
 from .data import Episode, SmartWindowDataset, load_episodes
 from .loopwm import LoopWM, LoopWMConfig
+from .optim import K3Config, MuonPlus
 from .physics import final_command, physics_baseline
 from .train_smart import generalisation_ratio, normalized_correction_loss
 
@@ -121,6 +122,15 @@ def child_seed(seed: int, name: str) -> int:
     return int.from_bytes(digest[:8], "little")
 
 
+def k3_config(cfg: TeacherV2Config) -> K3Config:
+    """Typed K3 config from the staged CLI fields; defaults stay off."""
+    return K3Config(
+        num_heads=cfg.k3_per_head,
+        qk_clip=cfg.k3_qk_clip,
+        qk_clip_tau=cfg.k3_qk_clip_tau,
+    )
+
+
 @dataclass(frozen=True)
 class TeacherV2Config:
     """All knobs of the staged run; every invalid value fails loudly."""
@@ -152,6 +162,10 @@ class TeacherV2Config:
     rlvr_temperature: float = 0.05
     truth_sidecar: Path | None = None
     calib_tol: float = 0.15
+    opt: str = "adamw"
+    k3_per_head: int = 0
+    k3_qk_clip: bool = False
+    k3_qk_clip_tau: float = 100.0
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "data", Path(self.data))
@@ -162,6 +176,9 @@ class TeacherV2Config:
             raise ValueError(
                 f"unknown stage {self.stage!r}; expected one of all, {', '.join(STAGE_ORDER)}"
             )
+        if self.opt not in ("adamw", "muon"):
+            raise ValueError(f"unknown optimizer {self.opt!r}; expected adamw or muon")
+        k3_config(self)  # the frozen K3Config validates its own fields
         if self.seed not in SEEDS:
             raise ValueError(f"seed must be one of {SEEDS}, got {self.seed}")
         if self.device != "cpu":
@@ -215,6 +232,15 @@ def config_hash(cfg: TeacherV2Config) -> str:
     fields.pop("out", None)
     body = json.dumps(fields, sort_keys=True, default=str)
     return hashlib.sha256(body.encode()).hexdigest()[:16]
+
+
+def _build_optimizer(
+    parameters: list[tuple[str, torch.Tensor]], cfg: TeacherV2Config, lr: float
+) -> Optimizer:
+    """AdamW keeps the historical gates; Muon+ is an explicit opt-in."""
+    if cfg.opt == "adamw":
+        return AdamW([p for _name, p in parameters], lr=lr)
+    return MuonPlus(parameters, lr=lr, k3=k3_config(cfg))
 
 
 def seed_everything(seed: int) -> None:
@@ -573,7 +599,7 @@ def _stage_sft(
     inner: list[Episode],
     device: torch.device,
 ) -> StageReport:
-    optimizer = AdamW(model.parameters(), lr=cfg.lr)
+    optimizer = _build_optimizer(list(model.named_parameters()), cfg, cfg.lr)
     batches = _window_batches(fit, cfg)
     steps = 0
     entropy = 0.0
@@ -620,10 +646,13 @@ def _stage_privileged(
         if builder is not None and hasattr(builder, "encoder")
         else None
     )
-    parameters = list(model.parameters()) + list(jepa.parameters())  # type: ignore[attr-defined]
+    parameters = list(model.named_parameters()) + [
+        (f"jepa.{name}", p)
+        for name, p in jepa.named_parameters()  # type: ignore[attr-defined]
+    ]
     if head is not None:
-        parameters += list(head.parameters())
-    optimizer = AdamW(parameters, lr=cfg.lr)
+        parameters += [(f"privileged_head.{name}", p) for name, p in head.named_parameters()]
+    optimizer = _build_optimizer(parameters, cfg, cfg.lr)
     batches = _window_batches(fit, cfg)
     steps, entropy, privileged_terms = 0, 0.0, 0
     model.train()
@@ -760,7 +789,7 @@ def _stage_dagger(
         raise ValueError("DAgger needs both fit and inner-held-out corrective samples")
     observations = torch.stack([torch.as_tensor(s.observation, dtype=torch.float32) for s in rows])
     corrections = torch.stack([torch.as_tensor(s.correction, dtype=torch.float32) for s in rows])
-    optimizer = AdamW(model.parameters(), lr=cfg.lr)
+    optimizer = _build_optimizer(list(model.named_parameters()), cfg, cfg.lr)
     steps, entropy = 0, 0.0
     model.train()
     for _ in range(cfg.epochs):
@@ -841,7 +870,7 @@ def _stage_rlvr(
     device: torch.device,
     cfg_hash: str,
 ) -> StageReport:
-    optimizer = AdamW(model.parameters(), lr=cfg.lr)
+    optimizer = _build_optimizer(list(model.named_parameters()), cfg, cfg.lr)
     rng = torch.Generator().manual_seed(child_seed(cfg.seed, "rlvr"))
     batches = _window_batches(fit, cfg)
     steps, entropy = 0, 0.0
@@ -935,7 +964,11 @@ def _stage_distill(
     device: torch.device,
 ) -> StageReport:
     student = _build_student(cfg, device)
-    optimizer = AdamW(student.parameters(), lr=cfg.student_lr)  # type: ignore[attr-defined]
+    optimizer = _build_optimizer(
+        list(student.named_parameters()),
+        cfg,
+        cfg.student_lr,  # type: ignore[attr-defined]
+    )
     batches = _window_batches(fit, cfg)
     steps = 0
     teacher.eval()
@@ -1071,6 +1104,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--rlvr-temperature", type=float, default=0.05)
     parser.add_argument("--truth-sidecar", type=Path, default=None)
     parser.add_argument("--calib-tol", type=float, default=0.15)
+    parser.add_argument(
+        "--opt", choices=("adamw", "muon"), default="adamw", help="optimizer for all stages"
+    )
+    parser.add_argument(
+        "--k3-per-head", type=int, default=0, help="K3 per-head QKV NS heads (0 = off)"
+    )
+    parser.add_argument(
+        "--k3-qk-clip",
+        action="store_true",
+        help="K3/K2 QK-Clip (needs --opt muon and named Q/K projections)",
+    )
+    parser.add_argument(
+        "--k3-qk-clip-tau", type=float, default=100.0, help="QK-Clip tau (K2 default 100)"
+    )
     return parser
 
 
