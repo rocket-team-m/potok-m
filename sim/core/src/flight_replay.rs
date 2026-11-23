@@ -3,10 +3,13 @@
 //! timestamp/phase alignment, residuals against a simulated episode, and
 //! NEES / chi-square corridor helpers.
 //!
-//! STATUS: **schema only**. No real flight log has been supplied or examined.
-//! Every gate in `core/tests/flight_replay_tests.rs` builds a synthetic fixture
-//! by perturbing a simulated episode; nothing here validates the vehicle, the
-//! sensors, the simulator or any real recording.
+//! STATUS: **no real flight log has been supplied or examined.** The schema,
+//! import, alignment and statistics code is exercised by synthetic fixtures,
+//! and [`synthetic_nees_corridor_gate`] is a deterministic 10^4-run check that
+//! the NEES corridor discriminates a calibrated estimator from a biased one.
+//! That validates the instrument only. [`validate_real_log_nees`] is the real
+//! data entry point and is LOUD `NOT MEASURED`: nothing here validates the
+//! vehicle, the sensors, the simulator or any real recording.
 //!
 //! Schema v1 has one canonical in-memory form ([`FlightLog`]) and two strict
 //! encodings:
@@ -23,6 +26,7 @@
 //! measurement 1-sigma values in [`CHANNEL_UNITS`]. Import never reorders,
 //! fills, clamps or guesses: every deviation is a loud error.
 
+use rand::{rngs::StdRng, Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -43,6 +47,8 @@ pub enum FlightLogError {
     Alignment(String),
     #[error("flight-log statistic error: {0}")]
     Stats(String),
+    #[error("real-data NEES corridor is {0}")]
+    NotMeasured(String),
 }
 
 pub type Result<T> = std::result::Result<T, FlightLogError>;
@@ -739,4 +745,95 @@ pub fn corridor_report(values: &[f64], corridor: Corridor) -> Result<CorridorRep
         inside,
         empirical_coverage: inside as f64 / values.len() as f64,
     })
+}
+
+/// Monte-Carlo runs in the synthetic NEES corridor gate. Pinned so a change
+/// to the test budget has to be a deliberate edit.
+pub const SYNTHETIC_NEES_RUNS: usize = 10_000;
+
+/// Per-channel bias of the deliberately miscalibrated estimator, in units of
+/// the declared sigma. Eight channels at +2 sigma give non-centrality 32, so
+/// NEES centres on 40 instead of 8 and sits far above the 95 % corridor (hi
+/// ~= 17.5).
+const BIASED_ESTIMATOR_BIAS_SIGMA: f64 = 2.0;
+
+/// Outcome of [`synthetic_nees_corridor_gate`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NeesCorridorGate {
+    pub runs: usize,
+    pub dof: usize,
+    pub coverage: f64,
+    pub corridor: Corridor,
+    /// Runs of the zero-mean (calibrated) estimator inside the corridor.
+    pub good_inside: usize,
+    /// Runs of the deliberately biased estimator inside the corridor.
+    pub biased_inside: usize,
+}
+
+impl NeesCorridorGate {
+    pub fn good_coverage(&self) -> f64 {
+        self.good_inside as f64 / self.runs as f64
+    }
+
+    pub fn biased_coverage(&self) -> f64 {
+        self.biased_inside as f64 / self.runs as f64
+    }
+}
+
+/// Deterministic synthetic validation of the NEES corridor: 10^4 paired
+/// Monte-Carlo runs. Each run draws eight independent standard-normal
+/// residuals. The calibrated estimator uses them unchanged (NEES ~ chi2_8);
+/// the biased estimator adds +2 sigma per channel (NEES ~ non-central chi2_8).
+/// The pair shares its draws, so the comparison is paired and lower-variance.
+/// Pure function of `seed`: no wall clock and no global RNG.
+///
+/// ponytail: diagonal covariance and Gaussian residuals only; a full matrix
+/// and a Cholesky solve would be needed for cross-axis correlation.
+/// This checks the instrument, not the vehicle — see [`validate_real_log_nees`].
+pub fn synthetic_nees_corridor_gate(seed: u64, coverage: f64) -> Result<NeesCorridorGate> {
+    let corridor = nees_corridor(CHANNEL_COUNT, coverage)?;
+    let sigma = [1.0; CHANNEL_COUNT];
+    let mut rng = StdRng::seed_from_u64(seed);
+    let mut good_inside = 0usize;
+    let mut biased_inside = 0usize;
+    for _ in 0..SYNTHETIC_NEES_RUNS {
+        let mut residual = [0.0_f64; CHANNEL_COUNT];
+        for pair in residual.as_chunks_mut::<2>().0 {
+            let u = rng.gen::<f64>().max(1e-12);
+            let v = rng.gen::<f64>();
+            let mag = (-2.0 * u.ln()).sqrt();
+            let angle = std::f64::consts::TAU * v;
+            pair[0] = mag * angle.cos();
+            pair[1] = mag * angle.sin();
+        }
+        if corridor.contains(nees(&residual, &sigma, &ALL_CHANNELS)?) {
+            good_inside += 1;
+        }
+        for c in 0..CHANNEL_COUNT {
+            residual[c] += BIASED_ESTIMATOR_BIAS_SIGMA * sigma[c];
+        }
+        if corridor.contains(nees(&residual, &sigma, &ALL_CHANNELS)?) {
+            biased_inside += 1;
+        }
+    }
+    Ok(NeesCorridorGate {
+        runs: SYNTHETIC_NEES_RUNS,
+        dof: CHANNEL_COUNT,
+        coverage,
+        corridor,
+        good_inside,
+        biased_inside,
+    })
+}
+
+/// Real-flight-data NEES corridor gate — LOUD by design and never a pass.
+/// No real flight log with per-channel sigma ships with this repository and
+/// this path is not implemented, so real-data coverage is `NOT MEASURED`.
+/// The error names the gap and the escape; it is not a silent fallback and a
+/// synthetic fixture must never be substituted for a measurement here.
+pub fn validate_real_log_nees(_log: &FlightLog) -> Result<CorridorReport> {
+    Err(FlightLogError::NotMeasured(
+        "NOT MEASURED: the real-flight-data NEES corridor has not been evaluated. No real flight log with per-channel sigma has been supplied and this path is not implemented. Supply a real log and implement this function before making any flight-validation claim; synthetic_nees_corridor_gate validates the instrument only, not the vehicle."
+            .into(),
+    ))
 }
