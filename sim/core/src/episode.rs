@@ -8,7 +8,9 @@ use rayon::prelude::*;
 use crate::{
     aero::{count_placeholder, AeroCard},
     atmosphere::Atmosphere,
-    config::{sample_domain, AeroSource, Conditioning, Config, Range},
+    config::{
+        episode_config, sample_domain, AeroSource, Conditioning, Config, CurriculumKnobs, Range,
+    },
     control::validate_command,
     dynamics::{self, phase_at, rk4, Phase, State, Vehicle},
     error::{Result, SimError},
@@ -40,6 +42,9 @@ pub struct EpisodeMeta {
     pub split: Split,
     /// Six vehicle numbers fed to the model as conditioning.
     pub conditioning: Conditioning,
+    /// WORLD05 curriculum draws actually applied to this episode's wind and
+    /// sensor config. Carried for observability; no file layout is changed.
+    pub curriculum: CurriculumKnobs,
 }
 
 #[derive(Debug, Clone)]
@@ -205,6 +210,10 @@ impl Simulator {
         // independent sub-seed so the legacy draw order does not move.
         let domain = sample_domain(cfg, index);
         let sc = scenario(index);
+        // WORLD05: derive the per-episode wind/sensor config from independent
+        // substreams. The base config stays the source of scale; only this
+        // episode's copy carries the four randomized knobs.
+        let (ep_cfg, curriculum) = episode_config(cfg, index);
         let diameter = 2.0 * (cfg.aero.area_m2 / std::f64::consts::PI).sqrt();
         let mut vehicle = Vehicle::from_config(cfg, mass, thrust_scale, gimbal_deg);
         vehicle.aero.cd0 = domain.cd0;
@@ -227,8 +236,8 @@ impl Simulator {
             gyro_noise: domain.gyro_noise as f32,
         };
         let mut state = State::new(mass, pitch_deg.to_radians(), yaw_deg.to_radians());
-        let wind = Wind::new(cfg, index);
-        let mut sensor = Sensor::new(cfg, index);
+        let wind = Wind::new(&ep_cfg, index);
+        let mut sensor = Sensor::new(&ep_cfg, index);
         let optimizer = ReferenceOptimizer::new(cfg);
 
         let steps = cfg.steps();
@@ -441,6 +450,7 @@ impl Simulator {
             scenario_id: sc.id,
             split: sc.split,
             conditioning,
+            curriculum,
         };
         Ok(Episode {
             meta,

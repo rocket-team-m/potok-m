@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     error::{Result, SimError},
     math::episode_seed,
+    scenario::{scenario, Split, SCENARIO_COUNT},
 };
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq)]
@@ -359,6 +360,148 @@ pub fn sample_domain(cfg: &Config, index: u64) -> DomainParams {
     }
 }
 
+// --- WORLD05 curriculum -------------------------------------------------
+// Independent SplitMix64 keys for the four previously-fixed knobs. Each is
+// independent of INIT/DOMA/WIND/SENS, so retuning one knob cannot shift the
+// draw of another or disturb the legacy RNG order.
+pub const DR_LAG: u64 = 0x4C41_474B; // "LAGK"
+pub const DR_TURB_SIGMA: u64 = 0x5453_4947; // "TSIG"
+pub const DR_TURB_SCALE: u64 = 0x544C_454E; // "TLEN"
+pub const DR_GUST_DUR: u64 = 0x4744_5552; // "GDUR"
+pub const DR_GUST_DIR: u64 = 0x4744_4952; // "GDIR"
+
+/// Domain-randomization support for the four knobs that used to be fixed in
+/// every training cell. The factor ranges multiply the `[wind]` scalars, so
+/// zero turbulence stays off and the config stays the source of scale. The
+/// held-out ranges must be disjoint from the training ranges: `validate()`
+/// refuses an overlapping config rather than silently degrading to a shared
+/// support. Held-out lag is carried by `scenario.lag_scale` (1.5-2.0).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct CurriculumConfig {
+    #[serde(default = "default_lag_scale_range")]
+    pub lag_scale_range: Range,
+    #[serde(default = "default_sigma_factor_range")]
+    pub sigma_factor_range: Range,
+    #[serde(default = "default_scale_factor_range")]
+    pub scale_factor_range: Range,
+    #[serde(default = "default_duration_factor_range")]
+    pub duration_factor_range: Range,
+    #[serde(default = "default_heldout_sigma_factor_range")]
+    pub heldout_sigma_factor_range: Range,
+    #[serde(default = "default_heldout_scale_factor_range")]
+    pub heldout_scale_factor_range: Range,
+    #[serde(default = "default_heldout_duration_factor_range")]
+    pub heldout_duration_factor_range: Range,
+}
+
+fn default_lag_scale_range() -> Range {
+    Range(1.0, 1.4)
+}
+fn default_sigma_factor_range() -> Range {
+    Range(0.5, 1.5)
+}
+fn default_scale_factor_range() -> Range {
+    Range(2.0 / 3.0, 1.5)
+}
+fn default_duration_factor_range() -> Range {
+    Range(0.5, 1.5)
+}
+fn default_heldout_sigma_factor_range() -> Range {
+    Range(2.0, 2.5)
+}
+fn default_heldout_scale_factor_range() -> Range {
+    Range(0.4, 0.6)
+}
+fn default_heldout_duration_factor_range() -> Range {
+    Range(1.75, 2.25)
+}
+
+impl Default for CurriculumConfig {
+    fn default() -> Self {
+        Self {
+            lag_scale_range: default_lag_scale_range(),
+            sigma_factor_range: default_sigma_factor_range(),
+            scale_factor_range: default_scale_factor_range(),
+            duration_factor_range: default_duration_factor_range(),
+            heldout_sigma_factor_range: default_heldout_sigma_factor_range(),
+            heldout_scale_factor_range: default_heldout_scale_factor_range(),
+            heldout_duration_factor_range: default_heldout_duration_factor_range(),
+        }
+    }
+}
+
+/// The per-episode curriculum draws, carried into `EpisodeMeta` so a reader
+/// can see which arm actually ran. `lag_scale` is the curriculum multiplier;
+/// `Sensor::new` multiplies it again by the scenario's own `lag_scale`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CurriculumKnobs {
+    pub lag_scale: f64,
+    pub turbulence_sigma: f64,
+    pub turbulence_scale: f64,
+    pub gust_duration_s: f64,
+    /// +1.0 or -1.0 applied to `wind.direction_deg`.
+    pub direction_sign: f64,
+}
+
+#[inline]
+fn dr_draw(cfg: &Config, index: u64, tag: u64) -> f64 {
+    let mut rng = StdRng::seed_from_u64(episode_seed(cfg.run.seed, index ^ tag));
+    rng.gen::<f64>()
+}
+
+/// Draw the curriculum knobs for one episode. Training cells use the training
+/// ranges; held-out cells use the disjoint OOD ranges (and leave the
+/// curriculum lag multiplier at 1.0 because their scenario cell is already
+/// OOD). Every knob is always sampled - there is no fixed-value fallback.
+pub fn sample_curriculum(cfg: &Config, index: u64) -> CurriculumKnobs {
+    let dr = &cfg.curriculum;
+    let held_out = scenario(index).split == Split::HeldOut;
+    let lag_scale = if held_out {
+        1.0
+    } else {
+        dr.lag_scale_range.sample(dr_draw(cfg, index, DR_LAG))
+    };
+    let (sigma, scale, duration) = if held_out {
+        (
+            &dr.heldout_sigma_factor_range,
+            &dr.heldout_scale_factor_range,
+            &dr.heldout_duration_factor_range,
+        )
+    } else {
+        (
+            &dr.sigma_factor_range,
+            &dr.scale_factor_range,
+            &dr.duration_factor_range,
+        )
+    };
+    CurriculumKnobs {
+        lag_scale,
+        turbulence_sigma: cfg.wind.turbulence_sigma
+            * sigma.sample(dr_draw(cfg, index, DR_TURB_SIGMA)),
+        turbulence_scale: cfg.wind.turbulence_scale
+            * scale.sample(dr_draw(cfg, index, DR_TURB_SCALE)),
+        gust_duration_s: cfg.wind.gust_duration * duration.sample(dr_draw(cfg, index, DR_GUST_DUR)),
+        direction_sign: if dr_draw(cfg, index, DR_GUST_DIR) < 0.5 {
+            -1.0
+        } else {
+            1.0
+        },
+    }
+}
+
+/// Per-episode config with the curriculum knobs applied to the scalars read
+/// by `Wind::new` and `Sensor::new`. The base config is left untouched.
+pub fn episode_config(cfg: &Config, index: u64) -> (Config, CurriculumKnobs) {
+    let knobs = sample_curriculum(cfg, index);
+    let mut ep = cfg.clone();
+    ep.wind.turbulence_sigma = knobs.turbulence_sigma;
+    ep.wind.turbulence_scale = knobs.turbulence_scale;
+    ep.wind.gust_duration = knobs.gust_duration_s;
+    ep.wind.direction_deg *= knobs.direction_sign;
+    ep.sensor.lag_tau *= knobs.lag_scale;
+    (ep, knobs)
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum OutputMode {
@@ -387,6 +530,11 @@ pub struct Config {
     pub sensor: SensorConfig,
     pub aero: AeroConfig,
     pub output: OutputConfig,
+    /// WORLD05 domain randomization. `#[serde(default)]` keeps older config
+    /// files loadable; the defaults are the documented [curriculum] values,
+    /// not a runtime degradation.
+    #[serde(default = "CurriculumConfig::default")]
+    pub curriculum: CurriculumConfig,
 }
 
 impl Config {
@@ -511,6 +659,71 @@ impl Config {
         check("sensor.baro_sat", s.baro_sat, 0.0, 1e9)?;
         check("sensor.spike_probability", s.spike_probability, 0.0, 1.0)?;
         check("sensor.spike_amplitude", s.spike_amplitude, 0.0, 1e6)?;
+
+        let d = &self.curriculum;
+        check_range("curriculum.lag_scale_range", d.lag_scale_range, 1.0, 100.0)?;
+        check_range(
+            "curriculum.sigma_factor_range",
+            d.sigma_factor_range,
+            1e-6,
+            100.0,
+        )?;
+        check_range(
+            "curriculum.scale_factor_range",
+            d.scale_factor_range,
+            1e-6,
+            100.0,
+        )?;
+        check_range(
+            "curriculum.duration_factor_range",
+            d.duration_factor_range,
+            1e-6,
+            100.0,
+        )?;
+        check_range(
+            "curriculum.heldout_sigma_factor_range",
+            d.heldout_sigma_factor_range,
+            1e-6,
+            100.0,
+        )?;
+        check_range(
+            "curriculum.heldout_scale_factor_range",
+            d.heldout_scale_factor_range,
+            1e-6,
+            100.0,
+        )?;
+        check_range(
+            "curriculum.heldout_duration_factor_range",
+            d.heldout_duration_factor_range,
+            1e-6,
+            100.0,
+        )?;
+        disjoint_above(
+            "curriculum.heldout_sigma_factor_range",
+            d.sigma_factor_range,
+            d.heldout_sigma_factor_range,
+        )?;
+        disjoint_below(
+            "curriculum.heldout_scale_factor_range",
+            d.scale_factor_range,
+            d.heldout_scale_factor_range,
+        )?;
+        disjoint_above(
+            "curriculum.heldout_duration_factor_range",
+            d.duration_factor_range,
+            d.heldout_duration_factor_range,
+        )?;
+        let held_lag_floor = (0..SCENARIO_COUNT as u64)
+            .map(scenario)
+            .filter(|s| s.split == Split::HeldOut)
+            .map(|s| s.lag_scale)
+            .fold(f64::INFINITY, f64::min);
+        if d.lag_scale_range.1 >= held_lag_floor {
+            return Err(SimError::Config(format!(
+                "curriculum.lag_scale_range upper {} must stay below the held-out scenario lag floor {}",
+                d.lag_scale_range.1, held_lag_floor
+            )));
+        }
         Ok(())
     }
 
@@ -535,6 +748,28 @@ fn check(name: &str, v: f64, lo: f64, hi: f64) -> Result<()> {
     if !v.is_finite() || v < lo || v > hi {
         Err(SimError::Config(format!(
             "{name} = {v} outside [{lo}, {hi}]"
+        )))
+    } else {
+        Ok(())
+    }
+}
+
+fn disjoint_above(name: &str, train: Range, ood: Range) -> Result<()> {
+    if ood.0 <= train.1 {
+        Err(SimError::Config(format!(
+            "{name} held-out lower {} overlaps training upper {}; held-out must be above training",
+            ood.0, train.1
+        )))
+    } else {
+        Ok(())
+    }
+}
+
+fn disjoint_below(name: &str, train: Range, ood: Range) -> Result<()> {
+    if ood.1 >= train.0 {
+        Err(SimError::Config(format!(
+            "{name} held-out upper {} overlaps training lower {}; held-out must be below training",
+            ood.1, train.0
         )))
     } else {
         Ok(())

@@ -32,6 +32,23 @@ gust_duration = 2.0        # s
 turbulence_sigma = 0.1
 turbulence_scale = 60.0    # m, integral scale
 
+# WORLD05 curriculum: the four knobs that used to be fixed in every training
+# cell. Each is drawn per episode from its own substream seed. Factors multiply
+# the [wind] scalars above, so a zero sigma stays off and this file remains the
+# single source of scale. Training cells (0-15) use the plain ranges; held-out
+# cells (16-19) use the strictly disjoint OOD ranges. Held-out lag comes from
+# scenario.lag_scale (1.5-2.0) with no extra multiplier, so the training
+# multiplier below must stay under that floor (validated in config.rs).
+[curriculum]
+lag_scale_range = [1.0, 1.4]                       # sensor lag: 1.0-1.4x
+sigma_factor_range = [0.5, 1.5]                    # 0.1 -> 0.05-0.15 m/s
+scale_factor_range = [0.6666666666666666, 1.5]     # 60 m -> 40-90 m
+duration_factor_range = [0.5, 1.5]                 # 2.0 s -> 1.0-3.0 s
+# Held-out OOD support (disjoint from every training range above):
+heldout_sigma_factor_range = [2.0, 2.5]            # -> 0.20-0.25 m/s
+heldout_scale_factor_range = [0.4, 0.6]            # -> 24-36 m
+heldout_duration_factor_range = [1.75, 2.25]       # -> 3.5-4.5 s
+
 [initial]
 # User-stated TTX: ~13 kg lift-off mass.
 mass_kg = [10.4, 11.4]
