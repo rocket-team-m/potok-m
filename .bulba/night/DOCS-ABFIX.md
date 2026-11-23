@@ -68,9 +68,10 @@ three are now on the ABFIX F1 verdict.
 
 ## 5. Landing
 
-Committed locally on `main` in the same commit as the three doc edits. Before
-pushing, `origin/main` (`e7a2d51`) was confirmed to be an ancestor of the local
-tip (`57ad689`), so the push is a fast-forward.
+Committed locally on `main` as `47fa4e4` in the same commit as the three doc
+edits and this report. `origin/main` (`e7a2d51`) was confirmed to be an
+ancestor of the local tip before pushing; push was a fast-forward:
+`e7a2d51..47fa4e4  main -> main`.
 
 ## 6. Out of scope
 
