@@ -32,13 +32,13 @@
   <style>
     :root {
       color-scheme: dark light;
-      --bg: #0c0c0c; --panel: #141414; --text: #f5f5f5; --muted: #8a8a8a;
-      --line: #2e2e2e; --accent: #6b8fff; --ok: #54d483; --warn: #f4b434;
+      --bg: #0c0c0c; --panel: #131313; --text: #f5f5f5; --muted: #8a8a8a;
+      --line: #2e2e2e; --grid: #212121; --accent: #6b8fff; --ok: #54d483; --warn: #f4b434;
     }
     @media (prefers-color-scheme: light) {
       :root {
         --bg: #fbfbfb; --panel: #ffffff; --text: #111111; --muted: #666666;
-        --line: #e5e5e5; --accent: #3457d5; --ok: #239f50; --warn: #eb980a;
+        --line: #e5e5e5; --grid: #ededed; --accent: #3457d5; --ok: #239f50; --warn: #eb980a;
       }
     }
     * { box-sizing: border-box; }
@@ -49,31 +49,35 @@
       font-size: 16px; line-height: 1.55; -webkit-font-smoothing: antialiased;
     }
     a { color: inherit; text-decoration: none; }
-    a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
     .mono { font-family: ui-monospace, "SFMono-Regular", "JetBrains Mono", monospace; font-variant-numeric: tabular-nums; }
-    .wrap { max-width: 1120px; margin: 0 auto; padding: 0 28px; }
+    .wrap { max-width: 1160px; margin: 0 auto; padding: 0 28px; }
     header { border-bottom: 1px solid var(--line); }
     .top { display: flex; align-items: center; gap: 28px; height: 64px; }
     .brand { display: flex; align-items: baseline; gap: 10px; font-weight: 600; letter-spacing: -0.02em; }
     .brand .idx { color: var(--muted); font-size: 12px; }
     nav { display: flex; gap: 24px; margin-left: auto; color: var(--muted); font-size: 14px; }
-    nav a:hover { color: var(--text); }
-    .hero { padding: 96px 0 72px; border-bottom: 1px solid var(--line); }
+    nav a:hover, footer a:hover { color: var(--accent); }
+    .hero { padding: 100px 0 72px; border-bottom: 1px solid var(--line); }
     .kicker { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
     h1 { margin: 0; font-size: clamp(44px, 7vw, 84px); line-height: 1.02; letter-spacing: -0.055em; font-weight: 620; max-width: 15ch; }
     .lede { margin: 28px 0 0; max-width: 62ch; color: var(--muted); font-size: 18px; }
     .actions { display: flex; gap: 24px; margin-top: 40px; flex-wrap: wrap; }
-    .btn { border: 1px solid var(--line); padding: 11px 18px; font-size: 14px; }
+    .btn { display: inline-block; border: 1px solid var(--line); padding: 11px 18px; font-size: 14px; transition: border-color .2s; }
     .btn.primary { border-color: var(--text); background: var(--text); color: var(--bg); }
     .btn:hover { border-color: var(--accent); }
+    @keyframes reveal { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+    .reveal { opacity: 0; animation: reveal .72s cubic-bezier(.2,.7,.2,1) forwards; animation-delay: calc(60ms + var(--i, 0) * 110ms); }
     .strip { display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: 1px solid var(--line); }
-    .stat { padding: 24px 0; border-right: 1px solid var(--line); }
+    .stat { padding: 22px 24px; border-right: 1px solid var(--line); }
+    .stat:first-child { padding-left: 0; }
     .stat:last-child { border-right: 0; }
-    .stat .v { font-size: 28px; letter-spacing: -0.03em; }
+    .stat .v { font-size: 26px; letter-spacing: -0.03em; }
     .stat .l { color: var(--muted); font-size: 13px; margin-top: 4px; }
-    .section { padding: 64px 0; border-bottom: 1px solid var(--line); }
-    .sec-head { display: flex; align-items: baseline; gap: 16px; margin-bottom: 32px; }
+    .section { padding: 72px 0; border-bottom: 1px solid var(--line); }
+    .sec-head { display: flex; align-items: baseline; gap: 16px; margin-bottom: 32px; flex-wrap: wrap; }
     .sec-head .idx { color: var(--accent); font-size: 12px; }
+    .sec-head .note { margin-left: auto; color: var(--muted); font-size: 12px; }
     h2 { margin: 0; font-size: 28px; letter-spacing: -0.03em; font-weight: 600; }
     .tabs { display: flex; gap: 0; border-bottom: 1px solid var(--line); }
     .tab { background: none; border: 0; color: var(--muted); padding: 12px 18px 12px 0; margin-right: 28px; cursor: pointer; font: inherit; font-size: 14px; border-bottom: 2px solid transparent; }
@@ -85,61 +89,246 @@
     .row .val { font-size: 15px; }
     .pill { color: var(--ok); font-size: 13px; }
     .pill.warn { color: var(--warn); }
+    .telemetry { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 28px 0; }
+    .telem-head { display: flex; justify-content: space-between; gap: 16px; color: var(--muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+    .rail { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 32px; margin-top: 24px; }
+    .rail-val { font-size: 24px; white-space: nowrap; }
+    .rail-val small { display: block; color: var(--muted); font-size: 11px; }
+    .rail-val.accent { color: var(--accent); }
+    .rail-line { position: relative; height: 1px; background: var(--line); }
+    .rail-line::before { content: ""; position: absolute; inset: 0; background: var(--accent); transform: scaleX(0); transform-origin: left; animation: railfill 1.5s cubic-bezier(.4,0,.2,1) .35s forwards; }
+    .rail-dot { position: absolute; top: -3px; left: 0; width: 7px; height: 7px; background: var(--accent); animation: railmove 1.5s cubic-bezier(.4,0,.2,1) .35s forwards; }
+    @keyframes railfill { to { transform: scaleX(1); } }
+    @keyframes railmove { to { left: calc(100% - 7px); } }
+    .rail-meta { display: flex; flex-wrap: wrap; gap: 8px 28px; margin-top: 20px; color: var(--muted); font-size: 12px; }
+    .graphs { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--line); }
+    .graph { margin: 0; padding: 28px 28px 20px 0; border-right: 1px solid var(--line); }
+    .graph + .graph { padding-left: 28px; border-right: 0; }
+    .graph figcaption { color: var(--muted); font-size: 12px; margin-bottom: 16px; }
+    .graph svg, .shot-frame svg { display: block; width: 100%; height: auto; }
+    .graph .gridline { stroke: var(--grid); stroke-width: 1; }
+    .graph .base { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+    .graph .assist { stroke: var(--accent); stroke-width: 1.5; fill: none; }
+    .graph .base-dot { fill: var(--muted); }
+    .graph .assist-dot { fill: var(--accent); }
+    .graph svg text { fill: var(--muted); font: 10px ui-monospace, monospace; }
+    .draw { stroke-dasharray: 900; stroke-dashoffset: 900; animation: draw 1.2s ease forwards; animation-delay: calc(450ms + var(--d, 0ms)); }
+    @keyframes draw { to { stroke-dashoffset: 0; } }
+    .pop { opacity: 0; animation: pop .4s ease forwards; animation-delay: calc(1000ms + var(--d, 0ms)); }
+    @keyframes pop { to { opacity: 1; } }
+    .legend { display: flex; gap: 20px; color: var(--muted); font-size: 11px; margin-top: 8px; }
+    .legend i { display: inline-block; width: 14px; height: 1px; background: var(--muted); vertical-align: middle; margin-right: 6px; }
+    .legend .a i { background: var(--accent); }
+    .src { color: var(--muted); font-size: 12px; margin: 20px 0 0; }
+    .src a { border-bottom: 1px solid var(--line); }
+    .diagram { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 32px 0 24px; }
+    .diagram-flow { display: grid; grid-template-columns: 1fr 28px 1fr 28px 1fr 28px 1fr; align-items: stretch; }
+    .node { display: block; border: 1px solid var(--line); padding: 18px; transition: border-color .2s; }
+    .node:hover { border-color: var(--accent); }
+    .node .num { color: var(--accent); font-size: 11px; }
+    .node .name { display: block; font-size: 19px; margin: 10px 0 6px; letter-spacing: -0.02em; }
+    .node .desc { display: block; color: var(--muted); font-size: 12px; }
+    .conn { display: flex; align-items: center; justify-content: center; color: var(--muted); }
+    .diagram-loop { display: flex; justify-content: space-between; gap: 16px; margin-top: 20px; color: var(--muted); font-size: 11px; letter-spacing: .04em; }
+    .shots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+    .shot { display: block; }
+    .shot-frame { display: block; border: 1px solid var(--line); background: var(--panel); overflow: hidden; transition: border-color .2s; }
+    .shot:hover .shot-frame { border-color: var(--accent); }
+    .shot-frame svg text { fill: var(--muted); font: 8px ui-monospace, monospace; letter-spacing: .04em; }
+    .shot-frame svg .hl { fill: var(--accent); }
+    .shot-frame svg .hair { stroke: var(--line); }
+    .shot-frame svg .acc { stroke: var(--accent); }
+    .shot-cap { display: flex; justify-content: space-between; gap: 8px; margin-top: 10px; color: var(--muted); font-size: 12px; }
+    .shot:hover .shot-cap { color: var(--accent); }
     footer { padding: 32px 0 56px; color: var(--muted); font-size: 13px; display: flex; gap: 24px; flex-wrap: wrap; }
     footer a { border-bottom: 1px solid var(--line); }
+    @media (max-width: 860px) {
+      .graphs, .shots { grid-template-columns: 1fr; }
+      .graph { border-right: 0; padding-right: 0; border-bottom: 1px solid var(--line); }
+      .graph + .graph { padding-left: 0; border-bottom: 0; }
+      .diagram-flow { grid-template-columns: 1fr; }
+      .conn { height: 28px; }
+      .conn::before { content: "↓"; }
+    }
     @media (max-width: 760px) {
       .wrap { padding: 0 20px; }
       nav { display: none; }
       .strip { grid-template-columns: repeat(2, 1fr); }
       .stat:nth-child(2) { border-right: 0; }
+      .stat:nth-child(3) { padding-left: 0; border-top: 1px solid var(--line); }
+      .stat:nth-child(4) { border-top: 1px solid var(--line); }
       .row { grid-template-columns: 1fr; gap: 4px; }
       .hero { padding: 64px 0 48px; }
+      .rail { grid-template-columns: 1fr; gap: 14px; }
+      .sec-head .note { margin-left: 0; width: 100%; }
+      .telem-head span:last-child { display: none; }
+      .diagram-loop { flex-direction: column; }
     }
-    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      .reveal, .rail-line::before, .rail-dot, .draw, .pop { animation: none !important; }
+      .reveal { opacity: 1; transform: none; }
+      .rail-line::before { transform: scaleX(1); }
+      .rail-dot { left: calc(100% - 7px); }
+      .draw { stroke-dashoffset: 0; }
+      .pop { opacity: 1; }
+      .btn, .node, .shot-frame { transition: none; }
+    }
   </style>
 </head>
 <body>
   <header>
     <div class="wrap top">
       <a class="brand" href="./"><span class="idx mono">[01]</span> Поток-М</a>
-      <nav class="mono">
+      <nav class="mono" aria-label="Основная навигация">
         <a href="#detail">Стек</a>
+        <a href="#telemetry">Телеметрия</a>
+        <a href="#system">Контур</a>
+        <a href="#screens">Интерфейс</a>
         <a href="docs/">Документация</a>
-        <a href="https://github.com/rocket-team-m">GitHub</a>
       </nav>
     </div>
   </header>
 
   <main>
     <section class="hero wrap">
-      <div class="kicker mono">Открытая ракетная инженерия · 2026</div>
-      <h1>Ракета, которую проверяют до пуска.</h1>
-      <p class="lede">Симулятор, прошивка, бортовой ИИ и документация — один связанный стек. Каждое число имеет источник, каждый отказ — причину, каждая правка — тест.</p>
-      <div class="actions">
+      <div class="kicker mono reveal" style="--i:0">Открытая ракетная инженерия · 2026</div>
+      <h1 class="reveal" style="--i:1">Ракета, которую проверяют до пуска.</h1>
+      <p class="lede reveal" style="--i:2">Симулятор, прошивка, бортовой ИИ и документация — один связанный стек. Каждое число имеет источник, каждый отказ — причину, каждая правка — тест.</p>
+      <div class="actions reveal" style="--i:3">
         <a class="btn primary" href="docs/">Открыть документацию</a>
         <a class="btn mono" href="https://github.com/rocket-team-m">Исходный код</a>
       </div>
     </section>
 
     <div class="strip wrap">
-      <div class="stat"><div class="v mono">6-DoF</div><div class="l">динамика полёта</div></div>
+      <div class="stat"><div class="v mono">+125.12 м</div><div class="l">апогей · AI assist</div></div>
+      <div class="stat"><div class="v mono">1.86 %</div><div class="l">OpenRocket parity</div></div>
       <div class="stat"><div class="v mono">500 Гц</div><div class="l">контур управления</div></div>
-      <div class="stat"><div class="v mono">v3</div><div class="l">цель рулевой команды</div></div>
-      <div class="stat"><div class="v mono">GPL</div><div class="l">собственный код</div></div>
+      <div class="stat"><div class="v mono">GPL-3.0</div><div class="l">собственный код</div></div>
     </div>
 
     <section class="section wrap" id="detail">
-      <div class="sec-head"><span class="idx mono">02</span><h2>Как устроен стек</h2></div>
-      <div class="tabs" role="tablist">
-        <button class="tab mono" role="tab" aria-current="true" hx-get="fragments/overview.html" hx-target="#detail-body">Обзор</button>
-        <button class="tab mono" role="tab" hx-get="fragments/stack.html" hx-target="#detail-body">Репозитории</button>
-        <button class="tab mono" role="tab" hx-get="fragments/status.html" hx-target="#detail-body">Статус</button>
+      <div class="sec-head"><span class="idx mono">02</span><h2>Как устроен стек</h2><span class="note mono">sim · ai · edge · firmware</span></div>
+      <div class="tabs" role="tablist" aria-label="Разделы стека">
+        <button class="tab mono" id="tab-overview" role="tab" aria-current="true" aria-controls="detail-body" hx-get="fragments/overview.html" hx-target="#detail-body">Обзор</button>
+        <button class="tab mono" id="tab-stack" role="tab" aria-current="false" aria-controls="detail-body" tabindex="-1" hx-get="fragments/stack.html" hx-target="#detail-body">Репозитории</button>
+        <button class="tab mono" id="tab-status" role="tab" aria-current="false" aria-controls="detail-body" tabindex="-1" hx-get="fragments/status.html" hx-target="#detail-body">Статус</button>
       </div>
-      <div id="detail-body" class="detail" hx-get="fragments/overview.html" hx-trigger="load">
+      <div id="detail-body" class="detail" role="tabpanel" aria-labelledby="tab-overview" hx-get="fragments/overview.html" hx-trigger="load">
         <div class="row"><div class="key mono">01 / Цель</div><div class="val">Собрать и проверить ракету целиком: геометрия, аэродинамика, прочность, симуляция, ИИ и лётный разбор.</div></div>
         <div class="row"><div class="key mono">02 / Принцип</div><div class="val">Никаких silent fallback: частичный импорт, неподтверждённый солвер и сработавший интерлок видны в отчёте.</div></div>
         <div class="row"><div class="key mono">03 / Граница ИИ</div><div class="val">На двигателе ассистент выключен. После выгорания он даёт поправку, а STM32 сохраняет вето.</div></div>
       </div>
+    </section>
+
+    <section class="section wrap" id="telemetry">
+      <div class="sec-head"><span class="idx mono">03</span><h2>Замкнутый контур в числах</h2><span class="note mono">ab_report.json · seed 1 · loopwm · 20 эпизодов</span></div>
+      <div class="telemetry">
+        <div class="telem-head mono"><span>Боковое СКО · v3 flown-truth · 30 с</span><span>POTOKTRJ v3 / 6-DoF</span></div>
+        <div class="rail">
+          <div class="rail-val mono">1528.366<small>м · zero command</small></div>
+          <div class="rail-line" aria-hidden="true"><span class="rail-dot"></span></div>
+          <div class="rail-val mono accent">1502.180<small>м · AI assist</small></div>
+        </div>
+        <div class="rail-meta mono">
+          <span>Δ −26.186 м</span><span>98.287 % от baseline</span><span>апогей +125.12 м</span><span>OR-parity 1.86 % / лимит 2 %</span>
+        </div>
+      </div>
+      <div class="graphs">
+        <figure class="graph">
+          <figcaption class="mono">01 / Боковое СКО по сценариям · м</figcaption>
+          <svg viewBox="0 0 520 175" role="img" aria-label="Боковое СКО: baseline 1532.165–1599.463 м против assist 1443.865–1582.775 м в сценариях 16–19">
+            <line class="gridline" x1="50" y1="46" x2="510" y2="46"/>
+            <line class="gridline" x1="50" y1="98" x2="510" y2="98"/>
+            <line class="gridline" x1="50" y1="150" x2="510" y2="150"/>
+            <text x="6" y="49">1600</text><text x="6" y="101">1500</text><text x="6" y="153">1400</text>
+            <polyline class="base draw" points="70,81.3 200,107.3 330,46.3 460,99.6"/>
+            <polyline class="assist draw" style="--d:160ms" points="70,92.9 200,127.2 330,55.0 460,114.4"/>
+            <g class="pop"><circle class="base-dot" cx="70" cy="81.3" r="2.5"/><circle class="base-dot" cx="200" cy="107.3" r="2.5"/><circle class="base-dot" cx="330" cy="46.3" r="2.5"/><circle class="base-dot" cx="460" cy="99.6" r="2.5"/></g>
+            <g class="pop" style="--d:160ms"><circle class="assist-dot" cx="70" cy="92.9" r="2.5"/><circle class="assist-dot" cx="200" cy="127.2" r="2.5"/><circle class="assist-dot" cx="330" cy="55.0" r="2.5"/><circle class="assist-dot" cx="460" cy="114.4" r="2.5"/></g>
+            <text x="64" y="170">16</text><text x="194" y="170">17</text><text x="324" y="170">18</text><text x="454" y="170">19</text>
+          </svg>
+          <div class="legend mono"><span><i></i>zero command</span><span class="a"><i></i>AI assist</span></div>
+        </figure>
+        <figure class="graph">
+          <figcaption class="mono">02 / Апогей по сценариям · м</figcaption>
+          <svg viewBox="0 0 520 175" role="img" aria-label="Апогей: baseline 1495–1962 м против assist 1596–2120 м в сценариях 16–19">
+            <line class="gridline" x1="50" y1="33" x2="510" y2="33"/>
+            <line class="gridline" x1="50" y1="92" x2="510" y2="92"/>
+            <line class="gridline" x1="50" y1="150" x2="510" y2="150"/>
+            <text x="6" y="36">2200</text><text x="6" y="95">1800</text><text x="6" y="153">1400</text>
+            <polyline class="base draw" points="70,106.5 200,58.7 330,134.5 460,82.6"/>
+            <polyline class="assist draw" style="--d:160ms" points="70,87.8 200,33.0 330,118.1 460,62.0"/>
+            <g class="pop"><circle class="base-dot" cx="70" cy="106.5" r="2.5"/><circle class="base-dot" cx="200" cy="58.7" r="2.5"/><circle class="base-dot" cx="330" cy="134.5" r="2.5"/><circle class="base-dot" cx="460" cy="82.6" r="2.5"/></g>
+            <g class="pop" style="--d:160ms"><circle class="assist-dot" cx="70" cy="87.8" r="2.5"/><circle class="assist-dot" cx="200" cy="33.0" r="2.5"/><circle class="assist-dot" cx="330" cy="118.1" r="2.5"/><circle class="assist-dot" cx="460" cy="62.0" r="2.5"/></g>
+            <text x="64" y="170">16</text><text x="194" y="170">17</text><text x="324" y="170">18</text><text x="454" y="170">19</text>
+          </svg>
+          <div class="legend mono"><span><i></i>zero command</span><span class="a"><i></i>AI assist</span></div>
+        </figure>
+      </div>
+      <p class="src mono">Источник: <a href="docs/ai/gates/">гейты ИИ</a> · <a href="docs/sim/validation/">валидация симулятора</a> · <code>ab_report.json</code>, seed 1, экспорт loopwm. Сценарии 16–19, по 5 эпизодов; разница −26.186 м при ULP сидкара 6.1e−05 м.</p>
+    </section>
+
+    <section class="section wrap" id="system">
+      <div class="sec-head"><span class="idx mono">04</span><h2>Как проходит команда</h2><span class="note mono">sim → ai → edge → firmware</span></div>
+      <div class="diagram">
+        <div class="diagram-flow">
+          <a class="node" href="docs/sim/validation/"><span class="num mono">01</span><span class="name">sim</span><span class="desc mono">6-DoF · OR-parity 1.86 %</span></a>
+          <span class="conn" aria-hidden="true">→</span>
+          <a class="node" href="docs/ai/gates/"><span class="num mono">02</span><span class="name">ai</span><span class="desc mono">v3 target · gated Delta</span></a>
+          <span class="conn" aria-hidden="true">→</span>
+          <a class="node" href="docs/edge/inference/"><span class="num mono">03</span><span class="name">edge</span><span class="desc mono">Raspberry Pi · UART · дедлайн</span></a>
+          <span class="conn" aria-hidden="true">→</span>
+          <a class="node" href="docs/protocol/embedded/"><span class="num mono">04</span><span class="name">firmware</span><span class="desc mono">STM32H743 · SIL · вето</span></a>
+        </div>
+        <div class="diagram-loop mono"><span>← телеметрия: кадры, гейты, отказы</span><span>команда руля: 500 Гц, предел ±10 м/с² →</span></div>
+      </div>
+      <p class="src mono">Ассистент выключен на активном участке; после выгорания он даёт поправку, а STM32 сохраняет право вето.</p>
+    </section>
+
+    <section class="section wrap" id="screens">
+      <div class="sec-head"><span class="idx mono">05</span><h2>Инженерный интерфейс</h2><span class="note mono">.preview → документация</span></div>
+      <div class="shots">
+        <a class="shot" href="docs/rocketcraft/ui/">
+          <span class="shot-frame"><svg viewBox="0 0 320 180" role="img" aria-label="Схематичный интерфейс RocketCraft">
+            <line class="hair" x1="0" y1="18" x2="320" y2="18"/><line class="hair" x1="86" y1="18" x2="86" y2="180"/>
+            <text class="hl" x="10" y="13">ROCKETCRAFT / CAD</text>
+            <text x="8" y="38">01 PROJECT</text><text x="8" y="56">02 MESH</text><text x="8" y="74">03 CFD</text><text x="8" y="92">04 FEA</text>
+            <line class="hair" x1="86" y1="150" x2="320" y2="150"/>
+            <path class="acc" d="M130 138 L170 48 L210 138 M145 100 L195 100 M170 48 L170 138" fill="none"/>
+            <text class="hl" x="96" y="165">MESH  OK</text><text x="236" y="165">24K CELLS</text>
+          </svg></span>
+          <span class="shot-cap mono"><span>01 / RocketCraft</span><span>интерфейс →</span></span>
+        </a>
+        <a class="shot" href="docs/sim/validation/">
+          <span class="shot-frame"><svg viewBox="0 0 320 180" role="img" aria-label="Схематичный отчёт валидации симулятора">
+            <line class="hair" x1="0" y1="18" x2="320" y2="18"/>
+            <text class="hl" x="10" y="13">SIM / VALIDATION</text>
+            <line class="hair" x1="32" y1="42" x2="304" y2="42"/><line class="hair" x1="32" y1="84" x2="304" y2="84"/><line class="hair" x1="32" y1="126" x2="304" y2="126"/>
+            <line class="hair" x1="32" y1="42" x2="32" y2="126"/>
+            <path class="acc" d="M36 110 L80 96 L124 78 L168 64 L212 48 L256 38 L300 30" fill="none"/>
+            <text x="10" y="46">3200</text><text x="10" y="88">2800</text><text x="10" y="130">2400</text>
+            <text class="hl" x="196" y="164">OR PARITY 1.86 %</text><text x="32" y="164">LIMIT 2 %</text>
+          </svg></span>
+          <span class="shot-cap mono"><span>02 / Симулятор</span><span>валидация →</span></span>
+        </a>
+        <a class="shot" href="docs/ai/gates/">
+          <span class="shot-frame"><svg viewBox="0 0 320 180" role="img" aria-label="Схематичный журнал обучения и A/B">
+            <line class="hair" x1="0" y1="18" x2="320" y2="18"/>
+            <text class="hl" x="10" y="13">AI / CLOSED LOOP</text>
+            <text x="12" y="42">seed 1  loopwm  ep 20</text>
+            <text x="12" y="60">lateral  1528.366 → 1502.180</text>
+            <text class="hl" x="12" y="78">apogee   +125.12 m</text>
+            <text x="12" y="96">gate trips 11596  clip 0</text>
+            <text x="12" y="114">rmse 9.054  ticks 30000</text>
+            <line class="hair" x1="12" y1="132" x2="308" y2="132"/>
+            <text class="hl" x="12" y="152">VERDICT PASS</text><text x="228" y="152">3 / 3</text>
+          </svg></span>
+          <span class="shot-cap mono"><span>03 / Бортовой ИИ</span><span>гейты и A/B →</span></span>
+        </a>
+      </div>
+      <p class="src mono">Превью schematic — не скриншоты продукта; исходные отчёты и логи доступны в документации.</p>
     </section>
   </main>
 
@@ -147,16 +336,33 @@
     <a href="docs/">Документация</a>
     <a href="docs/project/goals/">ТТХ</a>
     <a href="docs/process/decisions/">Решения</a>
+    <a href="https://github.com/rocket-team-m">GitHub</a>
     <span>Собственный код: GPL-3.0-or-later</span>
   </footer>
 
   <script>
-    document.querySelectorAll('[role="tab"]').forEach(function (tab) {
-      tab.addEventListener('htmx:afterSwap', function () {
-        document.querySelectorAll('[role="tab"]').forEach(function (t) { t.setAttribute('aria-current', 'false'); });
-        tab.setAttribute('aria-current', 'true');
+    var tabs = Array.prototype.slice.call(document.querySelectorAll('[role="tab"]'));
+    function setActive(tab) {
+      tabs.forEach(function (t) {
+        var on = t === tab;
+        t.setAttribute('aria-current', on ? 'true' : 'false');
+        t.tabIndex = on ? 0 : -1;
+      });
+      var panel = document.getElementById('detail-body');
+      if (panel) panel.setAttribute('aria-labelledby', tab.id);
+    }
+    tabs.forEach(function (tab, i) {
+      tab.addEventListener('click', function () { setActive(tab); });
+      tab.addEventListener('keydown', function (e) {
+        var next = null;
+        if (e.key === 'ArrowRight') next = tabs[(i + 1) % tabs.length];
+        if (e.key === 'ArrowLeft') next = tabs[(i - 1 + tabs.length) % tabs.length];
+        if (e.key === 'Home') next = tabs[0];
+        if (e.key === 'End') next = tabs[tabs.length - 1];
+        if (next) { e.preventDefault(); setActive(next); next.focus(); next.click(); }
       });
     });
+    if (tabs.length) setActive(tabs[0]);
   </script>
 </body>
 </html>
