@@ -86,6 +86,9 @@
 `TLM` (24 B): `type u8`, `seq u16`, `time_ms u32`, `phase u8`, `flags u8`,
 `subframe u8`, `height_dm u16`, `speed_cmd_s u16`, `g_roll i16`, `g_pitch i16`,
 `confidence u8`, `ai_health u8`, `battery_mv u16`, `crc16 u16`.
+GPS на борту нет: бит `GPS_FIX` из `uart.yaml` не выставляется и в UI не
+показывается. Поле `flags` сохраняется в кадре для совместимости с протоколом,
+но он не является источником положения.
 `g_roll/g_pitch` — масштаб 0.001, диагностическая угловая пара validation v3;
  authoritative command — `[g_accel_y, −g_accel_x]`, она едет в `subframe`.
 
@@ -195,7 +198,7 @@ UNKNOWN / NOT RUN`; цвет не единственный носитель см
  phase ......... DESCENT          height  ▁▂▃▅▇▆▅▃▂▁   1234.5 m
  time .......... t+00:42.180      g_roll  ···−0.03···   diag
  battery ....... 3820 mV          g_pitch ···+0.01···   diag
- flags ......... GPS IMU BARO     seq 0042 (gap 0, crc 0, hmac 0)
+ flags ......... IMU BARO PITOT   seq 0042 (gap 0, crc 0, hmac 0)
  ai ............ READY / 1
 ──────────────────────────────────────────────────────────────────────────────────────
 [+] EVENT LOG      t+00:40.120  EVT 02  apogee        (caption: Fig 1. altitude / 10 Hz)
@@ -229,16 +232,27 @@ UNKNOWN / NOT RUN`; цвет не единственный носитель см
 ### 4.4 `[03] SEARCH 144`
 
 ```
-[+] LAST KNOWN POINT   t+00:42.180   x/y/z from POTOKTRJ replay slot, NOT A FIX
+[+] GROUND DF          bearing 142° ±15°   rotating directional antenna, min/max RSSI
+[+] SIGNAL STRENGTH    RSSI -- dBm (NOT MEASURED)   trace ▁▂▅▇▅▂▁  range -- (NOT MEASURED)
+[+] LAUNCH POINT       entered by operator before launch   source: MANUAL
+[+] DRIFT ESTIMATE     wind 6 m/s @ 240° (OPERATOR INPUT) · sim descent model, NOT MEASURED
+[+] SEARCH AREA        ellipse -- × -- m   uncertainty UNKNOWN   NOT A FIX
 [+] BEACON HINT        144 MHz  duty 10%  slots 2/20   (from FW14 scheduler, hint only)
 [+] BUZZER            pattern SEARCH 880/1047 Hz    battery band 3820 mV = NOMINAL
-[+] RADIO LINK         RSSI -- (NOT MEASURED)   range -- (NOT MEASURED)
 [+] POST-LANDING       BEACON_SELECT [READY]  MELODY_REQUEST [READY, search wins]
+[+] RX ONLY            no command TX in flight (§3.6)     controls LOCKED IN_FLIGHT
 ```
 
-Поле «последняя известная точка» честно называет источник: это снимок из
-телеметрии/реплея, а не измеренное местоположение приёмника. Наземный приёмник
-не притворяется источником пеленга без реального measurements.
+Ракета не несёт GPS. Все оценки положения строятся наземными средствами:
+пеленг по вращаемой направленной антенне (минимум/максимум уровня сигнала),
+запись RSSI, точка старта, введённая оператором до пуска, и оценка сноса по
+ветру. Ветер — ввод оператора или сценарий симулятора, но не бортовой датчик;
+модель снижения из `POTOKTRJ`/OpenRocket не откалибрована на реальных пусках.
+Поэтому результат — поисковый эллипс с источником и неопределённостью, а не
+координата. Пока радио не подключено, пеленг и RSSI показываются как
+`NOT MEASURED` и не превращаются в точку на карте. Вкладка только принимает:
+144 МГц маяк и жужжалка принадлежат борту, а передача `CMD` в полёте запрещена
+(§3.6).
 
 ### 4.5 `[04] REPLAY`
 
@@ -260,6 +274,10 @@ UNKNOWN / NOT RUN`; цвет не единственный носитель см
   нет RSSI, PER, дальности, задержки, чувствительности и реального спектра. Нет
   совместимости с `LoRa1262F30`, подтверждённой на железе: драйвера радио в
   прошивке нет, пункт помечен заблокированным (`hardware/search.md:11-13`).
+- **GPS на борту нет.** Поиск опирается на наземный пеленг, уровень сигнала,
+  точку старта, введённую оператором, и оценку сноса ветром. Ни одна из этих
+  величин не является измеренным положением ракеты; все оценки помечены
+  источником и неопределённостью. Бит `GPS_FIX` в протоколе не используется.
 - **Нет лётного лога.** `flights/README.md` и `docs/.../flights/log.md`: пусков
   не было, таблица пустая. `[04] REPLAY` читает только синтетические/sim sidecar.
 - **Нет платы и HIL.** Прошивка не вводилась в строй; 144 МГц scheduler существует
