@@ -42,9 +42,9 @@ flags are optional, so every older command line keeps working.
 | lift-off mass | 10.4–11.4 kg | OpenRocket Simulation 9 |
 | diameter / frontal area | 0.102 m / 0.00817 m² | user-stated TTX |
 | static margin | 0.0765 m ≈ 0.65 cal of the 118 mm outer diameter | OpenRocket-derived |
-| motor impulse | 2.4 + 1.2 kNs (upper passport) | RDK-2000 / RDK-1000 passports, chat PDFs (2.2–2.4 / 1.0–1.2 kNs) |
+| motor impulse | 2.2 + 1.0 kNs (passport minimum) | RDK-2000 / RDK-1000 passports (2.2–2.4 / 1.0–1.2 kNs) |
 | thrust / mass flow | 400 N @ 0.342 kg/s for 5.5 s; 312.5 N @ 0.3125 kg/s for 3.2 s | passport minimum 2.2 + 1.0 kNs; propellant masses from the passports |
-| target speed / apogee | M=0,5–0,6 (±) / ~3 km | current TTX; this model reaches ~276 m/s / ~3.12 km at nominal seed, matching OpenRocket within 1% |
+| target speed / apogee | M=0,5–0,6 (±) / ~3 km | current TTX; OR Sim 9 gives 274.278 m/s (M=0,82), sim 278.251 m/s (1.45 % error, 2 % gate) — the TTX contradiction stays open |
 | gyro noise | 0.0015 rad/s | previously validated simulator value |
 | accel noise | 0.011 m/s² (1064 µg) | DELTA report |
 | wind (v_10, shear, gust, turbulence) | 3 m/s, 2 m/s, p=0.2, σ=0.6 m/s | launch-day assumption, not passport data; reduced from earlier 8/6 m/s so the vehicle stays near vertical |
@@ -56,8 +56,28 @@ placeholders, calibrated only so the nominal trajectory stays in the TTX
 ballpark. Their uncertainty is unquantified; a real OpenRocket/Ansys
 aerodynamic card (as referenced in the project docs) should replace them.
 Motor peaks (500–550 / 550–600 N) and thrust ripple are not modelled — only
-average thrust and mass flow. With the OpenRocket-derived inputs the nominal simulation reaches ~276 m/s
-and ~3.12 km, within 1% of OpenRocket Simulation 9.
+average thrust and mass flow.
+
+## OpenRocket Simulation 9 parity (oracle)
+
+Oracle: `гугугага.ork`, databranch `Маршевая ступень`; fixture
+`tests/fixtures/or_sim9.csv` (55 rows: 54 on the 0.5 s grid plus the exact
+26.9 s apogee point). The one canonical run is episode 0, seed 1337,
+`Config::default()`, tests `or_parity_tests` + `or_parity_extended_tests`:
+
+| metric | OR | sim | error | gate |
+| --- | ---: | ---: | ---: | ---: |
+| apogee | 3127.363 m | 3185.378 m | 1.86 % | 2 % |
+| vmax | 274.278 m/s | 278.251 m/s | 1.45 % | 2 % |
+| time to apogee | 26.9 s | 27.04 s (tick 1352) | 0.14 s | 0.25 s |
+| worst altitude | — | t = 5 s | 4.95 % | 5 % |
+
+Drag law error 1–2.3 % at a 5 % gate. Instantaneous speed is not compared:
+`Frame` has no speed field and `pitot_dp` is a noisy saturating `i16`. The
+thresholds were picked after measuring — these are regression pins on the
+current model, not a fidelity claim. The early −6.40 % / −2.42 % run is
+history; the "within 1 %" note is retracted as not reproducible. The
+TTX contradiction M=0,5–0,6 (≈170–200 m/s) vs OR's M=0,82 stays open.
 
 ## Domain randomization (Potok-M only)
 
