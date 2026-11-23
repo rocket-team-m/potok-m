@@ -20,6 +20,7 @@ import math
 import random
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
+from enum import Enum
 from pathlib import Path
 
 import numpy as np
@@ -69,6 +70,123 @@ METRIC_FIELDS = (
 )
 
 
+class ShieldReason(str, Enum):
+    """Why an online shield replaced a candidate command with the fallback."""
+
+    MACH_UNAVAILABLE = "mach_unavailable"
+    MACH_LIMIT = "mach_limit"
+    AUTHORITY = "authority"
+    PHASE_FORBIDDEN = "phase_forbidden"
+
+
+@dataclass(frozen=True)
+class ShieldSample:
+    """Runtime values the shield verifies against but does not derive itself.
+
+    ``mach`` is caller-derived (the shield runs no aerodynamics); ``phase`` is
+    the numeric wire phase, where 0 is Pad/Boost.
+    """
+
+    mach: float
+    phase: int
+
+
+@dataclass(frozen=True)
+class ShieldDecision:
+    """The command actually used for supervision, and why it is not the candidate."""
+
+    command: torch.Tensor
+    reason: ShieldReason | None = None
+
+    @property
+    def intervened(self) -> bool:
+        return self.reason is not None
+
+
+@dataclass
+class ShieldCounts:
+    """One counter per reason plus accepted; counts survive eval/reset."""
+
+    accepted: int = 0
+    mach_unavailable: int = 0
+    mach_limit: int = 0
+    authority: int = 0
+    phase_forbidden: int = 0
+
+    def record(self, decision: ShieldDecision) -> None:
+        key = "accepted" if decision.reason is None else decision.reason.value
+        setattr(self, key, getattr(self, key) + 1)
+
+    @property
+    def interventions(self) -> int:
+        return (
+            self.mach_unavailable + self.mach_limit
+            + self.authority + self.phase_forbidden
+        )
+
+    def as_dict(self) -> dict[str, int]:
+        return {
+            "accepted": self.accepted,
+            "mach_unavailable": self.mach_unavailable,
+            "mach_limit": self.mach_limit,
+            "authority": self.authority,
+            "phase_forbidden": self.phase_forbidden,
+        }
+
+
+class OnlineShield:
+    """Typed online filter on the candidate-command path.
+
+    ``verify`` is the only exit: it selects the command and records the
+    decision, so an intervention cannot happen uncounted. The fallback is the
+    deterministic classical baseline (residual suppressed), never a clipped
+    version of a bad demand. Check order is fixed: unverifiable Mach → Mach
+    ceiling → forbidden phase → authority box → accept. This is an in-training
+    instrument; it changes no gate limit, reward weight or flight code.
+    """
+
+    # protocol_code 0 covers both Pad and Boost (BURN/Idle): AI forbidden there.
+    FORBIDDEN_PHASES = frozenset({0})
+
+    def __init__(self, *, mach_max: float, authority: float) -> None:
+        if not math.isfinite(mach_max) or mach_max < 0.0:
+            raise ValueError(f"shield Mach ceiling must be finite and non-negative, got {mach_max!r}")
+        if not math.isfinite(authority) or authority <= 0.0:
+            raise ValueError(f"shield authority must be finite and positive, got {authority!r}")
+        self.mach_max = float(mach_max)
+        self.authority = float(authority)
+        self.counts = ShieldCounts()
+
+    def verify(self, candidate: torch.Tensor, fallback: torch.Tensor,
+               sample: ShieldSample) -> ShieldDecision:
+        if candidate.shape != fallback.shape:
+            raise ValueError(
+                f"shield candidate {tuple(candidate.shape)} and fallback "
+                f"{tuple(fallback.shape)} must match"
+            )
+        if not math.isfinite(sample.mach):
+            reason = ShieldReason.MACH_UNAVAILABLE
+        elif sample.mach > self.mach_max:
+            reason = ShieldReason.MACH_LIMIT
+        elif int(sample.phase) in self.FORBIDDEN_PHASES:
+            reason = ShieldReason.PHASE_FORBIDDEN
+        elif (not bool(torch.isfinite(candidate).all())
+              or float(candidate.detach().abs().max()) > self.authority):
+            reason = ShieldReason.AUTHORITY
+        else:
+            reason = None
+        decision = ShieldDecision(fallback if reason is not None else candidate, reason)
+        self.counts.record(decision)
+        return decision
+
+
+# Offline v3 episodes carry no Mach or phase column. These are explicit
+# "no exceedance recorded / unpowered segment" values, not derived aerodynamics
+# and not silent fallbacks; a caller with real evidence supplies its own sample.
+OFFLINE_MACH = 0.0
+OFFLINE_PHASE = 1  # Coast wire code.
+
+
 @dataclass
 class TrainConfig:
     """The single configuration shared by every adapter."""
@@ -108,6 +226,8 @@ class TrainConfig:
     # Typed v3 command envelope. Default is the simulator's +/-10 m/s^2 limit,
     # not a gate threshold and not a tuning knob.
     command_envelope: CommandEnvelope = field(default_factory=CommandEnvelope)
+    # Certified Mach ceiling from the runtime shield, not a reward/gate tune.
+    shield_mach_max: float = 0.6
     # Optional smoke subset: N episodes per training scenario, all kept. None
     # (production) uses the full v3 train split.
     episodes_per_scenario: int | None = None
@@ -357,6 +477,11 @@ class ModelAdapter(ABC):
                 continue
             for batch in self.batches(chosen, cfg):
                 self.train_step(model, batch, optimizer, cfg)
+        shield = getattr(self, "shield", None)
+        if shield is not None:
+            (cfg.out / "shield.json").write_text(
+                json.dumps(shield.counts.as_dict(), indent=2) + "\n"
+            )
         rmse = self.evaluate(model, groups, cfg, device)
         path = self.export(model, cfg)
         return self._report(model, cfg, groups, held_out, rmse, path, device)
@@ -463,6 +588,10 @@ class LRSAdapter(ModelAdapter):
     name = "lrs"
 
     def build(self, cfg: TrainConfig, device: torch.device) -> StatefulTCN:
+        self.shield = OnlineShield(
+            mach_max=cfg.shield_mach_max, authority=cfg.command_envelope.accel
+        )
+        self.shield_sample = ShieldSample(mach=OFFLINE_MACH, phase=OFFLINE_PHASE)
         return StatefulTCN(
             smart_student_config(
                 seed=cfg.seed,
@@ -504,7 +633,11 @@ class LRSAdapter(ModelAdapter):
                 continue
             reference = torch.as_tensor(targets[tick, :2], dtype=torch.float32, device=device)
             features = torch.as_tensor(frame[:SMART_FEATURES], dtype=torch.float32, device=device)
-            command = final_command(corrections, physics_baseline(features), cfg.residual)
+            baseline = physics_baseline(features)
+            candidate = final_command(corrections, baseline, cfg.residual)
+            # Online shield: candidate -> verify -> safe classical fallback,
+            # with a typed reason and a count for every intervention.
+            command = self.shield.verify(candidate, baseline, self.shield_sample).command
             error = (command - reference).abs().max().detach()
             command_losses.append(F.mse_loss(command, reference))
             # Train the LOGIT, never its sigmoid: a near-zero target on the
@@ -925,6 +1058,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--command-envelope", type=float, default=CommandEnvelope().accel,
         help="authoritative v3 command envelope in m/s^2 (default: 10, the sim limit)",
+    )
+    parser.add_argument(
+        "--shield-mach-max", type=float, default=0.6,
+        help="certified Mach ceiling for the online training shield (default: 0.6)",
     )
     parser.add_argument(
         "--episodes-per-scenario", type=int, default=None,

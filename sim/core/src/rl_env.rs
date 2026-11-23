@@ -15,9 +15,17 @@
 //! terminal `reward::evaluate` score. Gates stay rejection, not a scalar:
 //! a rejected flight has no verifier value in `info`, only a named violation.
 //!
+//! [`RlEnv::step_shielded`] is the shielded training entry point: a typed
+//! online filter verifies the candidate demand against the runtime Mach
+//! sample, the command authority and the current phase before the simulator
+//! sees it. A veto falls back to zero with a named reason and is counted; no
+//! gate limit or reward weight is changed. This is an in-simulator instrument,
+//! not a flight claim.
+//!
 //! No RNG of its own, no wall clock, no training algorithm, no GPU. Two envs
 //! driven by the same seed and action sequence are bitwise identical.
 
+use std::fmt;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread::{self, JoinHandle};
 
@@ -145,6 +153,190 @@ impl Action {
     }
 }
 
+/// Why a candidate action was replaced by the safe fallback.
+///
+/// One variant per runtime constraint plus an unverifiable-input case. Every
+/// variant names the values that caused the veto, so an intervention is
+/// auditable without reading the simulator's state.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ShieldReason {
+    /// No trustworthy Mach evidence: fail safe without deriving one here.
+    MachUnavailable { observed: f64 },
+    /// Certified Mach ceiling exceeded. `limit` is the verifier's own gate.
+    MachLimit { observed: f64, limit: f64 },
+    /// Demand is non-finite or outside the command authority box. Refused,
+    /// never clamped to the box.
+    Authority { ay: f32, ax: f32, limit: f32 },
+    /// AI corrections are forbidden in this flight phase.
+    PhaseForbidden { phase: Phase },
+}
+
+impl fmt::Display for ShieldReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MachUnavailable { observed } => {
+                write!(f, "shield: Mach evidence {observed} is not finite")
+            }
+            Self::MachLimit { observed, limit } => {
+                write!(f, "shield: Mach {observed} above certified ceiling {limit}")
+            }
+            Self::Authority { ay, ax, limit } => write!(
+                f,
+                "shield: demand [ay={ay}, ax={ax}] outside authority +/-{limit} m/s^2"
+            ),
+            Self::PhaseForbidden { phase } => {
+                write!(f, "shield: AI corrections forbidden in phase {phase:?}")
+            }
+        }
+    }
+}
+
+/// Runtime inputs the shield verifies against but does not derive itself.
+///
+/// The shield runs no aerodynamics and owns no RNG. `mach` is a caller-derived
+/// estimate (the same split the firmware runtime shield uses); `phase` is the
+/// flight phase at the moment the action is chosen.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShieldSample {
+    pub mach: f64,
+    pub phase: Phase,
+}
+
+/// What actually reaches the simulator, and why it is not the candidate.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShieldDecision {
+    pub action: Action,
+    pub reason: Option<ShieldReason>,
+}
+
+impl ShieldDecision {
+    pub fn intervened(&self) -> bool {
+        self.reason.is_some()
+    }
+}
+
+/// One counter per reason plus accepted. Counts survive `RlEnv::reset`: they
+/// describe a training run, not one episode.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ShieldCounts {
+    pub accepted: u64,
+    pub mach_unavailable: u64,
+    pub mach_limit: u64,
+    pub authority: u64,
+    pub phase_forbidden: u64,
+}
+
+impl ShieldCounts {
+    fn record(&mut self, reason: Option<ShieldReason>) {
+        match reason {
+            None => self.accepted += 1,
+            Some(ShieldReason::MachUnavailable { .. }) => self.mach_unavailable += 1,
+            Some(ShieldReason::MachLimit { .. }) => self.mach_limit += 1,
+            Some(ShieldReason::Authority { .. }) => self.authority += 1,
+            Some(ShieldReason::PhaseForbidden { .. }) => self.phase_forbidden += 1,
+        }
+    }
+
+    /// Every veto, whatever its reason.
+    pub fn interventions(&self) -> u64 {
+        self.mach_unavailable + self.mach_limit + self.authority + self.phase_forbidden
+    }
+
+    pub fn total(&self) -> u64 {
+        self.accepted + self.interventions()
+    }
+}
+
+/// Typed online shield on the candidate-action path.
+///
+/// `verify` is the only way a command leaves this module: it both picks the
+/// action that reaches the simulator and records the decision, so an
+/// intervention cannot happen uncounted. The safe fallback is always
+/// [`Action::ZERO`] (no new demand), never a clipped version of the bad demand.
+///
+/// Check priority is fixed and loud: unverifiable Mach → Mach ceiling →
+/// forbidden phase → authority box → accept. This is an online *veto*, not a
+/// reward term: the verifier's gates and weights are unchanged. It is a
+/// training/in-simulator instrument only — no flight claim is made here.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Shield {
+    mach_max: f64,
+    authority: f32,
+    counts: ShieldCounts,
+}
+
+impl Shield {
+    /// Build from the verifier's own limits and the simulator's command
+    /// authority. No new gate values are introduced or tuned here.
+    pub fn new(limits: GateLimits) -> Result<Self> {
+        if !limits.mach_max.is_finite() || limits.mach_max < 0.0 {
+            return Err(SimError::Config(format!(
+                "rl_env: shield Mach ceiling {} must be finite and non-negative",
+                limits.mach_max
+            )));
+        }
+        Ok(Self {
+            mach_max: limits.mach_max,
+            authority: MAX_COMMAND_MPS2 as f32,
+            counts: ShieldCounts::default(),
+        })
+    }
+
+    pub fn mach_max(&self) -> f64 {
+        self.mach_max
+    }
+    pub fn authority(&self) -> f32 {
+        self.authority
+    }
+    pub fn counts(&self) -> ShieldCounts {
+        self.counts
+    }
+    pub fn reset_counts(&mut self) {
+        self.counts = ShieldCounts::default();
+    }
+
+    /// Verify one candidate against the runtime sample. Records the outcome.
+    pub fn verify(&mut self, candidate: Action, sample: ShieldSample) -> ShieldDecision {
+        let reason = if !sample.mach.is_finite() {
+            Some(ShieldReason::MachUnavailable {
+                observed: sample.mach,
+            })
+        } else if sample.mach > self.mach_max {
+            Some(ShieldReason::MachLimit {
+                observed: sample.mach,
+                limit: self.mach_max,
+            })
+        } else if !sample.phase.ai_allowed() {
+            Some(ShieldReason::PhaseForbidden {
+                phase: sample.phase,
+            })
+        } else {
+            let limit = self.authority;
+            if !candidate.ay.is_finite()
+                || !candidate.ax.is_finite()
+                || candidate.ay.abs() > limit
+                || candidate.ax.abs() > limit
+            {
+                Some(ShieldReason::Authority {
+                    ay: candidate.ay,
+                    ax: candidate.ax,
+                    limit,
+                })
+            } else {
+                None
+            }
+        };
+        let action = if reason.is_some() {
+            Action::ZERO
+        } else {
+            candidate
+        };
+        let decision = ShieldDecision { action, reason };
+        self.counts.record(decision.reason);
+        decision
+    }
+}
+
 /// Potential-based shaping. `bonus = γ·Φ(s') − Φ(s)` with Φ a function of
 /// privileged truth only, so it cannot change the optimal policy.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -250,6 +442,8 @@ pub struct RlEnv {
     shaping: Shaping,
     conditioning: Conditioning,
     gates: GateStatus,
+    shield: Shield,
+    last_shield_decision: Option<ShieldDecision>,
     obs_rx: Option<Receiver<WorkerMsg>>,
     act_tx: Option<Sender<Action>>,
     worker: Option<JoinHandle<Result<Episode>>>,
@@ -286,6 +480,7 @@ impl RlEnv {
         let seed = cfg.run.seed;
         let conditioning = initial_conditioning(&cfg, index);
         let gates = GateStatus::new(&truth);
+        let shield = Shield::new(truth.limits)?;
         Ok(Self {
             cfg,
             index,
@@ -295,6 +490,8 @@ impl RlEnv {
             shaping,
             conditioning,
             gates,
+            shield,
+            last_shield_decision: None,
             obs_rx: None,
             act_tx: None,
             worker: None,
@@ -322,6 +519,14 @@ impl RlEnv {
     pub fn total_reward(&self) -> f64 {
         self.total_reward
     }
+    /// The online shield's cumulative decisions. Survives `reset`.
+    pub fn shield_counts(&self) -> ShieldCounts {
+        self.shield.counts()
+    }
+    /// The most recent shielded step's decision, if `step_shielded` was used.
+    pub fn last_shield_decision(&self) -> Option<ShieldDecision> {
+        self.last_shield_decision
+    }
 
     /// Start a fresh episode and return its first observation (no action yet).
     pub fn reset(&mut self) -> Result<(Observation, EnvInfo)> {
@@ -338,6 +543,7 @@ impl RlEnv {
         self.done = false;
         self.total_reward = 0.0;
         self.prev_phi = 0.0;
+        self.last_shield_decision = None;
 
         let (obs_tx, obs_rx) = channel::<WorkerMsg>();
         let (act_tx, act_rx) = channel::<Action>();
@@ -382,6 +588,24 @@ impl RlEnv {
         self.last_truth = Some(truth);
         let info = self.info(obs.tick, truth, None, None);
         Ok((obs, info))
+    }
+
+    /// Shielded counterpart of [`RlEnv::step`]: verify a candidate demand
+    /// against the runtime Mach sample and the current observation's phase,
+    /// then apply the decision. `mach` is caller-derived — this module does no
+    /// aerodynamics and never guesses a Mach number. The phase comes from the
+    /// environment's own last observation, so it cannot be supplied wrongly.
+    ///
+    /// The veto replaces the demand with [`Action::ZERO`]; it does not change
+    /// the verifier's gate limits or reward weights.
+    pub fn step_shielded(&mut self, candidate: Action, mach: f64) -> Result<Step> {
+        let phase = self
+            .last
+            .ok_or_else(|| SimError::Control("rl_env: reset must precede step".into()))?
+            .phase;
+        let decision = self.shield.verify(candidate, ShieldSample { mach, phase });
+        self.last_shield_decision = Some(decision);
+        self.step(decision.action)
     }
 
     /// Apply one action and advance exactly one 50 Hz tick.
