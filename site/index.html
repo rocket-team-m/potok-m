@@ -28,7 +28,7 @@
   <meta name="twitter:image" content="https://rocket-team-m.github.io/potok-m/assets/og.png" />
   <meta name="twitter:image:alt" content="Поток-М: открытая ракетная инженерия — заголовок на тёмном фоне с линией телеметрии." />
 
-  <script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js" defer></script>
+  <script src="assets/htmx-2.0.4.min.js" integrity="sha384-5TCFNSugIyzxLCj1yUKYgXCxC7c7MWp9zZ6LIGUWxvhDnf5zH+ceSLcFMxc08T86" crossorigin="anonymous" defer></script>
   <style>
     :root {
       color-scheme: dark light;
@@ -50,6 +50,9 @@
     }
     a { color: inherit; text-decoration: none; }
     a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+    .skip { position: absolute; left: -9999px; top: 0; }
+    .skip:focus { left: 20px; top: 8px; z-index: 10; padding: 8px 12px; background: var(--panel); border: 1px solid var(--accent); color: var(--text); }
+    .noscript { padding: 12px 0; color: var(--warn); }
     .mono { font-family: ui-monospace, "SFMono-Regular", "JetBrains Mono", monospace; font-variant-numeric: tabular-nums; }
     .wrap { max-width: 1160px; margin: 0 auto; padding: 0 28px; }
     header { border-bottom: 1px solid var(--line); }
@@ -152,7 +155,8 @@
     }
     @media (max-width: 760px) {
       .wrap { padding: 0 20px; }
-      nav { display: none; }
+      .top { height: auto; min-height: 64px; flex-wrap: wrap; gap: 0 16px; padding-top: 10px; }
+      nav { display: flex; order: 3; width: 100%; gap: 20px; overflow-x: auto; white-space: nowrap; padding: 8px 0 10px; border-top: 1px solid var(--line); -webkit-overflow-scrolling: touch; }
       .strip { grid-template-columns: repeat(2, 1fr); }
       .stat:nth-child(2) { border-right: 0; }
       .stat:nth-child(3) { padding-left: 0; border-top: 1px solid var(--line); }
@@ -177,6 +181,8 @@
   </style>
 </head>
 <body>
+  <a class="skip" href="#main">Перейти к содержимому</a>
+  <noscript><p class="wrap noscript">Вкладки требуют JavaScript; все разделы доступны в <a href="docs/">документации</a>.</p></noscript>
   <header>
     <div class="wrap top">
       <a class="brand" href="./"><span class="idx mono">[01]</span> Поток-М</a>
@@ -190,14 +196,14 @@
     </div>
   </header>
 
-  <main>
+  <main id="main">
     <section class="hero wrap">
       <div class="kicker mono reveal" style="--i:0">Открытая ракетная инженерия · 2026</div>
       <h1 class="reveal" style="--i:1">Ракета, которую проверяют до пуска.</h1>
       <p class="lede reveal" style="--i:2">Симулятор, прошивка, бортовой ИИ и документация — один связанный стек. Каждое число имеет источник, каждый отказ — причину, каждая правка — тест.</p>
       <div class="actions reveal" style="--i:3">
         <a class="btn primary" href="docs/">Открыть документацию</a>
-        <a class="btn mono" href="https://github.com/rocket-team-m">Исходный код</a>
+        <a class="btn mono" href="https://github.com/rocket-team-m/potok-m">Исходный код</a>
       </div>
     </section>
 
@@ -323,7 +329,7 @@
             <text x="12" y="96">gate trips 11596  clip 0</text>
             <text x="12" y="114">rmse 9.054  ticks 30000</text>
             <line class="hair" x1="12" y1="132" x2="308" y2="132"/>
-            <text class="hl" x="12" y="152">VERDICT PASS</text><text x="228" y="152">3 / 3</text>
+            <text class="hl" x="12" y="152">V3 A/B PASS</text><text x="228" y="152">loopwm 3/3</text>
           </svg></span>
           <span class="shot-cap mono"><span>03 / Бортовой ИИ</span><span>гейты и A/B →</span></span>
         </a>
@@ -336,7 +342,7 @@
     <a href="docs/">Документация</a>
     <a href="docs/project/goals/">ТТХ</a>
     <a href="docs/process/decisions/">Решения</a>
-    <a href="https://github.com/rocket-team-m">GitHub</a>
+    <a href="https://github.com/rocket-team-m/potok-m">GitHub</a>
     <span>Собственный код: GPL-3.0-or-later</span>
   </footer>
 

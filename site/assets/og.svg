@@ -36,6 +36,6 @@
   </g>
 
   <line x1="64" y1="560" x2="1136" y2="560" stroke="#2e2e2e" stroke-width="1"/>
-  <text x="64" y="594" fill="#8a8a8a" font-family="DejaVu Sans Mono, monospace" font-size="18" letter-spacing="1">6-DoF · 500 ГЦ · v3 · GPL-3.0-OR-LATER</text>
+  <text x="64" y="594" fill="#8a8a8a" font-family="DejaVu Sans Mono, monospace" font-size="18" letter-spacing="1">6-DoF · 500 Гц · v3 · GPL-3.0-OR-LATER</text>
   <text x="1136" y="594" fill="#6b8fff" font-family="DejaVu Sans Mono, monospace" font-size="18" letter-spacing="1" text-anchor="end">ROCKET-TEAM-M / POTOK-M</text>
 </svg>

@@ -1,0 +1,14 @@
+---
+import DefaultHead from '@astrojs/starlight/components/Head.astro';
+
+const image = 'https://rocket-team-m.github.io/potok-m/docs/assets/og.png';
+---
+
+<DefaultHead />
+<meta property="og:image" content={image} />
+<meta property="og:image:type" content="image/png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content="Поток-М: открытая ракетная инженерия — заголовок на тёмном фоне с линией телеметрии." />
+<meta name="twitter:image" content={image} />
+<meta name="twitter:image:alt" content="Поток-М: открытая ракетная инженерия — заголовок на тёмном фоне с линией телеметрии." />

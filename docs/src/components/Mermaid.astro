@@ -6,18 +6,21 @@ interface Props {
 const { code } = Astro.props;
 ---
 
-<div class="mermaid">{code}</div>
+<div class="mermaid" data-source={code}>{code}</div>
 
 <script>
   import mermaid from 'mermaid';
 
-  mermaid.initialize({
+  const init = () => mermaid.initialize({
     startOnLoad: false,
-    theme: 'neutral',
+    theme: document.documentElement.dataset.theme === 'dark' ? 'dark' : 'neutral',
+    themeVariables: { fontSize: '15px' },
+    flowchart: { useMaxWidth: false },
     securityLevel: 'loose',
   });
 
   const render = async () => {
+    init();
     const nodes = document.querySelectorAll<HTMLElement>('.mermaid:not([data-processed])');
     if (nodes.length === 0) return;
     await mermaid.run({ nodes: [...nodes] });
@@ -25,11 +28,28 @@ const { code } = Astro.props;
 
   render();
   document.addEventListener('astro:page-load', render);
+
+  // A theme flip changes data-theme on <html>, not the page. Restore the source
+  // and re-render so nodes follow the active theme instead of a stale SVG.
+  let debounce = 0;
+  new MutationObserver(() => {
+    window.clearTimeout(debounce);
+    debounce = window.setTimeout(() => {
+      document.querySelectorAll<HTMLElement>('.mermaid[data-processed]').forEach((node) => {
+        node.textContent = node.dataset.source ?? '';
+        node.removeAttribute('data-processed');
+      });
+      render();
+    }, 50);
+  }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 </script>
 
 <style>
   .mermaid {
     margin: 1.5rem 0;
     text-align: center;
+    overflow-x: auto;
   }
+  /* Mermaid injects the SVG at runtime, so the scoped selector cannot reach it. */
+  .mermaid :global(svg) { max-width: none; }
 </style>

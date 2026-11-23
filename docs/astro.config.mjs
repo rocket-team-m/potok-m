@@ -9,6 +9,9 @@ export default defineConfig({
   integrations: [
     starlight({
       title: 'Поток-М',
+      components: {
+        Head: './src/components/Head.astro',
+      },
       description:
         'Инженерная документация команды «Поток-М»: конструкция, борт, ИИ, полёты и процессы.',
       defaultLocale: 'root',
