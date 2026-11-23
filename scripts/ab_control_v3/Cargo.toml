@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[package]
+name = "ab-control-v3"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+
+# Read-only driver for the potok-sim v3 command->dynamics seam. The CLI applies
+# one control file to every episode; this driver flies one per-episode TSV (or
+# the oracle arm) and writes POTOKTRJ v3 sidecars so the A/B measures the same
+# flown truth as the v3 training data.
+[dependencies]
+potok-sim = { path = "../../sim/core" }

@@ -50,6 +50,7 @@ ai/out/*/data/*.trajectory
 # Scratch A/B work dirs — regenerate locally
 scripts/ab_diag_work/
 scripts/ab_work/
+scripts/ab_control_v3/runs/
 # Generated analysis plots
 scripts/analysis_out/
 scripts/analysis_out_light/

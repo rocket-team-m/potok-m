@@ -1,23 +1,9 @@
 {
-  "calibration": {
-    "lite": 0.011412002762333047,
-    "loopwm": 0.0,
-    "lrs": 0.3139237422341333
-  },
-  "calibration_source": "run4 <model>/calibration.json; the v2 export binary has no calibration field, nothing hardcoded",
-  "config": "ai/out/run4/sim.toml",
-  "conversion": {
-    "accel_per_normalised_command_mps2": 1.729176985364668,
-    "actuator_limit_mps2": 10.0,
-    "command_units": "desired lateral acceleration m/s^2 (not fin degrees)",
-    "derivation": "ai/src/potok_ai/physics.py:27-28 BETA0=ALPHA0=10 deg; g*tan(10 deg), g=9.80665; no A/B fitting",
-    "gravity_mps2": 9.80665,
-    "interlock": "recorded ai_healthy AND calibrated confidence >= threshold",
-    "oracle": "sim-internal fin_accel_command, no harness conversion"
-  },
-  "exit_code": 1,
-  "failure_location": "AI exports are trained on g_theta (angle-domain target, ai/src/potok_ai/engine.py:400-402; sim/core/src/optimizer.rs:115-146), while the actuator now consumes fin_accel_command (world-frame m/s^2, optimizer.rs:98-113). The harness's g*tan(10deg) conversion rescales units but cannot invert that target mismatch.",
-  "frames_per_episode": 1500,
+  "blockers": [
+    "lrs seed 3: missing export `ai/out/v3_final/runs/lrs/s3/lrs.bin`; seed not measured, no stand-in was substituted"
+  ],
+  "exit_code": 0,
+  "failure_location": "",
   "held_out_indices": [
     16,
     17,
@@ -40,8 +26,81 @@
     98,
     99
   ],
-  "measurement": "POTOKTRJ v1 flown-truth sidecar, not surrogate",
-  "seed_note": "seeds 2/3 use seed-1-trained exports: off-training generalization, not a training seed sweep",
+  "honesty_notes": [
+    "Commands are generated from the baseline flight's recorded frames and replayed by frame index through the simulator seam; after the assisted command moves the vehicle, later frames differ from the baseline flight, but the interlock schedule stays the paired baseline one.",
+    "Lateral RMS and apogee are over the whole 30 s flown trajectory from the v3 sidecar, not over a gate-open tail and not from a surrogate.",
+    "The v3 target is the fin command [g_accel_y, -g_accel_x] in m/s^2 seam order, so the student's trained output is written directly to the TSV; no degree/radian or g*tan conversion is applied.",
+    "The physics_baseline term keeps its trained normalised scale and is added to the student Delta exactly as in engine.py::final_command; both are interpreted in the seam's m/s^2 units because that is the unit of the v3 supervised target.",
+    "Clipping at +/-10 m/s^2 is the seam's hard actuator bound, counted per episode; no threshold, gain or physics constant was tuned for this report.",
+    "Seeds 2/3 fly seed-matched exports on regenerated held-out flights; they test input robustness, not reproducibility of training. Missing exports are reported as blockers and never replaced with a stand-in."
+  ],
+  "measurement": "POTOKTRJ v3 flown-truth sidecar (stride 26, 6-DoF truth), not surrogate",
+  "oracle_failure": "",
+  "partial_students": [
+    {
+      "export": "ai/out/v3_final/runs/lrs/s1/lrs.bin",
+      "family": "lrs",
+      "name": "lrs"
+    }
+  ],
+  "provenance": {
+    "command_limit_mps2": 10.0,
+    "config": "ai/out/v3_final/sim.toml",
+    "config_hash": "1969edcc0829536c4b2ee1bff0ba7d663a22fa36dec588fac67c96107379fed6",
+    "config_sha256": "9c34e71f9d10bcf081c31f15f5332f7bb2fac04dddb28009a27cd30987ab5e91",
+    "exports_dir": "ai/out/v3_final",
+    "exports_sha256": {
+      "ai/out/v3_final/runs/loopwm-lite/s1/lite.pt": "0a65f189af91fb3ec09740c1f1d3fead8fac47522727be7ebcca0798ffd0a6df",
+      "ai/out/v3_final/runs/loopwm-lite/s2/lite.pt": "d170a0a2aee89826c3926350b6721116b73ce304564a3bbce07f0f7d7fc402ef",
+      "ai/out/v3_final/runs/loopwm-lite/s3/lite.pt": "bd36d7b11a17cfb7e4260dafcd77407d070b990602cf32701dc97f7397880af1",
+      "ai/out/v3_final/runs/loopwm/s1/loopwm.pt": "16b587d34cc4d164b9195b3776fadcd8de708b98ba155d3cf5295beec5f7ecc6",
+      "ai/out/v3_final/runs/loopwm/s2/loopwm.pt": "af5c5ddceacc872af0dd02e56c862848b147bac85d86ebfc80c0f8ed4e821b6a",
+      "ai/out/v3_final/runs/loopwm/s3/loopwm.pt": "6f5ff22583c13352b2876d4dc0a891d48c66894473bf9e2570c64d96e29ca70d",
+      "ai/out/v3_final/runs/lrs/s1/lrs.bin": "99df782a78f9a6fa8f3d91b36ec3c7dc965e6efb6632da36f74dd2137f757954",
+      "ai/out/v3_final/runs/lrs/s2/lrs.bin": "e3dd3cd04a22ab6abb2ca68c69625eabcb2a3c720c7f15c76b7ed269e7300f74"
+    },
+    "feature_names": [
+      "gyro_x",
+      "gyro_y",
+      "gyro_z",
+      "acc_x",
+      "acc_y",
+      "acc_z",
+      "baro_h",
+      "pitot_q",
+      "alpha_deg",
+      "beta_deg",
+      "q_dyn_kpa",
+      "a_lat_resid",
+      "drag_est",
+      "static_margin_cal"
+    ],
+    "frames_per_episode": 1500,
+    "generated_at_utc": "2026-11-23T13:34:20+00:00",
+    "git_head": "cee6202c97825c0e66dc54283a9926417cd87075",
+    "harness": "scripts/ab_v3.py",
+    "harness_sha256": "9fe749dd612fdf48a5dda02c6be8f2fa9ece114aae7230338b81669f03d7bc01",
+    "heldout_manifest_sha256": "24f59615eca1359507c0bf2b24b77b2ff4acd89abf3410f0386337d007cd3e76",
+    "heldout_sha256": "5848e222604b92d659f5778e467bfb359b98d5a2634bdc1b1c2a8257459685ed",
+    "helper": "scripts/ab_control_v3/src/main.rs",
+    "helper_sha256": "1f5564e30d66d82e081e5e435bcac3932a862638163cb0fac9a7261920559fed",
+    "min_meaningful_delta_m": 0.001,
+    "numpy": "2.5.5",
+    "python": "3.13.15",
+    "quality_report_sha256": "75fa4633803d7274f101ef573003cbe47da71df6e83dfe28d5500cf7ddb47ec2",
+    "sidecar_ulp_m": 6.103515625e-05,
+    "target_names": [
+      "g_roll",
+      "g_pitch",
+      "confidence",
+      "ai_healthy",
+      "g_accel_y",
+      "g_accel_x"
+    ],
+    "torch": "2.15.0+cpu",
+    "window": 50
+  },
+  "seed_note": "seeds 2/3 use the seed-matched v3 exports on the same held-out indices generated with --seed 2/3; off-training generalization checks, not a re-training sweep",
   "seed_order": [
     1,
     2,
@@ -51,292 +110,300 @@
     "1": {
       "lite": {
         "aggregate": {
-          "ai_healthy_ticks": 18404,
-          "apogee_delta_m": -18.20084228515634,
-          "apogee_retention_pct": 98.95094641099293,
+          "apogee_delta_m": 125.11527709960933,
+          "apogee_retention_pct": 107.21134925651226,
           "assisted": {
-            "apogee_m": 1716.7765197753906,
-            "lateral_rms_m": 1534.450610557144
+            "apogee_m": 1860.0926391601563,
+            "lateral_rms_m": 1502.1799022256514
           },
           "baseline": {
             "apogee_m": 1734.977362060547,
             "lateral_rms_m": 1528.366295257779
           },
+          "calibration_threshold": 0.0,
           "clipped_ticks": 0,
           "episodes": 20,
+          "first_command_tick": 49,
           "gate_open_ticks": 18404,
           "gate_trips": 11596,
           "interventions": 18404,
-          "lateral_delta_m": 6.0843152993650165,
-          "lateral_ratio_pct": 100.39809274244293,
-          "max_command_mps2": 2.647279193916318,
+          "lateral_delta_m": -26.186393032127626,
+          "lateral_ratio_pct": 98.28664155226538,
+          "max_command_mps2": 2.0,
           "rows": 30000,
-          "tracking_rmse_norm": 0.16913349875800923
+          "tracking_rmse_mps2": 9.542279456699712
         },
+        "arm": "physics_baseline + exported student Delta, gated and clipped",
+        "export_sha256": "0a65f189af91fb3ec09740c1f1d3fead8fac47522727be7ebcca0798ffd0a6df",
         "per_scenario": [
           {
-            "apogee_delta_m": -18.096606445312318,
-            "apogee_retention_pct": 98.91472456668603,
+            "apogee_delta_m": 115.37058105468759,
+            "apogee_retention_pct": 106.91891364959442,
             "assisted": {
-              "apogee_m": 1649.3700927734376,
-              "lateral_rms_m": 1537.953369857172
+              "apogee_m": 1782.8372802734375,
+              "lateral_rms_m": 1509.876732556724
             },
             "baseline": {
               "apogee_m": 1667.46669921875,
               "lateral_rms_m": 1532.164899478036
             },
             "episodes": 5,
-            "lateral_delta_m": 5.788470379136015,
-            "lateral_ratio_pct": 100.37779682729372,
+            "lateral_delta_m": -22.28816692131204,
+            "lateral_ratio_pct": 98.54531539464811,
             "scenario": "scenario_16"
           },
           {
-            "apogee_delta_m": -19.288720703125136,
-            "apogee_retention_pct": 99.0169292907318,
+            "apogee_delta_m": 157.7668701171874,
+            "apogee_retention_pct": 108.04076077891467,
             "assisted": {
-              "apogee_m": 1942.8001220703125,
-              "lateral_rms_m": 1489.4253888978305
+              "apogee_m": 2119.855712890625,
+              "lateral_rms_m": 1443.865350577688
             },
             "baseline": {
               "apogee_m": 1962.0888427734376,
               "lateral_rms_m": 1482.130886192255
             },
             "episodes": 5,
-            "lateral_delta_m": 7.294502705575496,
-            "lateral_ratio_pct": 100.4921631937862,
+            "lateral_delta_m": -38.26553561456694,
+            "lateral_ratio_pct": 97.41820806980988,
             "scenario": "scenario_17"
           },
           {
-            "apogee_delta_m": -15.155981445312364,
-            "apogee_retention_pct": 98.98645126807104,
+            "apogee_delta_m": 100.92241210937505,
+            "apogee_retention_pct": 106.74913618664439,
             "assisted": {
-              "apogee_m": 1480.1822265625,
-              "lateral_rms_m": 1603.7344277599364
+              "apogee_m": 1596.2606201171875,
+              "lateral_rms_m": 1582.774678727229
             },
             "baseline": {
               "apogee_m": 1495.3382080078125,
               "lateral_rms_m": 1599.4626011137857
             },
             "episodes": 5,
-            "lateral_delta_m": 4.271826646150657,
-            "lateral_ratio_pct": 100.26707887031407,
+            "lateral_delta_m": -16.687922386556693,
+            "lateral_ratio_pct": 98.95665441786909,
             "scenario": "scenario_18"
           },
           {
-            "apogee_delta_m": -20.262060546874864,
-            "apogee_retention_pct": 98.88364268328377,
+            "apogee_delta_m": 126.4012451171875,
+            "apogee_retention_pct": 106.96419569481438,
             "assisted": {
-              "apogee_m": 1794.7536376953126,
-              "lateral_rms_m": 1504.1615715161038
+              "apogee_m": 1941.416943359375,
+              "lateral_rms_m": 1468.5119178500352
             },
             "baseline": {
               "apogee_m": 1815.0156982421875,
               "lateral_rms_m": 1497.0278135561464
             },
             "episodes": 5,
-            "lateral_delta_m": 7.133757959957393,
-            "lateral_ratio_pct": 100.47652808420516,
+            "lateral_delta_m": -28.515895706111223,
+            "lateral_ratio_pct": 98.09516593827523,
             "scenario": "scenario_19"
           }
         ],
         "sha256": {
-          "assisted": "d138c6d16cb9e41b5a7590346c040d5e3a7b7c53a542da4d98e823f53c307151",
-          "baseline": "a289e63e8a2e110f4f41029ce15afd5353d33fd10bcc3c41bebbdadd699c147f"
+          "assisted": "43c2e0aafc3c2ba63f7d4ef6b3c0c2ff324ce56e056efdebed5bea123e53eb43",
+          "baseline": "0be79f08183fcf56fd207cbea1757adb588b9bbd0d7bb7841bb0bd0bb128c9ee"
         }
       },
       "loopwm": {
         "aggregate": {
-          "ai_healthy_ticks": 18404,
-          "apogee_delta_m": -43.736071777343795,
-          "apogee_retention_pct": 97.47915605507379,
+          "apogee_delta_m": 125.11571044921857,
+          "apogee_retention_pct": 107.21137423376089,
           "assisted": {
-            "apogee_m": 1691.2412902832032,
-            "lateral_rms_m": 1542.361945744686
+            "apogee_m": 1860.0930725097655,
+            "lateral_rms_m": 1502.1797859853127
           },
           "baseline": {
             "apogee_m": 1734.977362060547,
             "lateral_rms_m": 1528.366295257779
           },
+          "calibration_threshold": 0.0,
           "clipped_ticks": 0,
           "episodes": 20,
+          "first_command_tick": 49,
           "gate_open_ticks": 18404,
           "gate_trips": 11596,
-          "interventions": 18404,
-          "lateral_delta_m": 13.995650486906925,
-          "lateral_ratio_pct": 100.91572619275449,
-          "max_command_mps2": 3.173681426057324,
+          "interventions": 9135,
+          "lateral_delta_m": -26.18650927246631,
+          "lateral_ratio_pct": 98.2866339467366,
+          "max_command_mps2": 2.0,
           "rows": 30000,
-          "tracking_rmse_norm": 0.8639653776706809
+          "tracking_rmse_mps2": 9.054219968923212
         },
+        "arm": "physics_baseline + exported student Delta, gated and clipped",
+        "export_sha256": "16b587d34cc4d164b9195b3776fadcd8de708b98ba155d3cf5295beec5f7ecc6",
         "per_scenario": [
           {
-            "apogee_delta_m": -40.773657226562364,
-            "apogee_retention_pct": 97.55475433208557,
+            "apogee_delta_m": 115.37099609375014,
+            "apogee_retention_pct": 106.9189385399903,
             "assisted": {
-              "apogee_m": 1626.6930419921875,
-              "lateral_rms_m": 1544.2322248520818
+              "apogee_m": 1782.8376953125,
+              "lateral_rms_m": 1509.8766246548923
             },
             "baseline": {
               "apogee_m": 1667.46669921875,
               "lateral_rms_m": 1532.164899478036
             },
             "episodes": 5,
-            "lateral_delta_m": 12.067325374045822,
-            "lateral_ratio_pct": 100.7875996492386,
+            "lateral_delta_m": -22.288274823143638,
+            "lateral_ratio_pct": 98.54530835220565,
             "scenario": "scenario_16"
           },
           {
-            "apogee_delta_m": -48.66721191406259,
-            "apogee_retention_pct": 97.5196224119357,
+            "apogee_delta_m": 157.7673583984374,
+            "apogee_retention_pct": 108.04078566470167,
             "assisted": {
-              "apogee_m": 1913.421630859375,
-              "lateral_rms_m": 1500.5673438420893
+              "apogee_m": 2119.856201171875,
+              "lateral_rms_m": 1443.8652045440538
             },
             "baseline": {
               "apogee_m": 1962.0888427734376,
               "lateral_rms_m": 1482.130886192255
             },
             "episodes": 5,
-            "lateral_delta_m": 18.43645764983421,
-            "lateral_ratio_pct": 101.24391562321458,
+            "lateral_delta_m": -38.26568164820128,
+            "lateral_ratio_pct": 97.41819821685858,
             "scenario": "scenario_17"
           },
           {
-            "apogee_delta_m": -31.455078125,
-            "apogee_retention_pct": 97.89645727257204,
+            "apogee_delta_m": 100.92282714843759,
+            "apogee_retention_pct": 106.74916394217557,
             "assisted": {
-              "apogee_m": 1463.8831298828125,
-              "lateral_rms_m": 1606.806751701678
+              "apogee_m": 1596.26103515625,
+              "lateral_rms_m": 1582.774586883555
             },
             "baseline": {
               "apogee_m": 1495.3382080078125,
               "lateral_rms_m": 1599.4626011137857
             },
             "episodes": 5,
-            "lateral_delta_m": 7.344150587892273,
-            "lateral_ratio_pct": 100.45916363300887,
+            "lateral_delta_m": -16.688014230230692,
+            "lateral_ratio_pct": 98.95664867571082,
             "scenario": "scenario_18"
           },
           {
-            "apogee_delta_m": -54.04833984375,
-            "apogee_retention_pct": 97.02215579203558,
+            "apogee_delta_m": 126.40166015625005,
+            "apogee_retention_pct": 106.96421856178257,
             "assisted": {
-              "apogee_m": 1760.9673583984375,
-              "lateral_rms_m": 1515.6972097798175
+              "apogee_m": 1941.4173583984375,
+              "lateral_rms_m": 1468.5117957424852
             },
             "baseline": {
               "apogee_m": 1815.0156982421875,
               "lateral_rms_m": 1497.0278135561464
             },
             "episodes": 5,
-            "lateral_delta_m": 18.66939622367113,
-            "lateral_ratio_pct": 101.24709748573892,
+            "lateral_delta_m": -28.516017813661165,
+            "lateral_ratio_pct": 98.0951577816098,
             "scenario": "scenario_19"
           }
         ],
         "sha256": {
-          "assisted": "82b57e59049c568199fdeee361c739d43be284e516f95cbdde7c2ce8128cb292",
-          "baseline": "a289e63e8a2e110f4f41029ce15afd5353d33fd10bcc3c41bebbdadd699c147f"
+          "assisted": "3ca4ee1cf4eb3b31df0fa64328de7f6bb594bdc74dac0abc98bf0ed06dd72532",
+          "baseline": "0be79f08183fcf56fd207cbea1757adb588b9bbd0d7bb7841bb0bd0bb128c9ee"
         }
       },
       "lrs": {
         "aggregate": {
-          "ai_healthy_ticks": 18404,
-          "apogee_delta_m": -7.505456542968886,
-          "apogee_retention_pct": 99.56740320034753,
+          "apogee_delta_m": 123.31338500976562,
+          "apogee_retention_pct": 107.10749244954484,
           "assisted": {
-            "apogee_m": 1727.471905517578,
-            "lateral_rms_m": 1530.7059699282563
+            "apogee_m": 1858.2907470703126,
+            "lateral_rms_m": 1502.5285038420877
           },
           "baseline": {
             "apogee_m": 1734.977362060547,
             "lateral_rms_m": 1528.366295257779
           },
+          "calibration_threshold": 0.0,
           "clipped_ticks": 0,
           "episodes": 20,
+          "first_command_tick": 0,
           "gate_open_ticks": 18404,
           "gate_trips": 11596,
           "interventions": 18404,
-          "lateral_delta_m": 2.3396746704772795,
-          "lateral_ratio_pct": 100.15308337260097,
-          "max_command_mps2": 3.3301431825982006,
+          "lateral_delta_m": -25.8377914156913,
+          "lateral_ratio_pct": 98.30945032641318,
+          "max_command_mps2": 1.9926142692565918,
           "rows": 30000,
-          "tracking_rmse_norm": 0.17215482570306959
+          "tracking_rmse_mps2": 9.549632761533159
         },
+        "arm": "physics_baseline + exported student Delta, gated and clipped",
+        "export_sha256": "99df782a78f9a6fa8f3d91b36ec3c7dc965e6efb6632da36f74dd2137f757954",
         "per_scenario": [
           {
-            "apogee_delta_m": -7.2117919921875,
-            "apogee_retention_pct": 99.56750008887336,
+            "apogee_delta_m": 113.70686035156268,
+            "apogee_retention_pct": 106.81913830152273,
             "assisted": {
-              "apogee_m": 1660.2549072265624,
-              "lateral_rms_m": 1534.2335385923475
+              "apogee_m": 1781.1735595703126,
+              "lateral_rms_m": 1510.185756122051
             },
             "baseline": {
               "apogee_m": 1667.46669921875,
               "lateral_rms_m": 1532.164899478036
             },
             "episodes": 5,
-            "lateral_delta_m": 2.068639114311509,
-            "lateral_ratio_pct": 100.1350141303339,
+            "lateral_delta_m": -21.97914335598489,
+            "lateral_ratio_pct": 98.56548447471467,
             "scenario": "scenario_16"
           },
           {
-            "apogee_delta_m": -8.171044921875136,
-            "apogee_retention_pct": 99.58355377474523,
+            "apogee_delta_m": 155.5243896484376,
+            "apogee_retention_pct": 107.92647031357673,
             "assisted": {
-              "apogee_m": 1953.9177978515625,
-              "lateral_rms_m": 1485.2246224547853
+              "apogee_m": 2117.613232421875,
+              "lateral_rms_m": 1444.336042682327
             },
             "baseline": {
               "apogee_m": 1962.0888427734376,
               "lateral_rms_m": 1482.130886192255
             },
             "episodes": 5,
-            "lateral_delta_m": 3.0937362625302285,
-            "lateral_ratio_pct": 100.20873569880716,
+            "lateral_delta_m": -37.794843509928114,
+            "lateral_ratio_pct": 97.44996586590088,
             "scenario": "scenario_17"
           },
           {
-            "apogee_delta_m": -5.511376953124909,
-            "apogee_retention_pct": 99.63142940348808,
+            "apogee_delta_m": 99.47453613281255,
+            "apogee_retention_pct": 106.65231019980016,
             "assisted": {
-              "apogee_m": 1489.8268310546875,
-              "lateral_rms_m": 1600.762932473655
+              "apogee_m": 1594.812744140625,
+              "lateral_rms_m": 1583.012747473233
             },
             "baseline": {
               "apogee_m": 1495.3382080078125,
               "lateral_rms_m": 1599.4626011137857
             },
             "episodes": 5,
-            "lateral_delta_m": 1.300331359869233,
-            "lateral_ratio_pct": 100.08129801590631,
+            "lateral_delta_m": -16.449853640552647,
+            "lateral_ratio_pct": 98.97153871374687,
             "scenario": "scenario_18"
           },
           {
-            "apogee_delta_m": -9.127612304687545,
-            "apogee_retention_pct": 99.49710560004922,
+            "apogee_delta_m": 124.54775390625014,
+            "apogee_retention_pct": 106.86207585019085,
             "assisted": {
-              "apogee_m": 1805.8880859375,
-              "lateral_rms_m": 1500.0121230932787
+              "apogee_m": 1939.5634521484376,
+              "lateral_rms_m": 1468.9011670578254
             },
             "baseline": {
               "apogee_m": 1815.0156982421875,
               "lateral_rms_m": 1497.0278135561464
             },
             "episodes": 5,
-            "lateral_delta_m": 2.984309537132276,
-            "lateral_ratio_pct": 100.199348970681,
+            "lateral_delta_m": -28.12664649832095,
+            "lateral_ratio_pct": 98.12116740626836,
             "scenario": "scenario_19"
           }
         ],
         "sha256": {
-          "assisted": "9d21192d6ea7fea69057e11cf27e7f5f11e61289cf31aaef64e5e89051933ee4",
-          "baseline": "a289e63e8a2e110f4f41029ce15afd5353d33fd10bcc3c41bebbdadd699c147f"
+          "assisted": "3166faefa3f9350d8c8eee7f172c927e231d20df6515f9965ac01444f7d831e5",
+          "baseline": "0be79f08183fcf56fd207cbea1757adb588b9bbd0d7bb7841bb0bd0bb128c9ee"
         }
       },
       "oracle_gtheta": {
         "aggregate": {
-          "ai_healthy_ticks": 18404,
           "apogee_delta_m": 2236.2200622558594,
           "apogee_retention_pct": 228.8904461323928,
           "assisted": {
@@ -347,17 +414,11 @@
             "apogee_m": 1734.977362060547,
             "lateral_rms_m": 1528.366295257779
           },
-          "clipped_ticks": null,
           "episodes": 20,
-          "gate_open_ticks": 18404,
-          "gate_trips": 11596,
-          "interventions": 18404,
           "lateral_delta_m": -493.1387795105459,
-          "lateral_ratio_pct": 67.73425447547103,
-          "max_command_mps2": null,
-          "rows": 30000,
-          "tracking_rmse_norm": null
+          "lateral_ratio_pct": 67.73425447547103
         },
+        "arm": "run_episode_with_oracle / fin_accel_command",
         "per_scenario": [
           {
             "apogee_delta_m": 2297.295263671875,
@@ -425,300 +486,308 @@
           }
         ],
         "sha256": {
-          "assisted": "e1a63113749b763aaf4c04678f4788a4e09447e67c2d950389986bb7e08141fd",
-          "baseline": "a289e63e8a2e110f4f41029ce15afd5353d33fd10bcc3c41bebbdadd699c147f"
+          "assisted": "20809991ce08f3d462abfd8079ef7488e10a11e78fb4c5e3945639bd7cdddaa1",
+          "baseline": "0be79f08183fcf56fd207cbea1757adb588b9bbd0d7bb7841bb0bd0bb128c9ee"
         }
       }
     },
     "2": {
       "lite": {
         "aggregate": {
-          "ai_healthy_ticks": 18359,
-          "apogee_delta_m": -16.28590698242192,
-          "apogee_retention_pct": 99.05766947352849,
+          "apogee_delta_m": 121.77717285156245,
+          "apogee_retention_pct": 107.04623620466978,
           "assisted": {
-            "apogee_m": 1711.9725463867187,
-            "lateral_rms_m": 1536.61907745276
+            "apogee_m": 1850.035626220703,
+            "lateral_rms_m": 1505.879684287403
           },
           "baseline": {
             "apogee_m": 1728.2584533691406,
             "lateral_rms_m": 1530.9569784284508
           },
+          "calibration_threshold": 0.02564102564102564,
           "clipped_ticks": 0,
           "episodes": 20,
+          "first_command_tick": 49,
           "gate_open_ticks": 18359,
           "gate_trips": 11641,
-          "interventions": 18359,
-          "lateral_delta_m": 5.6620990243091,
-          "lateral_ratio_pct": 100.36984050525844,
-          "max_command_mps2": 2.74964026813697,
+          "interventions": 18188,
+          "lateral_delta_m": -25.077294141047787,
+          "lateral_ratio_pct": 98.36198570603923,
+          "max_command_mps2": 2.0,
           "rows": 30000,
-          "tracking_rmse_norm": 0.19054580072530178
+          "tracking_rmse_mps2": 9.535901917684138
         },
+        "arm": "physics_baseline + exported student Delta, gated and clipped",
+        "export_sha256": "d170a0a2aee89826c3926350b6721116b73ce304564a3bbce07f0f7d7fc402ef",
         "per_scenario": [
           {
-            "apogee_delta_m": -14.913110351562636,
-            "apogee_retention_pct": 99.11695452913084,
+            "apogee_delta_m": 123.54658203124995,
+            "apogee_retention_pct": 107.31552621366005,
             "assisted": {
-              "apogee_m": 1673.9138916015625,
-              "lateral_rms_m": 1528.8233751278165
+              "apogee_m": 1812.373583984375,
+              "lateral_rms_m": 1500.0232879013317
             },
             "baseline": {
               "apogee_m": 1688.827001953125,
               "lateral_rms_m": 1523.7546036071085
             },
             "episodes": 5,
-            "lateral_delta_m": 5.068771520707969,
-            "lateral_ratio_pct": 100.33265012021678,
+            "lateral_delta_m": -23.73131570577675,
+            "lateral_ratio_pct": 98.4425762751037,
             "scenario": "scenario_16"
           },
           {
-            "apogee_delta_m": -15.249951171875182,
-            "apogee_retention_pct": 99.17062187319999,
+            "apogee_delta_m": 137.33562011718732,
+            "apogee_retention_pct": 107.46908354472491,
             "assisted": {
-              "apogee_m": 1823.4712158203124,
-              "lateral_rms_m": 1484.1071712530436
+              "apogee_m": 1976.056787109375,
+              "lateral_rms_m": 1445.2975983691997
             },
             "baseline": {
               "apogee_m": 1838.7211669921876,
               "lateral_rms_m": 1477.782734227439
             },
             "episodes": 5,
-            "lateral_delta_m": 6.324437025604539,
-            "lateral_ratio_pct": 100.42796798738557,
+            "lateral_delta_m": -32.485135858239346,
+            "lateral_ratio_pct": 97.80176509673312,
             "scenario": "scenario_17"
           },
           {
-            "apogee_delta_m": -15.479467773437591,
-            "apogee_retention_pct": 99.01621439621157,
+            "apogee_delta_m": 99.7862548828125,
+            "apogee_retention_pct": 106.3418382625615,
             "assisted": {
-              "apogee_m": 1557.9800048828124,
-              "lateral_rms_m": 1623.422451287195
+              "apogee_m": 1673.2457275390625,
+              "lateral_rms_m": 1602.0653647351794
             },
             "baseline": {
               "apogee_m": 1573.45947265625,
               "lateral_rms_m": 1618.9909801966473
             },
             "episodes": 5,
-            "lateral_delta_m": 4.431471090547575,
-            "lateral_ratio_pct": 100.2737180839642,
+            "lateral_delta_m": -16.92561546146794,
+            "lateral_ratio_pct": 98.95455776662746,
             "scenario": "scenario_18"
           },
           {
-            "apogee_delta_m": -19.5010986328125,
-            "apogee_retention_pct": 98.92379597295586,
+            "apogee_delta_m": 126.44023437500005,
+            "apogee_retention_pct": 106.97783709405066,
             "assisted": {
-              "apogee_m": 1792.5250732421875,
-              "lateral_rms_m": 1506.4585269172987
+              "apogee_m": 1938.46640625,
+              "lateral_rms_m": 1471.4367296000037
             },
             "baseline": {
               "apogee_m": 1812.026171875,
               "lateral_rms_m": 1499.5050462210536
             },
             "episodes": 5,
-            "lateral_delta_m": 6.953480696245151,
-            "lateral_ratio_pct": 100.46371839253018,
+            "lateral_delta_m": -28.068316621049917,
+            "lateral_ratio_pct": 98.12816124281905,
             "scenario": "scenario_19"
           }
         ],
         "sha256": {
-          "assisted": "ecc78770230565c985fc0eca5e436baf1293522b7889007fafa0d9ae779be73e",
-          "baseline": "882199ae15bd29320a230ac5cad71736b954e0659920da8c2a4ef1b115873fa8"
+          "assisted": "325e7020621321a1d2c720b72cd693ce3af5a792a17f1722afd506afc86607b8",
+          "baseline": "60980e80c731d0720a9926363c9035761bd5249f4a66380cd025be66b3c47107"
         }
       },
       "loopwm": {
         "aggregate": {
-          "ai_healthy_ticks": 18359,
-          "apogee_delta_m": -43.13651733398433,
-          "apogee_retention_pct": 97.50404707988598,
+          "apogee_delta_m": 121.7772094726563,
+          "apogee_retention_pct": 107.04623832362911,
           "assisted": {
-            "apogee_m": 1685.1219360351563,
-            "lateral_rms_m": 1545.4391195076334
+            "apogee_m": 1850.035662841797,
+            "lateral_rms_m": 1505.9109614100837
           },
           "baseline": {
             "apogee_m": 1728.2584533691406,
             "lateral_rms_m": 1530.9569784284508
           },
+          "calibration_threshold": 0.0,
           "clipped_ticks": 0,
           "episodes": 20,
+          "first_command_tick": 49,
           "gate_open_ticks": 18359,
           "gate_trips": 11641,
           "interventions": 18359,
-          "lateral_delta_m": 14.482141079182611,
-          "lateral_ratio_pct": 100.94595349727258,
-          "max_command_mps2": 3.1772545521188005,
+          "lateral_delta_m": -25.046017018367138,
+          "lateral_ratio_pct": 98.36402868458934,
+          "max_command_mps2": 2.0,
           "rows": 30000,
-          "tracking_rmse_norm": 0.8672822432311798
+          "tracking_rmse_mps2": 9.531946115442148
         },
+        "arm": "physics_baseline + exported student Delta, gated and clipped",
+        "export_sha256": "af5c5ddceacc872af0dd02e56c862848b147bac85d86ebfc80c0f8ed4e821b6a",
         "per_scenario": [
           {
-            "apogee_delta_m": -37.558349609375,
-            "apogee_retention_pct": 97.77606885927695,
+            "apogee_delta_m": 123.54665527343741,
+            "apogee_retention_pct": 107.31553055052743,
             "assisted": {
-              "apogee_m": 1651.26865234375,
-              "lateral_rms_m": 1535.9458259860737
+              "apogee_m": 1812.3736572265625,
+              "lateral_rms_m": 1500.0284293664824
             },
             "baseline": {
               "apogee_m": 1688.827001953125,
               "lateral_rms_m": 1523.7546036071085
             },
             "episodes": 5,
-            "lateral_delta_m": 12.191222378965222,
-            "lateral_ratio_pct": 100.80007780453005,
+            "lateral_delta_m": -23.72617424062605,
+            "lateral_ratio_pct": 98.44291369591531,
             "scenario": "scenario_16"
           },
           {
-            "apogee_delta_m": -49.4775390625,
-            "apogee_retention_pct": 97.3091331110613,
+            "apogee_delta_m": 137.3357177734374,
+            "apogee_retention_pct": 107.46908885582111,
             "assisted": {
-              "apogee_m": 1789.2436279296876,
-              "lateral_rms_m": 1497.0809497190135
+              "apogee_m": 1976.056884765625,
+              "lateral_rms_m": 1445.2975560274074
             },
             "baseline": {
               "apogee_m": 1838.7211669921876,
               "lateral_rms_m": 1477.782734227439
             },
             "episodes": 5,
-            "lateral_delta_m": 19.29821549157441,
-            "lateral_ratio_pct": 101.30588990144504,
+            "lateral_delta_m": -32.48517820003167,
+            "lateral_ratio_pct": 97.80176223150866,
             "scenario": "scenario_17"
           },
           {
-            "apogee_delta_m": -35.12124023437491,
-            "apogee_retention_pct": 97.76789673679458,
+            "apogee_delta_m": 99.78627929687491,
+            "apogee_retention_pct": 106.34183981417837,
             "assisted": {
-              "apogee_m": 1538.338232421875,
-              "lateral_rms_m": 1628.3029590510741
+              "apogee_m": 1673.245751953125,
+              "lateral_rms_m": 1602.1781823758797
             },
             "baseline": {
               "apogee_m": 1573.45947265625,
               "lateral_rms_m": 1618.9909801966473
             },
             "episodes": 5,
-            "lateral_delta_m": 9.311978854426798,
-            "lateral_ratio_pct": 100.57517175625621,
+            "lateral_delta_m": -16.812797820767628,
+            "lateral_ratio_pct": 98.96152615879767,
             "scenario": "scenario_18"
           },
           {
-            "apogee_delta_m": -50.388940429687636,
-            "apogee_retention_pct": 97.21919356288616,
+            "apogee_delta_m": 126.440185546875,
+            "apogee_retention_pct": 106.9778343993807,
             "assisted": {
-              "apogee_m": 1761.6372314453124,
-              "lateral_rms_m": 1517.1607731509555
+              "apogee_m": 1938.466357421875,
+              "lateral_rms_m": 1471.436730658992
             },
             "baseline": {
               "apogee_m": 1812.026171875,
               "lateral_rms_m": 1499.5050462210536
             },
             "episodes": 5,
-            "lateral_delta_m": 17.655726929901903,
-            "lateral_ratio_pct": 101.17743697991524,
+            "lateral_delta_m": -28.06831556206157,
+            "lateral_ratio_pct": 98.12816131344157,
             "scenario": "scenario_19"
           }
         ],
         "sha256": {
-          "assisted": "1eb1c15a231b22b3322e0285b766ea4b9c3f1388417326119d8f30cdd0070a88",
-          "baseline": "882199ae15bd29320a230ac5cad71736b954e0659920da8c2a4ef1b115873fa8"
+          "assisted": "a541dd26c543c314228eb515f57223819d28876606455cff6d1f678f2aa351f7",
+          "baseline": "60980e80c731d0720a9926363c9035761bd5249f4a66380cd025be66b3c47107"
         }
       },
       "lrs": {
         "aggregate": {
-          "ai_healthy_ticks": 18359,
-          "apogee_delta_m": -7.16986083984375,
-          "apogee_retention_pct": 99.58513954751001,
+          "apogee_delta_m": 120.1204956054687,
+          "apogee_retention_pct": 106.95037801616424,
           "assisted": {
-            "apogee_m": 1721.0885925292969,
-            "lateral_rms_m": 1533.6882743524125
+            "apogee_m": 1848.3789489746093,
+            "lateral_rms_m": 1506.232123174276
           },
           "baseline": {
             "apogee_m": 1728.2584533691406,
             "lateral_rms_m": 1530.9569784284508
           },
+          "calibration_threshold": 0.0,
           "clipped_ticks": 0,
           "episodes": 20,
+          "first_command_tick": 0,
           "gate_open_ticks": 18359,
           "gate_trips": 11641,
           "interventions": 18359,
-          "lateral_delta_m": 2.731295923961625,
-          "lateral_ratio_pct": 100.17840448572014,
-          "max_command_mps2": 3.33014441940196,
+          "lateral_delta_m": -24.724855254174827,
+          "lateral_ratio_pct": 98.38500652842934,
+          "max_command_mps2": 1.9930164813995361,
           "rows": 30000,
-          "tracking_rmse_norm": 0.2077583004179432
+          "tracking_rmse_mps2": 9.53890081544099
         },
+        "arm": "physics_baseline + exported student Delta, gated and clipped",
+        "export_sha256": "e3dd3cd04a22ab6abb2ca68c69625eabcb2a3c720c7f15c76b7ed269e7300f74",
         "per_scenario": [
           {
-            "apogee_delta_m": -6.212255859375091,
-            "apogee_retention_pct": 99.63215558182155,
+            "apogee_delta_m": 121.86201171874995,
+            "apogee_retention_pct": 107.21577826371895,
             "assisted": {
-              "apogee_m": 1682.61474609375,
-              "lateral_rms_m": 1526.3378017941573
+              "apogee_m": 1810.689013671875,
+              "lateral_rms_m": 1500.3291067495254
             },
             "baseline": {
               "apogee_m": 1688.827001953125,
               "lateral_rms_m": 1523.7546036071085
             },
             "episodes": 5,
-            "lateral_delta_m": 2.5831981870487652,
-            "lateral_ratio_pct": 100.16952849106632,
+            "lateral_delta_m": -23.425496857583084,
+            "lateral_ratio_pct": 98.46264636037004,
             "scenario": "scenario_16"
           },
           {
-            "apogee_delta_m": -7.431542968750136,
-            "apogee_retention_pct": 99.59583089039505,
+            "apogee_delta_m": 135.4759521484375,
+            "apogee_retention_pct": 107.36794433981805,
             "assisted": {
-              "apogee_m": 1831.2896240234375,
-              "lateral_rms_m": 1481.5943189766551
+              "apogee_m": 1974.197119140625,
+              "lateral_rms_m": 1445.6970982994235
             },
             "baseline": {
               "apogee_m": 1838.7211669921876,
               "lateral_rms_m": 1477.782734227439
             },
             "episodes": 5,
-            "lateral_delta_m": 3.811584749216081,
-            "lateral_ratio_pct": 100.25792592246037,
+            "lateral_delta_m": -32.08563592801556,
+            "lateral_ratio_pct": 97.82879883592703,
             "scenario": "scenario_17"
           },
           {
-            "apogee_delta_m": -6.0762939453125,
-            "apogee_retention_pct": 99.61382583721367,
+            "apogee_delta_m": 98.42966308593759,
+            "apogee_retention_pct": 106.25562111998808,
             "assisted": {
-              "apogee_m": 1567.3831787109375,
-              "lateral_rms_m": 1620.6016797804866
+              "apogee_m": 1671.8891357421876,
+              "lateral_rms_m": 1602.413126978052
             },
             "baseline": {
               "apogee_m": 1573.45947265625,
               "lateral_rms_m": 1618.9909801966473
             },
             "episodes": 5,
-            "lateral_delta_m": 1.6106995838392777,
-            "lateral_ratio_pct": 100.09948786642677,
+            "lateral_delta_m": -16.577853218595237,
+            "lateral_ratio_pct": 98.97603795071288,
             "scenario": "scenario_18"
           },
           {
-            "apogee_delta_m": -8.9593505859375,
-            "apogee_retention_pct": 99.50556174491305,
+            "apogee_delta_m": 124.71435546875,
+            "apogee_retention_pct": 106.88259128949012,
             "assisted": {
-              "apogee_m": 1803.0668212890625,
-              "lateral_rms_m": 1502.537944887672
+              "apogee_m": 1936.74052734375,
+              "lateral_rms_m": 1471.7966834537874
             },
             "baseline": {
               "apogee_m": 1812.026171875,
               "lateral_rms_m": 1499.5050462210536
             },
             "episodes": 5,
-            "lateral_delta_m": 3.0328986666183937,
-            "lateral_ratio_pct": 100.20225998400349,
+            "lateral_delta_m": -27.70836276726618,
+            "lateral_ratio_pct": 98.15216608726361,
             "scenario": "scenario_19"
           }
         ],
         "sha256": {
-          "assisted": "40d666b0827bfd6d53d753e588a37f5d9d7f633920e8fa9fcfcb537b9553f3a7",
-          "baseline": "882199ae15bd29320a230ac5cad71736b954e0659920da8c2a4ef1b115873fa8"
+          "assisted": "aaf15ce52eabe5aec5081eea5da4bd2e237681f847b34e40b5be3e7585d8c1e4",
+          "baseline": "60980e80c731d0720a9926363c9035761bd5249f4a66380cd025be66b3c47107"
         }
       },
       "oracle_gtheta": {
         "aggregate": {
-          "ai_healthy_ticks": 18359,
           "apogee_delta_m": 2272.221368408203,
           "apogee_retention_pct": 231.4746277663875,
           "assisted": {
@@ -729,17 +798,11 @@
             "apogee_m": 1728.2584533691406,
             "lateral_rms_m": 1530.9569784284508
           },
-          "clipped_ticks": null,
           "episodes": 20,
-          "gate_open_ticks": 18359,
-          "gate_trips": 11641,
-          "interventions": 18359,
           "lateral_delta_m": -497.60421078846525,
-          "lateral_ratio_pct": 67.49717870587956,
-          "max_command_mps2": null,
-          "rows": 30000,
-          "tracking_rmse_norm": null
+          "lateral_ratio_pct": 67.49717870587956
         },
+        "arm": "run_episode_with_oracle / fin_accel_command",
         "per_scenario": [
           {
             "apogee_delta_m": 2345.7721679687497,
@@ -807,300 +870,210 @@
           }
         ],
         "sha256": {
-          "assisted": "5a4101195fd1dee48d9f0eeb3b7b167799f21bbc58302b8d6ca40039e2677297",
-          "baseline": "882199ae15bd29320a230ac5cad71736b954e0659920da8c2a4ef1b115873fa8"
+          "assisted": "4d6e6b356df66d9728bb9a63bd0e92119d30866be2e7c9447146633a0bab4e2c",
+          "baseline": "60980e80c731d0720a9926363c9035761bd5249f4a66380cd025be66b3c47107"
         }
       }
     },
     "3": {
       "lite": {
         "aggregate": {
-          "ai_healthy_ticks": 18385,
-          "apogee_delta_m": -16.86063842773433,
-          "apogee_retention_pct": 99.0339980395921,
+          "apogee_delta_m": 122.47700195312495,
+          "apogee_retention_pct": 107.01711412048225,
           "assisted": {
-            "apogee_m": 1728.543524169922,
-            "lateral_rms_m": 1534.1642949570744
+            "apogee_m": 1867.8811645507812,
+            "lateral_rms_m": 1502.5163591225332
           },
           "baseline": {
             "apogee_m": 1745.4041625976563,
             "lateral_rms_m": 1528.1740048385427
           },
+          "calibration_threshold": 0.0,
           "clipped_ticks": 0,
           "episodes": 20,
+          "first_command_tick": 49,
           "gate_open_ticks": 18385,
           "gate_trips": 11615,
           "interventions": 18385,
-          "lateral_delta_m": 5.990290118531675,
-          "lateral_ratio_pct": 100.39199005476897,
-          "max_command_mps2": 2.7862137921120214,
+          "lateral_delta_m": -25.657645716009483,
+          "lateral_ratio_pct": 98.32102590184287,
+          "max_command_mps2": 2.0,
           "rows": 30000,
-          "tracking_rmse_norm": 0.19501613476004676
+          "tracking_rmse_mps2": 9.541179667293777
         },
+        "arm": "physics_baseline + exported student Delta, gated and clipped",
+        "export_sha256": "bd36d7b11a17cfb7e4260dafcd77407d070b990602cf32701dc97f7397880af1",
         "per_scenario": [
           {
-            "apogee_delta_m": -20.308520507812545,
-            "apogee_retention_pct": 98.82485544796826,
+            "apogee_delta_m": 131.37468261718755,
+            "apogee_retention_pct": 107.60194434119887,
             "assisted": {
-              "apogee_m": 1707.8635986328125,
-              "lateral_rms_m": 1523.9217131244939
+              "apogee_m": 1859.5468017578125,
+              "lateral_rms_m": 1491.2505146528813
             },
             "baseline": {
               "apogee_m": 1728.172119140625,
               "lateral_rms_m": 1517.2890082673389
             },
             "episodes": 5,
-            "lateral_delta_m": 6.632704857154977,
-            "lateral_ratio_pct": 100.43714182472917,
+            "lateral_delta_m": -26.038493614457593,
+            "lateral_ratio_pct": 98.28388042933283,
             "scenario": "scenario_16"
           },
           {
-            "apogee_delta_m": -17.62966308593741,
-            "apogee_retention_pct": 99.03011530062416,
+            "apogee_delta_m": 143.50227050781245,
+            "apogee_retention_pct": 107.89468612149716,
             "assisted": {
-              "apogee_m": 1800.07744140625,
-              "lateral_rms_m": 1482.1884383168076
+              "apogee_m": 1961.209375,
+              "lateral_rms_m": 1441.1259550172585
             },
             "baseline": {
               "apogee_m": 1817.7071044921875,
               "lateral_rms_m": 1474.7996093579732
             },
             "episodes": 5,
-            "lateral_delta_m": 7.388828958834438,
-            "lateral_ratio_pct": 100.50100562218424,
+            "lateral_delta_m": -33.67365434071462,
+            "lateral_ratio_pct": 97.71673018306711,
             "scenario": "scenario_17"
           },
           {
-            "apogee_delta_m": -16.000659179687545,
-            "apogee_retention_pct": 99.01974829077744,
+            "apogee_delta_m": 89.82500000000005,
+            "apogee_retention_pct": 105.50296764602645,
             "assisted": {
-              "apogee_m": 1616.3004150390625,
-              "lateral_rms_m": 1624.2260236855495
+              "apogee_m": 1722.12607421875,
+              "lateral_rms_m": 1603.621078759579
             },
             "baseline": {
               "apogee_m": 1632.30107421875,
               "lateral_rms_m": 1619.6095872263168
             },
             "episodes": 5,
-            "lateral_delta_m": 4.616436459232773,
-            "lateral_ratio_pct": 100.28503390543264,
+            "lateral_delta_m": -15.988508466737812,
+            "lateral_ratio_pct": 99.01281712624835,
             "scenario": "scenario_18"
           },
           {
-            "apogee_delta_m": -13.503710937500045,
-            "apogee_retention_pct": 99.25122331495159,
+            "apogee_delta_m": 125.2060546875,
+            "apogee_retention_pct": 106.9426378430945,
             "assisted": {
-              "apogee_m": 1789.9326416015624,
-              "lateral_rms_m": 1502.4347590677169
+              "apogee_m": 1928.6424072265625,
+              "lateral_rms_m": 1468.9959012211064
             },
             "baseline": {
               "apogee_m": 1803.4363525390625,
               "lateral_rms_m": 1496.972985344213
             },
             "episodes": 5,
-            "lateral_delta_m": 5.4617737235039385,
-            "lateral_ratio_pct": 100.3648545282364,
+            "lateral_delta_m": -27.97708412310658,
+            "lateral_ratio_pct": 98.13108957896969,
             "scenario": "scenario_19"
           }
         ],
         "sha256": {
-          "assisted": "5cdbb92baf4cf27d74fcb3df57682e06a69f997c41c61c5d775ecd54f1e6274b",
-          "baseline": "32ba089073d24461ae599a3aac73c729b81b59bf147ae81d354bb9c1352b7a43"
+          "assisted": "75f11a2b7fdbdf4fd9bb94cd2c4078220a0944f71f46bc652823f5f69dcf35d8",
+          "baseline": "7b80f3d93e72a8beb1706045c76e254b0c34829b910fabe83e83c48e215a9f3b"
         }
       },
       "loopwm": {
         "aggregate": {
-          "ai_healthy_ticks": 18385,
-          "apogee_delta_m": -47.352075195312636,
-          "apogee_retention_pct": 97.28704238192951,
+          "apogee_delta_m": 122.47819213867183,
+          "apogee_retention_pct": 107.01718231016417,
           "assisted": {
-            "apogee_m": 1698.0520874023437,
-            "lateral_rms_m": 1543.9273240116258
+            "apogee_m": 1867.8823547363281,
+            "lateral_rms_m": 1502.516061560157
           },
           "baseline": {
             "apogee_m": 1745.4041625976563,
             "lateral_rms_m": 1528.1740048385427
           },
+          "calibration_threshold": 0.0,
           "clipped_ticks": 0,
           "episodes": 20,
+          "first_command_tick": 49,
           "gate_open_ticks": 18385,
           "gate_trips": 11615,
           "interventions": 18385,
-          "lateral_delta_m": 15.753319173083128,
-          "lateral_ratio_pct": 101.03085899401539,
-          "max_command_mps2": 3.1773712239401224,
+          "lateral_delta_m": -25.6579432783858,
+          "lateral_ratio_pct": 98.32100643008276,
+          "max_command_mps2": 2.0,
           "rows": 30000,
-          "tracking_rmse_norm": 0.8695225199792208
+          "tracking_rmse_mps2": 9.541174813842318
         },
+        "arm": "physics_baseline + exported student Delta, gated and clipped",
+        "export_sha256": "6f5ff22583c13352b2876d4dc0a891d48c66894473bf9e2570c64d96e29ca70d",
         "per_scenario": [
           {
-            "apogee_delta_m": -50.287158203125045,
-            "apogee_retention_pct": 97.09015336804927,
+            "apogee_delta_m": 131.3756103515625,
+            "apogee_retention_pct": 107.60199802418362,
             "assisted": {
-              "apogee_m": 1677.8849609375,
-              "lateral_rms_m": 1533.345759361407
+              "apogee_m": 1859.5477294921875,
+              "lateral_rms_m": 1491.250251052821
             },
             "baseline": {
               "apogee_m": 1728.172119140625,
               "lateral_rms_m": 1517.2890082673389
             },
             "episodes": 5,
-            "lateral_delta_m": 16.056751094068204,
-            "lateral_ratio_pct": 101.05825264709483,
+            "lateral_delta_m": -26.038757214517773,
+            "lateral_ratio_pct": 98.28386305623788,
             "scenario": "scenario_16"
           },
           {
-            "apogee_delta_m": -54.528662109374864,
-            "apogee_retention_pct": 97.000140343039,
+            "apogee_delta_m": 143.50395507812505,
+            "apogee_retention_pct": 107.89477879706124,
             "assisted": {
-              "apogee_m": 1763.1784423828126,
-              "lateral_rms_m": 1495.976243516713
+              "apogee_m": 1961.2110595703125,
+              "lateral_rms_m": 1441.1255487084918
             },
             "baseline": {
               "apogee_m": 1817.7071044921875,
               "lateral_rms_m": 1474.7996093579732
             },
             "episodes": 5,
-            "lateral_delta_m": 21.176634158739944,
-            "lateral_ratio_pct": 101.43589908923009,
+            "lateral_delta_m": -33.67406064948136,
+            "lateral_ratio_pct": 97.71670263296716,
             "scenario": "scenario_17"
           },
           {
-            "apogee_delta_m": -39.6175537109375,
-            "apogee_retention_pct": 97.57290157210126,
+            "apogee_delta_m": 89.82565917968736,
+            "apogee_retention_pct": 105.50300802948865,
             "assisted": {
-              "apogee_m": 1592.6835205078125,
-              "lateral_rms_m": 1629.9694251065698
+              "apogee_m": 1722.1267333984374,
+              "lateral_rms_m": 1603.620891696866
             },
             "baseline": {
               "apogee_m": 1632.30107421875,
               "lateral_rms_m": 1619.6095872263168
             },
             "episodes": 5,
-            "lateral_delta_m": 10.359837880253053,
-            "lateral_ratio_pct": 100.63965031832116,
+            "lateral_delta_m": -15.988695529450752,
+            "lateral_ratio_pct": 99.01280557638385,
             "scenario": "scenario_18"
           },
           {
-            "apogee_delta_m": -44.974926757812455,
-            "apogee_retention_pct": 97.50615392140165,
+            "apogee_delta_m": 125.20754394531264,
+            "apogee_retention_pct": 106.94272042198953,
             "assisted": {
-              "apogee_m": 1758.46142578125,
-              "lateral_rms_m": 1512.9282407366754
+              "apogee_m": 1928.643896484375,
+              "lateral_rms_m": 1468.9955542114064
             },
             "baseline": {
               "apogee_m": 1803.4363525390625,
               "lateral_rms_m": 1496.972985344213
             },
             "episodes": 5,
-            "lateral_delta_m": 15.955255392462504,
-            "lateral_ratio_pct": 101.0658345573814,
+            "lateral_delta_m": -27.977431132806487,
+            "lateral_ratio_pct": 98.1310663982107,
             "scenario": "scenario_19"
           }
         ],
         "sha256": {
-          "assisted": "1ee0c522983c681c7a2333282df4a683d74b6d8e417437de9095e9eb42861b68",
-          "baseline": "32ba089073d24461ae599a3aac73c729b81b59bf147ae81d354bb9c1352b7a43"
-        }
-      },
-      "lrs": {
-        "aggregate": {
-          "ai_healthy_ticks": 18385,
-          "apogee_delta_m": -7.902496337890625,
-          "apogee_retention_pct": 99.54723974496947,
-          "assisted": {
-            "apogee_m": 1737.5016662597657,
-            "lateral_rms_m": 1531.1808268581935
-          },
-          "baseline": {
-            "apogee_m": 1745.4041625976563,
-            "lateral_rms_m": 1528.1740048385427
-          },
-          "clipped_ticks": 0,
-          "episodes": 20,
-          "gate_open_ticks": 18385,
-          "gate_trips": 11615,
-          "interventions": 18385,
-          "lateral_delta_m": 3.0068220196508264,
-          "lateral_ratio_pct": 100.19675913934739,
-          "max_command_mps2": 3.330117518920189,
-          "rows": 30000,
-          "tracking_rmse_norm": 0.21317331740730738
-        },
-        "per_scenario": [
-          {
-            "apogee_delta_m": -8.867700195312409,
-            "apogee_retention_pct": 99.48687401578252,
-            "assisted": {
-              "apogee_m": 1719.3044189453126,
-              "lateral_rms_m": 1519.9428696133125
-            },
-            "baseline": {
-              "apogee_m": 1728.172119140625,
-              "lateral_rms_m": 1517.2890082673389
-            },
-            "episodes": 5,
-            "lateral_delta_m": 2.65386134597361,
-            "lateral_ratio_pct": 100.17490809802966,
-            "scenario": "scenario_16"
-          },
-          {
-            "apogee_delta_m": -8.8365478515625,
-            "apogee_retention_pct": 99.51386294140985,
-            "assisted": {
-              "apogee_m": 1808.870556640625,
-              "lateral_rms_m": 1478.9896661477858
-            },
-            "baseline": {
-              "apogee_m": 1817.7071044921875,
-              "lateral_rms_m": 1474.7996093579732
-            },
-            "episodes": 5,
-            "lateral_delta_m": 4.1900567898126155,
-            "lateral_ratio_pct": 100.28411024543442,
-            "scenario": "scenario_17"
-          },
-          {
-            "apogee_delta_m": -6.9005615234375455,
-            "apogee_retention_pct": 99.57724946503878,
-            "assisted": {
-              "apogee_m": 1625.4005126953125,
-              "lateral_rms_m": 1621.3905170317373
-            },
-            "baseline": {
-              "apogee_m": 1632.30107421875,
-              "lateral_rms_m": 1619.6095872263168
-            },
-            "episodes": 5,
-            "lateral_delta_m": 1.7809298054205556,
-            "lateral_ratio_pct": 100.1099604385814,
-            "scenario": "scenario_18"
-          },
-          {
-            "apogee_delta_m": -7.0051757812500455,
-            "apogee_retention_pct": 99.6115651228064,
-            "assisted": {
-              "apogee_m": 1796.4311767578124,
-              "lateral_rms_m": 1500.5048916854053
-            },
-            "baseline": {
-              "apogee_m": 1803.4363525390625,
-              "lateral_rms_m": 1496.972985344213
-            },
-            "episodes": 5,
-            "lateral_delta_m": 3.5319063411923253,
-            "lateral_ratio_pct": 100.23593654499918,
-            "scenario": "scenario_19"
-          }
-        ],
-        "sha256": {
-          "assisted": "d460c3426de1671fc39a62ea75893d97a759fa6c4ff2dffefde9f74f561c5d46",
-          "baseline": "32ba089073d24461ae599a3aac73c729b81b59bf147ae81d354bb9c1352b7a43"
+          "assisted": "f42e40dcc7d27f74d329397734d6ec09a1f38ebf0c05f96361803cd62c7e8a5b",
+          "baseline": "7b80f3d93e72a8beb1706045c76e254b0c34829b910fabe83e83c48e215a9f3b"
         }
       },
       "oracle_gtheta": {
         "aggregate": {
-          "ai_healthy_ticks": 18385,
           "apogee_delta_m": 2252.268774414062,
           "apogee_retention_pct": 229.03995662884452,
           "assisted": {
@@ -1111,17 +1084,11 @@
             "apogee_m": 1745.4041625976563,
             "lateral_rms_m": 1528.1740048385427
           },
-          "clipped_ticks": null,
           "episodes": 20,
-          "gate_open_ticks": 18385,
-          "gate_trips": 11615,
-          "interventions": 18385,
           "lateral_delta_m": -505.1217091436404,
-          "lateral_ratio_pct": 66.94606062239565,
-          "max_command_mps2": null,
-          "rows": 30000,
-          "tracking_rmse_norm": null
+          "lateral_ratio_pct": 66.94606062239565
         },
+        "arm": "run_episode_with_oracle / fin_accel_command",
         "per_scenario": [
           {
             "apogee_delta_m": 2304.8783203125,
@@ -1189,51 +1156,40 @@
           }
         ],
         "sha256": {
-          "assisted": "14a499d586f9cb48eaeaf8bd88607838eab7338a58a0190017190f1d5ad75d8f",
-          "baseline": "32ba089073d24461ae599a3aac73c729b81b59bf147ae81d354bb9c1352b7a43"
+          "assisted": "cc50d1ee1b9e6a6fb5da8a1e51d9f9f350e1296f22cea27f3b39c0617135da69",
+          "baseline": "7b80f3d93e72a8beb1706045c76e254b0c34829b910fabe83e83c48e215a9f3b"
         }
       }
     }
   },
-  "sim_source": "commit e1b12cb acceleration fin mapping, read-only via scripts/ab_control; oracle uses run_episode_with_oracle / ReferenceOptimizer::fin_accel_command",
+  "sim_source": "read-only scripts/ab_control_v3 on commit cee6202c97825c0e66dc54283a9926417cd87075; oracle uses run_episode_with_oracle / ReferenceOptimizer::fin_accel_command (v3 g_accel, not g_theta)",
   "students": [
     {
-      "bin": "ai/out/run4/loopwm/loopwm_student.bin",
-      "calibration": "ai/out/run4/loopwm/calibration.json",
-      "calibration_method": "isotonic",
-      "g_max": 1.324554204940796,
-      "kind": "v2 stateful student binary export",
-      "name": "loopwm",
-      "sha256": "16752323c29e1fe9bd8b1027af74f149b7bd033ad8487ca5f2c9ca3be85dfe05",
-      "threshold": 0.0
+      "export": "ai/out/v3_final/runs/loopwm/s1/loopwm.pt",
+      "family": "loopwm",
+      "kind": "window checkpoint",
+      "name": "loopwm"
     },
     {
-      "bin": "ai/out/run4/lrs/lrs.bin",
-      "calibration": "ai/out/run4/lrs/calibration.json",
-      "calibration_method": "isotonic",
-      "g_max": 1.6310008764266968,
-      "kind": "v2 stateful student binary export",
-      "name": "lrs",
-      "sha256": "975bc4a66baef9321778ee1b546436a7290846f986af6b0efef85d3bfe1a1aa7",
-      "threshold": 0.3139237422341333
-    },
-    {
-      "bin": "ai/out/run4/lite/lite.pt",
-      "calibration": "ai/out/run4/lite/calibration.json",
-      "calibration_method": "temperature",
-      "g_max": 1.0,
-      "kind": "windowed lite torch export",
-      "name": "lite",
-      "sha256": "07fd43e09256fed526158d10d720994fa03972ee69ff154bf0e82df87629e319",
-      "threshold": 0.011412002762333047
+      "export": "ai/out/v3_final/runs/loopwm-lite/s1/lite.pt",
+      "family": "loopwm-lite",
+      "kind": "window checkpoint",
+      "name": "lite"
     }
   ],
-  "supersedes": "12 s closed-loop A/B (commit 42df574) and surrogate A/B (commit 237920a); both void",
-  "task": "closed-loop AI assist vs zero-command PID on OR-aligned held-out scenarios",
+  "supersedes": "the v1/v2 closed-loop ab_report at e57c6bf and the earlier surrogate A/B at 237920a; both are void, not smaller versions of these results",
+  "task": "closed-loop v3 AI assist vs zero command on OR-aligned held-out scenarios",
   "verdict": {
-    "beats_apogee": false,
-    "beats_lateral": false,
-    "pass": false,
-    "primary": "loopwm"
+    "any_student_beats_zero_seed1": [
+      "loopwm",
+      "lite",
+      "lrs"
+    ],
+    "beats_apogee": true,
+    "beats_lateral": true,
+    "oracle_positive_control": true,
+    "pass": true,
+    "primary": "loopwm",
+    "status": "PASS"
   }
 }
