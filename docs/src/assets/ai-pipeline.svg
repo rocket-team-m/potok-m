@@ -1,0 +1,63 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 580" width="1000" height="580" role="img" aria-label="Конвейер ИИ-ассистента">
+  <title>Конвейер ИИ-ассистента</title>
+  <rect width="1000" height="580" fill="#ffffff"/>
+  <rect x="0.5" y="0.5" width="999" height="579" fill="none" stroke="#d7dce5"/>
+  <text x="32" y="46" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="21" font-weight="700" fill="#0f172a">Конвейер ИИ-ассистента</text>
+  <text x="32" y="70" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="12.5" fill="#475569">Офлайн-обучение и бортовой контур; модель-советчик не имеет прямого управления рулями</text>
+  <text x="32" y="98" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="11" font-weight="700" letter-spacing="1.2" fill="#3457d5">ОФЛАЙН · ОБУЧЕНИЕ</text>
+  <rect x="32" y="110" width="160" height="72" rx="3" fill="#f5f7fb" stroke="#d7dce5"/>
+  <text x="46" y="130.0" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="11.5" font-weight="700" fill="#0f172a">validation v3</text>
+  <text x="46" y="147.5" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="11.5" fill="#475569">80 train / 20 held-out</text>
+  <rect x="230" y="110" width="160" height="72" rx="3" fill="#f5f7fb" stroke="#d7dce5"/>
+  <text x="244" y="130.0" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="11.5" font-weight="700" fill="#0f172a">LoopWM · учитель</text>
+  <text x="244" y="147.5" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="11.5" fill="#475569">JEPA + KoLeo, ветер в цели</text>
+  <rect x="428" y="110" width="160" height="72" rx="3" fill="#f5f7fb" stroke="#d7dce5"/>
+  <text x="442" y="130.0" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="11.5" font-weight="700" fill="#0f172a">дистилляция</text>
+  <text x="442" y="147.5" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="11.5" fill="#475569">LoopWM-lite → LRS-TCN</text>
+  <rect x="626" y="110" width="160" height="72" rx="3" fill="#f5f7fb" stroke="#d7dce5"/>
+  <text x="640" y="130.0" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="11.5" font-weight="700" fill="#0f172a">калибровка</text>
+  <text x="640" y="147.5" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="11.5" fill="#475569">confidence, ECE ≤ 0,05</text>
+  <rect x="824" y="110" width="160" height="72" rx="3" fill="#f5f7fb" stroke="#d7dce5"/>
+  <text x="838" y="130.0" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="11.5" font-weight="700" fill="#0f172a">экспорт</text>
+  <text x="838" y="147.5" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="11.5" fill="#475569">POTOKM3 + SHA-256</text>
+  <path d="M192 146 L221 146" fill="none" stroke="#475569" stroke-width="1.6"/>
+  <path d="M220 142 L228 146 L220 150" fill="none" stroke="#475569" stroke-width="1.6"/>
+  <path d="M390 146 L419 146" fill="none" stroke="#475569" stroke-width="1.6"/>
+  <path d="M418 142 L426 146 L418 150" fill="none" stroke="#475569" stroke-width="1.6"/>
+  <path d="M588 146 L617 146" fill="none" stroke="#475569" stroke-width="1.6"/>
+  <path d="M616 142 L624 146 L616 150" fill="none" stroke="#475569" stroke-width="1.6"/>
+  <path d="M786 146 L815 146" fill="none" stroke="#475569" stroke-width="1.6"/>
+  <path d="M814 142 L822 146 L814 150" fill="none" stroke="#475569" stroke-width="1.6"/>
+  <text x="32" y="236" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="11" font-weight="700" letter-spacing="1.2" fill="#3457d5">НА БОРТУ · 50 Гц ЗАПРОС / 500 Гц КОНТУР</text>
+  <rect x="32" y="248" width="160" height="72" rx="3" fill="#f5f7fb" stroke="#d7dce5"/>
+  <text x="46" y="268.0" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="11.5" font-weight="700" fill="#0f172a">STM32 · датчики</text>
+  <text x="46" y="285.5" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="11.5" fill="#475569">6 MEMS → ES-EKF</text>
+  <rect x="230" y="248" width="160" height="72" rx="3" fill="#f5f7fb" stroke="#d7dce5"/>
+  <text x="244" y="268.0" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="11.5" font-weight="700" fill="#0f172a">UART · запрос</text>
+  <text x="244" y="285.5" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="11.5" fill="#475569">56 B, CRC16, seq</text>
+  <rect x="428" y="248" width="160" height="72" rx="3" fill="#f5f7fb" stroke="#d7dce5"/>
+  <text x="442" y="268.0" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="11.5" font-weight="700" fill="#0f172a">edge · watchguard</text>
+  <text x="442" y="285.5" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="11.5" fill="#475569">SHA-256, 3 пропуска → стоп</text>
+  <rect x="626" y="248" width="160" height="72" rx="3" fill="#f5f7fb" stroke="#d7dce5"/>
+  <text x="640" y="268.0" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="11.5" font-weight="700" fill="#0f172a">инференс</text>
+  <text x="640" y="285.5" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="11.5" fill="#475569">2 поправки + confidence</text>
+  <rect x="824" y="248" width="160" height="72" rx="3" fill="#f5f7fb" stroke="#d7dce5"/>
+  <text x="838" y="268.0" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="11.5" font-weight="700" fill="#0f172a">STM32 · PID</text>
+  <text x="838" y="285.5" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="11.5" fill="#475569">±10 м/с², интерлок</text>
+  <path d="M192 284 L221 284" fill="none" stroke="#475569" stroke-width="1.6"/>
+  <path d="M220 280 L228 284 L220 288" fill="none" stroke="#475569" stroke-width="1.6"/>
+  <path d="M390 284 L419 284" fill="none" stroke="#475569" stroke-width="1.6"/>
+  <path d="M418 280 L426 284 L418 288" fill="none" stroke="#475569" stroke-width="1.6"/>
+  <path d="M588 284 L617 284" fill="none" stroke="#475569" stroke-width="1.6"/>
+  <path d="M616 280 L624 284 L616 288" fill="none" stroke="#475569" stroke-width="1.6"/>
+  <path d="M786 284 L815 284" fill="none" stroke="#475569" stroke-width="1.6"/>
+  <path d="M814 280 L822 284 L814 288" fill="none" stroke="#475569" stroke-width="1.6"/>
+  <rect x="32" y="368" width="952" height="52" rx="3" fill="#f5f7fb" stroke="#d7dce5"/>
+  <text x="46" y="390" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="12" font-weight="700" fill="#0f172a">Ответ 14 B: две поправки, confidence, ai_healthy, CRC16. На активном участке вывод сети запрещён.</text>
+  <rect x="32" y="436" width="952" height="52" rx="3" fill="#f5f7fb" stroke="#d7dce5"/>
+  <text x="46" y="458" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="12" font-weight="700" fill="#0f172a">Цель v3 — команда руля [g_accel_y, −g_accel_x] м/с²; угловая g_theta — только диагностика.</text>
+  <rect x="32" y="504" width="952" height="52" rx="3" fill="#f5f7fb" stroke="#d7dce5"/>
+  <text x="46" y="526" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="12" font-weight="700" fill="#0f172a">Физический baseline доступен борту; истинный ветер и порыв в inputs студента не попадают.</text>
+  <text x="32" y="572" font-family="system-ui,-apple-system,'Segoe UI',sans-serif" font-size="11" fill="#475569">Схема по docs/src/content/docs/ai/concept.md, docs/src/content/docs/ai/safety.md</text>
+</svg>

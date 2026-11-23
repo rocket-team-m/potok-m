@@ -108,6 +108,17 @@ bash scripts/check_visual.sh --self-test
 ```
 
 Демо открывает фиксированный проект `Sample Rocket` без выбора файла.
+
+![Sample Rocket в RocketCraft](../../../assets/rocketcraft-demo-light.png)
+
+*Скриншот: `Sample Rocket`, светлая тема, 1920×1080; 4 детали, предпросмотр без
+физики, Mesh/Aero/FEA — NOT RUN.*
+
+![Палитра команд RocketCraft](../../../assets/rocketcraft-palette-dark.png)
+
+*Скриншот: палитра по Ctrl+K, тёмная тема, 1920×1080; 14 команд с индексами
+[01]…[14]. Это снимки интерфейса, не baseline визуальной матрицы.*
+
 `scripts/check_visual.sh` в полном режиме красный по замыслу: 12 скриншотов
 матрицы не коммитятся, а точка съёмки отсутствует.
 
