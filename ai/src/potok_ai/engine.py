@@ -36,6 +36,7 @@ from .calibration import (
     expected_calibration_error,
     sigmoid,
 )
+from .conf_integration import split_confidence_score
 from .curriculum import STAGES as CURRICULUM_STAGES
 from .curriculum import Curriculum
 from .data import (
@@ -59,7 +60,8 @@ MODELS = ("lrs", "loopwm-lite", "loopwm")
 STAGES = ("train", "distill", "eval")
 METRIC_FIELDS = (
     "model", "rmse_train", "rmse_held_out", "ratio", "params", "mac", "bytes",
-    "mae", "max_error", "ece", "seed", "config_hash",
+    "mae", "max_error", "ece", "ece_source", "ece_held_out", "conformal_coverage",
+    "seed", "config_hash",
 )
 
 
@@ -147,7 +149,12 @@ class Metrics:
     bytes: int
     mae: float = 0.0
     max_error: float = 0.0
+    # Legacy field: in-sample ECE from the calibration fit (see `ece_source`).
     ece: float = 0.0
+    ece_source: str = "in-sample"
+    # Honest scores on a disjoint fit/score split of the held-out predictions.
+    ece_held_out: float = 0.0
+    conformal_coverage: float = 0.0
     seed: int = 1
     config_hash: str = ""
 
@@ -188,7 +195,9 @@ def config_hash(cfg: TrainConfig) -> str:
 
 def _split_metrics(model: str, rmse: dict, held_out: set[str], params: int, mac: int,
                    size: int, *, mae: float = 0.0, max_error: float = 0.0,
-                   ece: float = 0.0, seed: int = 1, hash_value: str = "") -> Metrics:
+                   ece: float = 0.0, ece_source: str = "in-sample", ece_held_out: float = 0.0,
+                   conformal_coverage: float = 0.0, seed: int = 1,
+                   hash_value: str = "") -> Metrics:
     train = [value for name, value in rmse.items() if name not in held_out]
     held = [value for name, value in rmse.items() if name in held_out]
     return Metrics(
@@ -202,6 +211,9 @@ def _split_metrics(model: str, rmse: dict, held_out: set[str], params: int, mac:
         mae=float(mae),
         max_error=float(max_error),
         ece=float(ece),
+        ece_source=ece_source,
+        ece_held_out=float(ece_held_out),
+        conformal_coverage=float(conformal_coverage),
         seed=int(seed),
         config_hash=hash_value,
     )
@@ -210,30 +222,51 @@ def _split_metrics(model: str, rmse: dict, held_out: set[str], params: int, mac:
 def build_metrics(model: str, cfg: TrainConfig, rmse: dict, held_out: set[str],
                   params: int, mac: int, size: int,
                   logits: np.ndarray, error: np.ndarray) -> Metrics:
-    """Fold held-out confidence logits and command errors into the report."""
+    """Fold held-out confidence logits and command errors into the report.
+
+    ``ece`` and ``calibration.json`` keep their legacy in-sample semantics and
+    are labelled ``ece_source="in-sample"``. With ``--calibrate`` the disjoint
+    split is scored separately into ``ece_held_out`` / ``conformal_coverage``
+    and the fitted split-conformal payload is exported as ``conformal.json``.
+    """
     z = np.asarray(logits, dtype=np.float64).ravel()
     err = np.asarray(error, dtype=np.float64).ravel()
     if z.size == 0 or err.size != z.size:
         raise ValueError("held-out predictions must be non-empty and paired")
 
     raw_ece = expected_calibration_error(sigmoid(z), correctness(err, cfg.calib_tol))
-    calibrated_ece = raw_ece
+    ece = raw_ece
+    ece_held_out = 0.0
+    conformal_coverage = 0.0
     if cfg.calibrate:
         result = conformal_calibrate(
             z, err, tol=cfg.calib_tol, target_ece=cfg.ece_target,
             max_loops=DEFAULT_MAX_LOOPS,
         )
-        calibrated_ece = result.ece
+        ece = result.ece
         payload = result.as_dict()
-        payload.update(model=model, seed=cfg.seed, config_hash=config_hash(cfg))
+        payload.update(
+            model=model, seed=cfg.seed, config_hash=config_hash(cfg),
+            ece_source="in-sample",
+        )
         cfg.out.mkdir(parents=True, exist_ok=True)
         (cfg.out / "calibration.json").write_text(json.dumps(payload, indent=2) + "\n")
+
+        split = split_confidence_score(
+            z, err, cfg.out, seed=cfg.seed, tol=cfg.calib_tol,
+            target_ece=cfg.ece_target, max_loops=DEFAULT_MAX_LOOPS,
+        )
+        ece_held_out = split.ece_held_out
+        conformal_coverage = split.conformal_coverage
 
     return _split_metrics(
         model, rmse, held_out, params, mac, size,
         mae=float(np.abs(err).mean()),
         max_error=float(err.max()),
-        ece=calibrated_ece,
+        ece=ece,
+        ece_source="in-sample",
+        ece_held_out=ece_held_out,
+        conformal_coverage=conformal_coverage,
         seed=cfg.seed,
         hash_value=config_hash(cfg),
     )
