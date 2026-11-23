@@ -135,6 +135,26 @@ fn training_grid_varies_every_previously_fixed_knob() {
 }
 
 #[test]
+fn calm_replay_anchor_stays_at_shipped_nominal() {
+    let cfg = Config::default();
+    for index in [0u64, SCENARIO_COUNT as u64, 3 * SCENARIO_COUNT as u64] {
+        let sc = scenario(index);
+        assert_eq!(sc.split, Split::Train);
+        assert_eq!(
+            sample_curriculum(&cfg, index),
+            CurriculumKnobs {
+                lag_scale: 1.0,
+                turbulence_sigma: cfg.wind.turbulence_sigma,
+                turbulence_scale: cfg.wind.turbulence_scale,
+                gust_duration_s: cfg.wind.gust_duration,
+                direction_sign: 1.0,
+            },
+            "the calm replay anchor must not drift with the curriculum"
+        );
+    }
+}
+
+#[test]
 fn knobs_are_deterministic_and_each_owns_its_substream() {
     let cfg = Config::default();
 

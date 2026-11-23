@@ -455,7 +455,20 @@ fn dr_draw(cfg: &Config, index: u64, tag: u64) -> f64 {
 /// OOD). Every knob is always sampled - there is no fixed-value fallback.
 pub fn sample_curriculum(cfg: &Config, index: u64) -> CurriculumKnobs {
     let dr = &cfg.curriculum;
-    let held_out = scenario(index).split == Split::HeldOut;
+    let sc = scenario(index);
+    // Cell 0 is the S0 calm replay anchor: no mean wind, gust or shear. It is
+    // deliberately left at the shipped nominal so the zero-command gate and
+    // the golden episode pin stay a fixed reference for every other arm.
+    if sc.split == Split::Train && sc.v10_u == 0.0 && sc.gust_u == 0.0 && sc.shear_u == 0.0 {
+        return CurriculumKnobs {
+            lag_scale: 1.0,
+            turbulence_sigma: cfg.wind.turbulence_sigma,
+            turbulence_scale: cfg.wind.turbulence_scale,
+            gust_duration_s: cfg.wind.gust_duration,
+            direction_sign: 1.0,
+        };
+    }
+    let held_out = sc.split == Split::HeldOut;
     let lag_scale = if held_out {
         1.0
     } else {
