@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Поток-М">
+  <rect width="64" height="64" rx="10" fill="#0c0c0c"/>
+  <rect x="0" y="0" width="5" height="64" rx="2" fill="#6b8fff"/>
+  <path d="M13 46V18L32 38 51 18v28" fill="none" stroke="#6b8fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

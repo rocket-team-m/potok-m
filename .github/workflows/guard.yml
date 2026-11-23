@@ -15,6 +15,25 @@ jobs:
       - uses: actions/checkout@v5
       - name: Reject binary extensions and files over 2 MB
         run: bash .github/scripts/guard.sh
+      - name: Image allowlist · site/assets/*.png and docs images, ≤2 MB
+        run: |
+          set -euo pipefail
+          fail=0
+          err() { echo "::error file=$1::$2"; fail=1; }
+
+          # SVG is text; the allowlist covers tracked raster assets only.
+          while IFS= read -r f; do
+            case "$f" in
+              site/assets/*.png|docs/*) ;;
+              *) err "$f" "raster image outside allowlist (site/assets/*.png, docs/**)"; continue ;;
+            esac
+            size=$(stat -c%s "$f")
+            if [ "$size" -gt 2097152 ]; then
+              err "$f" "raster image exceeds the 2 MB ceiling"
+            fi
+          done < <(git ls-files | grep -Ei '\.(png|jpe?g|gif|webp|ico|bmp|tiff?)$' || true)
+
+          exit "$fail"
 
   license-gate:
     name: License gate · GPL-3.0-or-later

@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-label="Поток-М — открытая ракетная инженерия">
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" fill="none" stroke="#1f1f1f" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="630" fill="#0c0c0c"/>
+  <rect width="1200" height="630" fill="url(#grid)"/>
+  <rect x="0" y="0" width="8" height="630" fill="#6b8fff"/>
+
+  <text x="64" y="94" fill="#6b8fff" font-family="DejaVu Sans Mono, monospace" font-size="21" letter-spacing="2">[01] ОТКРЫТАЯ РАКЕТНАЯ ИНЖЕНЕРИЯ</text>
+
+  <text x="62" y="266" fill="#f5f5f5" font-family="DejaVu Sans, sans-serif" font-size="108" font-weight="700" letter-spacing="-3">ПОТОК-М</text>
+  <text x="66" y="326" fill="#8a8a8a" font-family="DejaVu Sans, sans-serif" font-size="32">Ракета, которую проверяют до пуска.</text>
+
+  <line x1="64" y1="382" x2="1136" y2="382" stroke="#2e2e2e" stroke-width="1"/>
+
+  <g fill="none" stroke="#262626" stroke-width="1">
+    <path d="M64 410V530 M232 410V530 M400 410V530 M568 410V530 M736 410V530 M904 410V530 M1072 410V530"/>
+    <path d="M64 470H1136"/>
+  </g>
+
+  <polyline points="64,516 136,514 208,510 280,503 352,492 424,478 496,462 568,449 640,441 712,436 784,433 856,431 928,430 1000,429 1072,429 1136,428"
+            fill="none" stroke="#6b8fff" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+  <g fill="#6b8fff">
+    <circle cx="64" cy="516" r="4"/>
+    <circle cx="352" cy="492" r="4"/>
+    <circle cx="640" cy="441" r="4"/>
+    <circle cx="928" cy="430" r="4"/>
+    <circle cx="1136" cy="428" r="5"/>
+  </g>
+  <g fill="#0c0c0c" stroke="#6b8fff" stroke-width="2">
+    <circle cx="496" cy="462" r="5"/>
+    <circle cx="784" cy="433" r="5"/>
+    <circle cx="1072" cy="429" r="5"/>
+  </g>
+
+  <line x1="64" y1="560" x2="1136" y2="560" stroke="#2e2e2e" stroke-width="1"/>
+  <text x="64" y="594" fill="#8a8a8a" font-family="DejaVu Sans Mono, monospace" font-size="18" letter-spacing="1">6-DoF · 500 ГЦ · v3 · GPL-3.0-OR-LATER</text>
+  <text x="1136" y="594" fill="#6b8fff" font-family="DejaVu Sans Mono, monospace" font-size="18" letter-spacing="1" text-anchor="end">ROCKET-TEAM-M / POTOK-M</text>
+</svg>
