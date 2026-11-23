@@ -33,12 +33,12 @@
     :root {
       color-scheme: dark light;
       --bg: #0c0c0c; --panel: #131313; --text: #f5f5f5; --muted: #8a8a8a;
-      --line: #2e2e2e; --grid: #212121; --accent: #6b8fff; --ok: #54d483; --warn: #f4b434;
+      --line: #2e2e2e; --grid: #212121; --accent: #6b8fff; --ok: #54d483; --warn: #f4b434; --fail: #e5484d;
     }
     @media (prefers-color-scheme: light) {
       :root {
         --bg: #fbfbfb; --panel: #ffffff; --text: #111111; --muted: #666666;
-        --line: #e5e5e5; --grid: #ededed; --accent: #3457d5; --ok: #239f50; --warn: #eb980a;
+        --line: #e5e5e5; --grid: #ededed; --accent: #3457d5; --ok: #239f50; --warn: #eb980a; --fail: #c62f36;
       }
     }
     * { box-sizing: border-box; }
@@ -92,6 +92,7 @@
     .row .val { font-size: 15px; }
     .pill { color: var(--ok); font-size: 13px; }
     .pill.warn { color: var(--warn); }
+    .pill.fail { color: var(--fail); }
     .telemetry { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 28px 0; }
     .telem-head { display: flex; justify-content: space-between; gap: 16px; color: var(--muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
     .rail { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 32px; margin-top: 24px; }
@@ -208,7 +209,7 @@
     </section>
 
     <div class="strip wrap">
-      <div class="stat"><div class="v mono" style="color:var(--ok)">PASS</div><div class="l">v3 A/B · F1 positive control</div></div>
+      <div class="stat"><div class="v mono" style="color:var(--fail)">FAIL</div><div class="l">v4 A/B · AIPOST1 · 4/7 gates pass</div></div>
       <div class="stat"><div class="v mono">1.86 %</div><div class="l">OpenRocket parity</div></div>
       <div class="stat"><div class="v mono">500 Гц</div><div class="l">контур управления</div></div>
       <div class="stat"><div class="v mono">GPL-3.0</div><div class="l">собственный код</div></div>
@@ -229,22 +230,22 @@
     </section>
 
     <section class="section wrap" id="telemetry">
-      <div class="sec-head"><span class="idx mono">03</span><h2>Замкнутый контур в числах</h2><span class="note mono">ab_report.json · post-FIXPUMP · F1 · seed 1 · loopwm · 20 эпизодов · PASS</span></div>
+      <div class="sec-head"><span class="idx mono">03</span><h2>Замкнутый контур в числах</h2><span class="note mono">ab_report_v4.json · AIPOST1 · post-FIXPUMP · 3 seed · 20 эпизодов · 4 PASS / 7 FAIL</span></div>
       <div class="telemetry">
         <div class="telem-head mono"><span>Боковое СКО · v3 flown-truth · 30 с</span><span>POTOKTRJ v3 / 6-DoF</span></div>
         <div class="rail">
-          <div class="rail-val mono">1309.409<small>м · zero command</small></div>
+          <div class="rail-val mono">1690.76<small>м · zero command · dep</small></div>
           <div class="rail-line" aria-hidden="true"><span class="rail-dot"></span></div>
-          <div class="rail-val mono accent">1267.367<small>м · AI assist</small></div>
+          <div class="rail-val mono accent">1611.99<small>м · teacher_v2 · dep · seed 1</small></div>
         </div>
         <div class="rail-meta mono">
-          <span>Δ −42.042 м</span><span>96.789 % от baseline</span><span>апогей +104.041 м · диагностика</span><span style="color:var(--ok)">PASS · F1 · loopwm/lite 3/3 · lrs 2/3</span><span>OR-parity 1.86 % / лимит 2 %</span>
+          <span>Δ −78.76 м</span><span>апогей 1973.74 → 2137.89 м</span><span style="color:var(--fail)">FAIL · v4 · AIPOST1 · 4 PASS / 7 FAIL</span><span>lateral &gt; 1000 м все seed · apogee &lt; 2000 м s2/s3</span><span>F1 (исторический): PASS по латерали+знаку</span><span>OR-parity 1.86 % / лимит 2 %</span>
         </div>
       </div>
       <div class="graphs">
         <figure class="graph">
-          <figcaption class="mono">01 / Боковое СКО по сценариям · м</figcaption>
-          <svg viewBox="0 0 520 175" role="img" aria-label="Боковое СКО post-FIXPUMP: baseline 1268.064–1376.938 м против assist 1220.899–1342.997 м в сценариях 16–19">
+          <figcaption class="mono">01 / F1 (исторический) · Боковое СКО по сценариям · м</figcaption>
+          <svg viewBox="0 0 520 175" role="img" aria-label="F1 (исторический): боковое СКО post-FIXPUMP, baseline 1268.064–1376.938 м против assist 1220.899–1342.997 м в сценариях 16–19">
             <line class="gridline" x1="50" y1="46" x2="510" y2="46"/>
             <line class="gridline" x1="50" y1="98" x2="510" y2="98"/>
             <line class="gridline" x1="50" y1="150" x2="510" y2="150"/>
@@ -258,8 +259,8 @@
           <div class="legend mono"><span><i></i>zero command</span><span class="a"><i></i>AI assist</span></div>
         </figure>
         <figure class="graph">
-          <figcaption class="mono">02 / Апогей по сценариям · м</figcaption>
-          <svg viewBox="0 0 520 175" role="img" aria-label="Апогей post-FIXPUMP: baseline 1756.220–2135.255 м против assist 1843.789–2264.592 м в сценариях 16–19">
+          <figcaption class="mono">02 / F1 (исторический) · Апогей · м (только диагностика)</figcaption>
+          <svg viewBox="0 0 520 175" role="img" aria-label="F1 (исторический, только диагностика): апогей post-FIXPUMP, baseline 1756.220–2135.255 м против assist 1843.789–2264.592 м в сценариях 16–19">
             <line class="gridline" x1="50" y1="33" x2="510" y2="33"/>
             <line class="gridline" x1="50" y1="92" x2="510" y2="92"/>
             <line class="gridline" x1="50" y1="150" x2="510" y2="150"/>
@@ -273,7 +274,7 @@
           <div class="legend mono"><span><i></i>zero command</span><span class="a"><i></i>AI assist</span></div>
         </figure>
       </div>
-      <p class="src mono">Источник: <a href="docs/ai/gates/">гейты ИИ</a> · <a href="docs/sim/validation/">валидация симулятора</a> · <code>ab_report.md/json</code> (post-FIXPUMP, F1), seed 1, экспорт loopwm. Сценарии 16–19, по 5 эпизодов; разница −42.042 м при ULP сидкара 6.1e−05 м. Вердикт PASS (exit 0): oracle достоверен — латераль ↓ на всех сидах, 12/12 знаков, привод на пределе; апогей — диагностика. loopwm/lite CREDITED 3/3, lrs PARTIAL 2/3 (нет s3). Пре-FIXPUMP +2 км (3971 м) и старый PASS отозваны: выигрыш скромный, ~3% латерали.</p>
+      <p class="src mono">Источник: <a href="docs/ai/gates/">гейты ИИ</a> · <a href="docs/sim/validation/">валидация симулятора</a> · <code>scripts/ab_report_v4.md/json</code> (AIPOST1, FAIL, exit 1, 4 PASS / 7 FAIL) и <code>ab_report.md/json</code> (исторический F1, PASS, exit 0). <strong>v4</strong>: 20 held-out эпизодов на seed, deployment-латераль 1611.99 / 1632.11 / 1642.11 м &gt; 1000 м, апогей 1974.90 / 1965.68 м &lt; 2000 м на seed 2/3, −35 % / +15 % и oracle-контроль не проходят; победы не заявлено. <strong>F1</strong> (графики ниже) проверял только латераль+знак с апогеем-диагностикой: oracle −17.312 / −10.503 / −8.382 м, 12/12 знаков, loopwm/lite 3/3, lrs 2/3. Пре-FIXPUMP +2 км и старый PASS отозваны.</p>
     </section>
 
     <section class="section wrap" id="system">
@@ -323,13 +324,13 @@
           <span class="shot-frame"><svg viewBox="0 0 320 180" role="img" aria-label="Схематичный журнал обучения и A/B">
             <line class="hair" x1="0" y1="18" x2="320" y2="18"/>
             <text class="hl" x="10" y="13">AI / CLOSED LOOP</text>
-            <text x="12" y="42">seed 1  loopwm  ep 20  post-FIXPUMP</text>
-            <text x="12" y="60">lateral  1309.409 → 1267.367</text>
-            <text class="hl" x="12" y="78">apogee   +104.04 m  диагностика</text>
-            <text x="12" y="96">gate trips 11280  clip 0</text>
-            <text x="12" y="114">rmse 9.819  ticks 30000</text>
+            <text x="12" y="42">seed 1  teacher_v2  ep 20  post-FIXPUMP</text>
+            <text x="12" y="60">dep lateral  1690.76 → 1611.99</text>
+            <text class="hl" x="12" y="78">apogee  1973.74 → 2137.89 m</text>
+            <text x="12" y="96">gate closed 11280  clip 9259</text>
+            <text x="12" y="114">v4 gates  4 PASS / 7 FAIL</text>
             <line class="hair" x1="12" y1="132" x2="308" y2="132"/>
-            <text x="12" y="152" style="fill:var(--ok)">V3 A/B PASS (F1)</text><text x="228" y="152">loopwm 3/3</text>
+            <text x="12" y="152" style="fill:var(--fail)">V4 A/B FAIL (AIPOST1)</text><text x="228" y="152">F1: PASS (hist)</text>
           </svg></span>
           <span class="shot-cap mono"><span>03 / Бортовой ИИ</span><span>гейты и A/B →</span></span>
         </a>
