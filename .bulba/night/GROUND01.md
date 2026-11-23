@@ -99,12 +99,12 @@ bun run build                -> 32 page(s) built in 3.80s, exit 0
 link-check                   -> checked 52 local navigation links, skipped 9 asset links
 CJK/мусорные токены          -> 0 в обоих файлах
 правило §3.6                 -> сохранено: IN_FLIGHT отбрасывает все CMD до эфира
-после PROTO-NOGPS            -> GPS_FIX: 0 в обоих файлах, build 32 page(s), link-check зелен
+после PROTO-NOGPS            -> старый флаг: 0 упоминаний в обоих файлах, build 32 page(s), link-check зелёный
 ```
 
 Первый запуск `bun run build` после правки флага упал в vite-резолвере на фоне
 параллельных правок node_modules; повторный запуск прошёл полностью зелёным
-(32 страницы). Репозиторийский grep `GPS_FIX` находит одну строку только в
+(32 страницы). Репозиторийский поиск старого имени флага находит одну строку только в
 `.bulba/night/PROTO-NOGPS.md` — это чужой отчёт, он не трогался.
 
 ## Синхронизация с PROTO-NOGPS
