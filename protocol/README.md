@@ -1,4 +1,4 @@
-![Поток-М: Протокол](docs/banner.svg)
+![Поток-М: Протокол](../docs/banner.svg)
 
 [![CI](https://github.com/rocket-team-m/potok-m-protocol/actions/workflows/ci.yml/badge.svg)](https://github.com/rocket-team-m/potok-m-protocol/actions/workflows/ci.yml)
 
@@ -77,7 +77,7 @@ C-биндинг считает CRC по таблице `POTOK_CRC16_TABLE[256]`
 
 `cargo run -p potok-generator` порождает `generated/protocol.rs`, `generated/protocol.h`, `generated/protocol.py`. Вывод детерминирован: перегенерация даёт побайтово одинаковые файлы (`sha256sum` → diff). Потребителям генератор не нужен — достаточно `--check`.
 
-Флаг `--check` сверяет содержимое трёх файлов с тем, что генератор произвёл из YAML, и при расхождении падает с сообщением `<path> is stale — rerun cargo run -p potok-generator`. Он же стоит в [CI](.github/workflows/ci.yml):
+Флаг `--check` сверяет содержимое трёх файлов с тем, что генератор произвёл из YAML, и при расхождении падает с сообщением `<path> is stale — rerun cargo run -p potok-generator`. Он же стоит в [CI](../.github/workflows/ci.yml):
 
 ```text
 cargo fmt --all -- --check
@@ -87,7 +87,7 @@ cargo run -p potok-generator -- --check
 cargo check -p potok-protocol --no-default-features
 ```
 
-Кросс-языковой golden-шаг теперь есть и в CI: [`.github/workflows/cross-language.yml`](.github/workflows/cross-language.yml) гоняет шесть проверок `stm32/tests/check_golden.sh` — `self-test`, `license`, `yaml`, `c`, `python`, `rust`. Коммитный C-харнесс — [`stm32/tests/golden_harness.c`](stm32/tests/golden_harness.c), он собирается с `cc -std=c11 -Wall -Wextra -Werror`; Python round-trip проходит, все три языка воспроизводят одни и те же golden-кадры. Ручные замеры и протокол — в [`BUILD_LOG.md`](BUILD_LOG.md). Тесты `golden_wire_bytes_match_c_and_python` и `committed_golden_fixtures_reencode_byte_identical` не дают трём языкам молча разойтись. На момент последнего прогона — 37 тестов: 9 генератор, 3 библиотека, 10 lowlat, 15 compat.
+Кросс-языковой golden-шаг теперь есть и в CI: [`.github/workflows/cross-language.yml`](../.github/workflows/cross-language.yml) гоняет шесть проверок `stm32/tests/check_golden.sh` — `self-test`, `license`, `yaml`, `c`, `python`, `rust`. Коммитный C-харнесс — [`stm32/tests/golden_harness.c`](stm32/tests/golden_harness.c), он собирается с `cc -std=c11 -Wall -Wextra -Werror`; Python round-trip проходит, все три языка воспроизводят одни и те же golden-кадры. Ручные замеры и протокол — в [`BUILD_LOG.md`](BUILD_LOG.md). Тесты `golden_wire_bytes_match_c_and_python` и `committed_golden_fixtures_reencode_byte_identical` не дают трём языкам молча разойтись. На момент последнего прогона — 37 тестов: 9 генератор, 3 библиотека, 10 lowlat, 15 compat.
 
 Lowlat-golden, зафиксированные в `lowlat_tests.rs` и воспроизводимые C и Python:
 
@@ -138,7 +138,7 @@ Slicing-by-4 ускорил полный compat request (encode+decode+CRC) с 3
 
 Для C достаточно header-only [`generated/protocol.h`](generated/protocol.h): C11, явная укладка байтов, без `memcpy` структуры. Для Python — [`generated/protocol.py`](generated/protocol.py). Все три языка воспроизводят одни и те же golden-байты.
 
-Бюджет МКУ из [`PROTOCOL_BUDGET.md`](PROTOCOL_BUDGET.md) — именно **расчёт**, не измерение: 70 Б RAM под два статических буфера и 1536 Б Flash под таблицы CRC. Замеров на реальной STM32 нет; время в проводе посчитано из размера кадра и скорости.
+Бюджет МКУ из [`PROTOCOL_BUDGET.md`](../PROTOCOL_BUDGET.md) — именно **расчёт**, не измерение: 70 Б RAM под два статических буфера и 1536 Б Flash под таблицы CRC. Замеров на реальной STM32 нет; время в проводе посчитано из размера кадра и скорости.
 
 ---
 
@@ -175,7 +175,7 @@ cargo run --release -p potok-protocol --example hotpath 1000000
 | [`generated/`](generated/) | Зафиксированные в git детерминированные артефакты |
 | [`potok-protocol/`](potok-protocol/) | CRC slicing-by-4, codec, zero-copy views, `SeqTracker`, хелперы флагов и углов |
 | [`BUILD_LOG.md`](BUILD_LOG.md) | Протокол проверок, golden-байты, замеры hotpath |
-| [`PROTOCOL_BUDGET.md`](PROTOCOL_BUDGET.md), [`SPEC_PROTOCOL_LOWLAT.md`](SPEC_PROTOCOL_LOWLAT.md) | Бюджет/надёжность и спецификация lowlat (черновики) |
+| [`PROTOCOL_BUDGET.md`](../PROTOCOL_BUDGET.md), [`SPEC_PROTOCOL_LOWLAT.md`](../SPEC_PROTOCOL_LOWLAT.md) | Бюджет/надёжность и спецификация lowlat (черновики) |
 
 Лицензия: GPL-3.0-or-later (или коммерческая).
 
