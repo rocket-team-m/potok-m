@@ -4,6 +4,11 @@
 //! `fast_field = true` uses a tabulated/interpolated atmosphere (built once
 //! per simulator); `false` evaluates the analytic equations at every call.
 //! Both are covered by an equivalence test.
+//!
+//! The lookup table is built up to [`OPERATIONAL_CEILING_M`], not just the last
+//! row of the boundary profile. Above the table both paths share the *same*
+//! analytic continuation (the terminal profile temperature offset and wind
+//! factor held constant), so they cannot silently freeze/diverge there.
 
 use std::path::Path;
 
@@ -14,6 +19,13 @@ use crate::error::{Result, SimError};
 const G: f64 = 9.80665;
 const R: f64 = 287.05287;
 const GAMMA: f64 = 1.4;
+
+/// Altitude (m) to which the fast lookup table is built. The shipped boundary
+/// profile tops out at 5 km, which is far below the altitude a longer/hotter
+/// flight can reach; without this floor the fast path froze at the grid top
+/// while the exact path kept climbing, so the two disagreed. Both paths now
+/// use analytic continuation above the table with the terminal perturbation.
+const OPERATIONAL_CEILING_M: f64 = 20_000.0;
 
 #[derive(Debug, Clone)]
 pub struct Atmosphere {
@@ -72,7 +84,9 @@ impl Atmosphere {
                 "boundary profile needs at least two rows".into(),
             ));
         }
-        let hi = rows.last().unwrap().0;
+        // Cover the whole operational altitude range, not just the profile's
+        // last row, so the fast table is valid wherever a flight can go.
+        let hi = rows.last().unwrap().0.max(OPERATIONAL_CEILING_M);
         let n = (hi / grid_m).ceil() as usize + 1;
         let step = grid_m;
         let mut profile = Array2::<f64>::zeros((n, 3));
@@ -131,7 +145,7 @@ impl Atmosphere {
         let x = h / self.step;
         let i = (x as usize).min(n - 1);
         if i + 1 >= n {
-            return row_air(&self.field, n - 1);
+            return self.beyond_grid(h);
         }
         let f = x - i as f64;
         let mut out = row_air(&self.field, i);
@@ -149,12 +163,22 @@ impl Atmosphere {
         let n = self.profile.nrows();
         let i = (h / self.step) as usize;
         if i + 1 >= n {
-            return analytic_at(h, 0.0, 1.0);
+            return self.beyond_grid(h);
         }
         let f = (h - self.profile[[i, 0]]) / self.step;
         let dt = self.profile[[i, 1]] + f * (self.profile[[i + 1, 1]] - self.profile[[i, 1]]);
         let wf = self.profile[[i, 2]] + f * (self.profile[[i + 1, 2]] - self.profile[[i, 2]]);
         analytic_at(h, dt, wf.max(0.0))
+    }
+
+    /// Continuation used by BOTH paths once the table is exhausted. Holds the
+    /// terminal boundary perturbation constant instead of freezing a row
+    /// (fast) or dropping it back to (0, 1) (exact) — the two behaviours that
+    /// used to make the paths disagree above the grid top.
+    #[inline]
+    fn beyond_grid(&self, h: f64) -> Air {
+        let n = self.profile.nrows();
+        analytic_at(h, self.profile[[n - 1, 1]], self.profile[[n - 1, 2]])
     }
 }
 
@@ -178,8 +202,12 @@ fn analytic_at(h: f64, dt: f64, wf: f64) -> Air {
         let t = 216.65;
         (t, 22_632.0 * (-G * (h - 11_000.0) / (R * t)).exp())
     } else {
+        // 20-32 km layer: temperature rises linearly (L = +0.001 K/m), so
+        // pressure must use the matching power law, not an isothermal exp()
+        // with a frozen 216.65 K. p(h) = p20 * (T20 / T)^(G / (R * L)).
         let t = 216.65 + 0.001 * (h - 20_000.0);
-        (t, 5_474.89 * (-G * (h - 20_000.0) / (R * 216.65)).exp())
+        let p = 5_474.89 * (216.65 / t).powf(G / (R * 0.001));
+        (t, p)
     };
     let t = t_base + dt;
     Air {
