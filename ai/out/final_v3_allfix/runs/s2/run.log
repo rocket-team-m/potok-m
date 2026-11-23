@@ -1,0 +1,1 @@
+{"ece": 0.3529445829963111, "entropy": 0.0, "entropy_enabled": false, "out": "/home/sehaxe/potok-m/ai/out/final_v3_allfix/runs/s2/metrics.json", "ratio": 1.0781041760296652, "seed": 2, "stage": "distill", "stages_completed": ["sft", "privileged", "dagger", "distill"]}

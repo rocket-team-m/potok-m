@@ -1,0 +1,55 @@
+{
+  "authority": 10.0,
+  "cases": [
+    {
+      "case": "in_envelope",
+      "command": [
+        1.0,
+        -1.0
+      ],
+      "reason": null
+    },
+    {
+      "case": "over_authority",
+      "command": [
+        0.0,
+        0.0
+      ],
+      "reason": "authority"
+    },
+    {
+      "case": "mach_limit",
+      "command": [
+        0.0,
+        0.0
+      ],
+      "reason": "mach_limit"
+    },
+    {
+      "case": "forbidden_phase",
+      "command": [
+        0.0,
+        0.0
+      ],
+      "reason": "phase_forbidden"
+    },
+    {
+      "case": "unverifiable_mach",
+      "command": [
+        0.0,
+        0.0
+      ],
+      "reason": "mach_unavailable"
+    }
+  ],
+  "claim": "SHIELD01 module is present and every veto is counted; the staged teacher-v2 trainer does not invoke the shield",
+  "counts": {
+    "accepted": 1,
+    "authority": 1,
+    "mach_limit": 1,
+    "mach_unavailable": 1,
+    "phase_forbidden": 1
+  },
+  "mach_max": 0.6,
+  "measurement": "counted OnlineShield verification, not a training intervention count"
+}

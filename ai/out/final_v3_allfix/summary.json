@@ -1,0 +1,132 @@
+{
+  "ab_win_claimed": false,
+  "comparison": {
+    "baseline": "ai/out/final_v3_postpump_dagger (RETRAIN-DAGGER)",
+    "baseline_rmse_held_out_mean": 7.902915971665115,
+    "baseline_rmse_held_out_std": 0.49880831277850946,
+    "claim": "two measurements on the same data; no A/B win claimed until a seeded closed-loop A/B with unweakened gates is run",
+    "delta_mean": -0.047364475867328615
+  },
+  "data_provenance": {
+    "config_sha256": "9c34e71f9d10bcf081c31f15f5332f7bb2fac04dddb28009a27cd30987ab5e91",
+    "heldout_sha256": "fdc1d1400b1c5f111e21f79dead37afa1dd9f058fe457edb78037dc6ebe89807",
+    "train_sha256": "34b35e0ff67f7eeecbd895b2efde8bebcfa159c1a3e78379da6750338b6930b6",
+    "truth_sidecar_sha256": "7f25bb69124638ea7542be99f43330fda1c5248513f1971f6bfd125f5f759cb8"
+  },
+  "fixes": {
+    "command_bound_mps2": 10.0,
+    "online_shield": "module verified in shield.json; not invoked by the trainer",
+    "privileged_batches_by_seed": {
+      "1": 2300,
+      "2": 2300,
+      "3": 2300
+    },
+    "residual_policy": "enabled by trainer default (SHIELD02)",
+    "rollout_source": "on_policy_student:gdn2_student",
+    "student_induced_rows_by_seed": {
+      "1": 118960,
+      "2": 118960,
+      "3": 118960
+    },
+    "truth_sidecar": "/home/sehaxe/potok-m/ai/out/final_v3_postpump/data/train/validation.trajectory",
+    "truth_sidecar_sha256": "7f25bb69124638ea7542be99f43330fda1c5248513f1971f6bfd125f5f759cb8"
+  },
+  "gates": {
+    "ece": {
+      "detail": "three disjoint ECE scores <= 0.05 with coverage in [0, 1]",
+      "name": "ece",
+      "passed": true
+    },
+    "ece_source": {
+      "detail": "three seeds labelled with a disjoint source ['disjoint', 'held-out', 'held_out']",
+      "name": "ece_source",
+      "passed": true
+    },
+    "rmse_ratio": {
+      "detail": "three seeds, held-out/train ratio <= 1.25",
+      "name": "rmse_ratio",
+      "passed": true
+    }
+  },
+  "measurement": "post-FIXPUMP all-fix four-stage default, 100 epochs, CPU",
+  "rlvr_used": false,
+  "rmse_held_out_by_seed": {
+    "1": 5.148904169724766,
+    "2": 10.344431805348933,
+    "3": 8.07331851231966
+  },
+  "rmse_held_out_mean": 7.855551495797786,
+  "rmse_held_out_std": 2.6046004891820242,
+  "seed_spread_ratio_vs_baseline": 5.221646116267853,
+  "seeds": [
+    1,
+    2,
+    3
+  ],
+  "shield_verification": {
+    "authority": 10.0,
+    "cases": [
+      {
+        "case": "in_envelope",
+        "command": [
+          1.0,
+          -1.0
+        ],
+        "reason": null
+      },
+      {
+        "case": "over_authority",
+        "command": [
+          0.0,
+          0.0
+        ],
+        "reason": "authority"
+      },
+      {
+        "case": "mach_limit",
+        "command": [
+          0.0,
+          0.0
+        ],
+        "reason": "mach_limit"
+      },
+      {
+        "case": "forbidden_phase",
+        "command": [
+          0.0,
+          0.0
+        ],
+        "reason": "phase_forbidden"
+      },
+      {
+        "case": "unverifiable_mach",
+        "command": [
+          0.0,
+          0.0
+        ],
+        "reason": "mach_unavailable"
+      }
+    ],
+    "claim": "SHIELD01 module is present and every veto is counted; the staged teacher-v2 trainer does not invoke the shield",
+    "counts": {
+      "accepted": 1,
+      "authority": 1,
+      "mach_limit": 1,
+      "mach_unavailable": 1,
+      "phase_forbidden": 1
+    },
+    "mach_max": 0.6,
+    "measurement": "counted OnlineShield verification, not a training intervention count"
+  },
+  "stage_order": [
+    "sft",
+    "privileged",
+    "dagger",
+    "distill"
+  ],
+  "surrogate_binding": {
+    "claimed": true,
+    "delta_within_one_baseline_std": true,
+    "reason": "on-policy world_step and the POTOKTRJ truth sidecar are both simulator surrogates; expert labels are recorded answers. No closed-loop flight dynamics are measured by these fixes."
+  }
+}

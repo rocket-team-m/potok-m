@@ -1,0 +1,54 @@
+{
+  "claim": "artifacts only; no closed-loop A/B was run and no win is claimed",
+  "export_format": "student.pt (torch state_dict of the distill-stage student)",
+  "fixes": {
+    "command_bound": 10.0,
+    "online_shield": "module verified in shield.json; not invoked by the trainer",
+    "residual_policy": "enabled by trainer default (SHIELD02)",
+    "rollout": "on_policy_student",
+    "truth_sidecar": "/home/sehaxe/potok-m/ai/out/final_v3_postpump/data/train/validation.trajectory"
+  },
+  "measurement": "distilled students from the post-FIXPUMP all-fix four-stage default",
+  "rlvr": "not run (opt-in checkpoint selection only)",
+  "stage_order": [
+    "sft",
+    "privileged",
+    "dagger",
+    "distill"
+  ],
+  "students": {
+    "1": {
+      "config_hash": "f5b5106b378aac4b",
+      "ece_source": "held-out",
+      "file": "teacher_v2_s1.pt",
+      "privileged_batches": 2300,
+      "rmse_held_out": 5.148904169724766,
+      "rollout_source": "on_policy_student:gdn2_student",
+      "sha256": "2514b4e46148f70945601ebacc1b3eb2ea207ea819cc0f65f2a543375a8775f4",
+      "student_command_bound": 10.0,
+      "student_source": "gdn2_student"
+    },
+    "2": {
+      "config_hash": "7b5ad1b86cfcb3f3",
+      "ece_source": "held-out",
+      "file": "teacher_v2_s2.pt",
+      "privileged_batches": 2300,
+      "rmse_held_out": 10.344431805348933,
+      "rollout_source": "on_policy_student:gdn2_student",
+      "sha256": "b2a0a521c7e70070c1f704d776200d643e82ec3c58732738b0756e3f9a9bb3b2",
+      "student_command_bound": 10.0,
+      "student_source": "gdn2_student"
+    },
+    "3": {
+      "config_hash": "717d2a5ae810d807",
+      "ece_source": "held-out",
+      "file": "teacher_v2_s3.pt",
+      "privileged_batches": 2300,
+      "rmse_held_out": 8.07331851231966,
+      "rollout_source": "on_policy_student:gdn2_student",
+      "sha256": "6d4d89d2bd896808edbbe40c176354f51c2186681da7fb7d2a91066812f4a968",
+      "student_command_bound": 10.0,
+      "student_source": "gdn2_student"
+    }
+  }
+}
