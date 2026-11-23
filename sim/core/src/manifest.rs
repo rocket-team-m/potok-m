@@ -392,6 +392,34 @@ pub fn measurement_hashes(dir: &Path) -> Result<BTreeMap<String, String>> {
     Ok(out)
 }
 
+pub const GOLDEN_SEED: u64 = 1337;
+
+/// The eight raw channels of the golden export. Not the 14-channel model frame:
+/// an unrelated physics-feature edit must not move the golden pin.
+const GOLDEN_FEATURES: [&str; 8] = [
+    "gyro_x", "gyro_y", "gyro_z", "acc_x", "acc_y", "acc_z", "baro_h", "pitot_q",
+];
+
+/// Regenerate the pinned seed-1337 episode-0 files in `dir` and return their
+/// records. The bytes are the golden pin asserted in
+/// `core/tests/manifest_hash_tests.rs`; any RNG or export change breaks both.
+pub fn write_golden_episode(dir: &Path) -> Result<Vec<FileRecord>> {
+    let mut cfg = Config::default();
+    cfg.run.seed = GOLDEN_SEED;
+    cfg.output.features = GOLDEN_FEATURES.iter().map(|s| (*s).to_string()).collect();
+    let sim = crate::episode::Simulator::new(cfg.clone())?;
+    let episodes = vec![sim.run_episode(0)?];
+    std::fs::create_dir_all(dir)?;
+    let validation = dir.join(crate::validation::FILE_NAME);
+    let sidecar = crate::trajectory::sidecar_path(&validation);
+    crate::validation::write_validation(&validation, &cfg, &episodes)?;
+    crate::trajectory::write_trajectory_v3(&sidecar, &cfg, &episodes)?;
+    Ok(vec![
+        file_record(crate::validation::FILE_NAME, &validation)?,
+        file_record("validation.trajectory", &sidecar)?,
+    ])
+}
+
 /// Canonical sha256 over the pinned episode's file records. Each record is
 /// encoded as `name NUL bytes NUL sha256 LF`, records are sorted by name; the
 /// NUL separators make the encoding unambiguous.

@@ -1,6 +1,9 @@
 //! potok-cli: headless episode runner and ratatui dashboard.
 
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use clap::{Parser, Subcommand};
 use potok_cli::tui;
@@ -11,10 +14,13 @@ use potok_sim::{
     control::ControlFile,
     episode::Episode,
     file_record,
-    manifest::{Bounds, DatasetManifest},
+    manifest::{
+        self, git_head_hash, golden_episode_hash, measurement_hashes, protocol_schema_hash,
+        provenance_path, write_provenance, Bounds, DatasetManifest, ProvenanceSources,
+    },
     quality::{
-        check_dataset, check_determinism, check_split_disjoint, observed_bounds, QualityReport,
-        QUALITY_SCHEMA_VERSION,
+        check_dataset, check_determinism, check_golden_episode, check_provenance,
+        check_split_disjoint, observed_bounds, QualityReport, QUALITY_SCHEMA_VERSION,
     },
     scenario::{scenario, Split},
     trajectory::{
@@ -24,6 +30,12 @@ use potok_sim::{
     validation::{read_validation, write_validation, FILE_NAME},
     write_manifest, Config, OutputMode, Simulator, PHYSICS_FEATURES,
 };
+
+/// Repo root and the canonical wire schema are compile-time constants so the
+/// code hash does not depend on the caller's working directory.
+const REPO: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
+const PROTOCOL_SCHEMA: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../protocol/uart.yaml");
+const MEASUREMENT_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../config/measurements");
 
 #[derive(Debug, Parser)]
 #[command(name = "potok-cli", version, about = "Deterministic Potok-M simulator")]
@@ -88,6 +100,14 @@ enum DatasetCommand {
         /// Optional TSV command file applied to every episode.
         #[arg(long, value_name = "PATH")]
         control_file: Option<PathBuf>,
+        /// Protocol schema bound by the provenance companion
+        /// (default: <repo>/protocol/uart.yaml).
+        #[arg(long, value_name = "PATH")]
+        protocol_schema: Option<PathBuf>,
+        /// Directory of thrust/Allan/servo measurement inputs bound by the
+        /// provenance companion (default: <repo>/config/measurements).
+        #[arg(long, value_name = "DIR")]
+        measurement_dir: Option<PathBuf>,
     },
 }
 
@@ -128,6 +148,8 @@ fn run(args: Args) -> Result<(), CliError> {
         config,
         min_episodes_per_split,
         control_file,
+        protocol_schema,
+        measurement_dir,
     }) = &args.command
     {
         return generate_dataset(
@@ -138,6 +160,8 @@ fn run(args: Args) -> Result<(), CliError> {
             config.as_deref(),
             *min_episodes_per_split,
             control_file.as_deref(),
+            protocol_schema.as_deref(),
+            measurement_dir.as_deref(),
         );
     }
     if args.episodes == 0 {
@@ -335,17 +359,20 @@ fn write_if_requested(args: &Args, cfg: &Config, episodes: &[Episode]) -> Result
     Ok(())
 }
 
-/// Whole-dataset generation: one invocation writes both splits, their v2
-/// privileged-truth sidecars, one manifest per split and a quality report.
-/// All outputs are functions of (seed, config, counts) only.
+/// Whole-dataset generation: one invocation writes both splits, their v3
+/// privileged-truth sidecars, one manifest and provenance companion per split,
+/// and a quality report. All outputs are functions of (seed, config, counts,
+/// recorded inputs) only.
 fn generate_dataset(
     seed: u64,
     train_episodes: usize,
     held_out_episodes: usize,
     out: &PathBuf,
-    config: Option<&std::path::Path>,
+    config: Option<&Path>,
     min_episodes_per_split: usize,
-    control_file: Option<&std::path::Path>,
+    control_file: Option<&Path>,
+    protocol_schema: Option<&Path>,
+    measurement_dir: Option<&Path>,
 ) -> Result<(), CliError> {
     if train_episodes == 0 || held_out_episodes == 0 {
         return Err(CliError::NoEpisodes);
@@ -368,6 +395,22 @@ fn generate_dataset(
         Some(p) => Some(ControlFile::from_path(p, cfg.frames_per_episode())?),
         None => None,
     };
+
+    // Resolve and validate the provenance inputs before writing any dataset
+    // bytes. A missing protocol schema, a broken git HEAD, an unreadable
+    // measurement directory or a failed golden replay is LOUD; an absent
+    // measurement directory is the documented empty-map case.
+    let protocol_path = protocol_schema.unwrap_or_else(|| Path::new(PROTOCOL_SCHEMA));
+    let default_measurements = PathBuf::from(MEASUREMENT_DIR);
+    let measurement_path = measurement_dir.unwrap_or(default_measurements.as_path());
+    let code_hash = git_head_hash(Path::new(REPO))?;
+    let protocol_hash = protocol_schema_hash(protocol_path)?;
+    let measurements = measurement_hashes(measurement_path)?;
+    let golden_dir = out.join(".provenance-golden");
+    let _ = fs::remove_dir_all(&golden_dir);
+    let golden_files = manifest::write_golden_episode(&golden_dir)?;
+    let golden_hash = golden_episode_hash(&golden_files)?;
+    fs::remove_dir_all(&golden_dir)?;
 
     let train_idx = indices_for(Split::Train, train_episodes);
     let held_idx = indices_for(Split::HeldOut, held_out_episodes);
@@ -435,14 +478,43 @@ fn generate_dataset(
 
     let bounds_train: Bounds = observed_bounds(&cfg, &tv, &tt);
     let bounds_held: Bounds = observed_bounds(&cfg, &hv, &ht);
-    write_manifest(
-        &train_dir.join("manifest.json"),
-        &build_manifest(&cfg, seed, Split::Train, &tv, &tt, &train_dir, bounds_train)?,
-    )?;
-    write_manifest(
-        &held_dir.join("manifest.json"),
-        &build_manifest(&cfg, seed, Split::HeldOut, &hv, &ht, &held_dir, bounds_held)?,
-    )?;
+    let train_manifest =
+        build_manifest(&cfg, seed, Split::Train, &tv, &tt, &train_dir, bounds_train)?;
+    let held_manifest =
+        build_manifest(&cfg, seed, Split::HeldOut, &hv, &ht, &held_dir, bounds_held)?;
+    let train_manifest_path = train_dir.join("manifest.json");
+    let held_manifest_path = held_dir.join("manifest.json");
+    write_manifest(&train_manifest_path, &train_manifest)?;
+    write_manifest(&held_manifest_path, &held_manifest)?;
+
+    let sources = ProvenanceSources {
+        repo: Path::new(REPO),
+        protocol_schema: protocol_path,
+        measurement_dir: Some(measurement_path),
+    };
+    let mut companion_paths = Vec::new();
+    for (label, manifest, manifest_path) in [
+        (Split::Train.label(), &train_manifest, &train_manifest_path),
+        (Split::HeldOut.label(), &held_manifest, &held_manifest_path),
+    ] {
+        let provenance = manifest::build_provenance(
+            manifest,
+            &code_hash,
+            &protocol_hash,
+            measurements.clone(),
+            &golden_hash,
+        )?;
+        let path = provenance_path(manifest_path);
+        write_provenance(&path, &provenance)?;
+        report
+            .checks
+            .extend(check_provenance(label, manifest, &provenance, &sources)?);
+        report
+            .checks
+            .push(check_golden_episode(label, &provenance, &golden_files)?);
+        companion_paths.push(path);
+    }
+
     report.all_passed = report.checks.iter().all(|c| c.ok);
     fs::write(
         out.join("quality_report.json"),
@@ -455,8 +527,13 @@ fn generate_dataset(
     );
     println!(
         "manifest: {} / {}",
-        train_dir.join("manifest.json").display(),
-        held_dir.join("manifest.json").display()
+        train_manifest_path.display(),
+        held_manifest_path.display()
+    );
+    println!(
+        "provenance: {} / {}",
+        companion_paths[0].display(),
+        companion_paths[1].display()
     );
     println!(
         "quality_report: {} ({} checks, all_passed={})",
