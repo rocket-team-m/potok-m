@@ -117,7 +117,7 @@ state, the atmosphere and the sensor's body-frame specific force:
 | `alpha_deg` | `atan2(omega_body_z, v_body_x)` in degrees. This is the literal SPEC formula; the classical aerodynamic AoA would use `−v_body_z`. |
 | `beta_deg` | `atan2(v_body_y, v_body_x)` in degrees |
 | `q_dyn_kpa` | `0.5 · rho · ‖v − w‖² / 1000`, `rho` from `Atmosphere::at` |
-| `a_lat_resid` | `hypot(a_meas_x − (N_x + D_x)/m, a_meas_y − (N_y + D_y)/m)`; `N = q_dyn·A·cna·(v_body_i/az)`, `D` is the mach-table drag vector, `az = max(‖v−w‖, 1)` |
+| `a_lat_resid` | `hypot(a_meas_x − (N_x + D_x)/m, a_meas_y − (N_y + D_y)/m)`; `N = N_raw − v_b·(N_raw·v_b/|v_b|²)`, the perpendicular projection of `N_raw = q_dyn·A·cna·(v_body_i/az)` onto the relative wind (`‖v−w‖ < 1e-6` → `N_raw`); `D` is the mach-table drag vector, `az = max(‖v−w‖, 1)`. The projection makes this metric cna-independent. |
 | `drag_est` | `cd0 · q_dyn · A / m_current` (current mass falls during burn) |
 | `static_margin_cal` | `static_margin_m / (2√(A/π))` |
 
