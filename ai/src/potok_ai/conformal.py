@@ -17,8 +17,11 @@ non-finite or misconfigured inputs raise loudly -- there is no silent fallback.
 Edge export: the optional monotone bin map encodes the binary indicator as a
 step map over ``p = 1 / (1 + s)`` (a confidence coordinate in ``(0, 1]`` that
 decreases with error). ``bins`` are ascending upper edges and ``values`` are
-0/1, so a reader that already applies ``first upper edge >= p`` needs no new
-machinery (see ``apply_confidence`` and the usage note in the module report).
+0/1. The canonical boundary is the INCLUSIVE LOWER EDGE: confident iff
+``p >= p_hat`` (equivalently ``s <= q_hat``), so at ``p == p_hat`` both routes
+return 1. The step reader implements this as ``first upper edge > p`` (last
+value held past the end), matching the Rust edge reader exactly (see
+``apply_confidence``).
 """
 
 from __future__ import annotations
@@ -77,9 +80,11 @@ def conformal_quantile(scores: np.ndarray, alpha: float = DEFAULT_ALPHA) -> floa
 def monotone_bin_map(q_hat: float) -> tuple[tuple[float, ...], tuple[float, ...]]:
     """Encode ``s <= q_hat`` as a monotone step map over ``p = 1/(1+s)``.
 
-    ``confident iff p >= 1/(1+q_hat)``. Emits two strictly ascending edges and
+    Canonical boundary: inclusive lower edge, ``confident iff p >= p_hat``
+    where ``p_hat = 1/(1+q_hat)``. Emits two strictly ascending edges and
     non-decreasing values ``(0, 1)``, matching the edge reader's ``n``-edge
-    ``bins``/``values`` shape. Uses ``apply_confidence`` to evaluate it.
+    ``bins``/``values`` shape. The reader uses ``first upper edge > p`` so the
+    lower edge ``p_hat`` is inclusive; ``apply_confidence`` evaluates it.
     """
     q = float(q_hat)
     if not np.isfinite(q) or q < 0.0:
@@ -208,10 +213,12 @@ def fit_conformal(
 def apply_confidence(payload: dict, error: np.ndarray) -> np.ndarray:
     """Apply a serialised calibration to raw errors (the future edge path).
 
-    With a bin map, maps ``p = 1/(1 + s)`` through the first upper edge ``>= p``
-    and holds the last value past the end -- identical to the existing edge
-    step-map reader. Without one, applies the exact ``s <= q_hat`` indicator.
-    Both routes return a boolean confidence array.
+    Canonical boundary: inclusive lower edge -- confident iff ``p >= p_hat``
+    (equivalently ``s <= q_hat``), so the two routes agree at equality. With a
+    bin map, maps ``p = 1/(1 + s)`` through the first upper edge ``> p`` (the
+    lower edge is inclusive) and holds the last value past the end -- identical
+    to the Rust edge reader. Without one, applies the exact ``s <= q_hat``
+    indicator. Both routes return a boolean confidence array.
     """
     s = conformal_scores(error, float(payload["tol"]))
     bins = payload.get("bins")
@@ -224,5 +231,7 @@ def apply_confidence(payload: dict, error: np.ndarray) -> np.ndarray:
     if v.size == 0 or b.size != v.size:
         raise ValueError("bin map needs n upper edges and n values")
     p = 1.0 / (1.0 + s)
-    index = np.minimum(np.searchsorted(b, p, side="left"), v.size - 1)
+    # Inclusive lower edge: the first edge strictly greater than p; the bin's
+    # lower edge p_hat is therefore confident at p == p_hat.
+    index = np.minimum(np.searchsorted(b, p, side="right"), v.size - 1)
     return v[index].astype(bool)

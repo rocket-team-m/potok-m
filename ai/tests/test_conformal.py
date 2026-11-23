@@ -95,6 +95,27 @@ def test_monotone_bin_map_matches_the_binary_indicator():
     )
 
 
+def test_bin_map_and_exact_indicator_agree_at_p_hat():
+    """Canonical boundary: inclusive lower edge -- both routes confident at equality."""
+    errors = np.full(19, 0.5)
+    result = fit_conformal(errors, alpha=0.05, tol=0.2, with_bin_map=True)
+    assert result.q_hat == pytest.approx(2.5)
+    p_hat = 1.0 / (1.0 + result.q_hat)
+
+    # Raw error whose normalised score is exactly q_hat -> p == p_hat.
+    boundary = np.array([result.q_hat * result.tol])
+    assert 1.0 / (1.0 + boundary[0] / result.tol) == p_hat
+    for payload in (result.as_dict(), json.loads(result.to_json())):
+        assert apply_confidence(payload, boundary).tolist() == [True]
+        assert result.is_confident(boundary).tolist() == [True]
+
+    # Both routes still agree immediately below and above the boundary.
+    probes = np.array([0.4, 0.5, 0.6])  # scores 2.0, 2.5, 3.0
+    expected = [True, True, False]
+    assert apply_confidence(result.as_dict(), probes).tolist() == expected
+    assert result.is_confident(probes).tolist() == expected
+
+
 def test_json_round_trip_with_and_without_bin_map():
     errors = np.abs(np.random.default_rng(5).normal(0, 1, 2000))
     for with_map in (False, True):
