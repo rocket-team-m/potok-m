@@ -164,6 +164,8 @@ class ConformalResult:
                 b = b[1:]
             if v.size == 0 or b.size != v.size:
                 raise ValueError("bin map needs n upper edges and n values")
+            if not np.all(np.isfinite(b)) or not np.all(np.isfinite(v)):
+                raise ValueError("bin map contains NaN or infinity")
             if b[0] <= 0.0 or b[-1] > 1.0 or np.any(np.diff(b) <= 0.0):
                 raise ValueError("bin edges must be strictly increasing in (0, 1]")
             if np.any((v < 0.0) | (v > 1.0)) or np.any(np.diff(v) < 0.0):
@@ -223,9 +225,14 @@ def apply_confidence(payload: dict, error: np.ndarray) -> np.ndarray:
     s = conformal_scores(error, float(payload["tol"]))
     bins = payload.get("bins")
     if bins is None:
-        return s <= float(payload["q_hat"])
+        q = float(payload["q_hat"])
+        if not np.isfinite(q) or q < 0.0:
+            raise ValueError(f"q_hat must be a finite non-negative number, got {payload['q_hat']!r}")
+        return s <= q
     b = np.asarray(bins, dtype=np.float64)
     v = np.asarray(payload["values"], dtype=np.float64)
+    if not np.all(np.isfinite(b)) or not np.all(np.isfinite(v)):
+        raise ValueError("bin map contains NaN or infinity")
     if b.size == v.size + 1:
         b = b[1:]
     if v.size == 0 or b.size != v.size:

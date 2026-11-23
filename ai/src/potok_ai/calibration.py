@@ -67,13 +67,20 @@ class CalibrationResult:
 
 def correctness(error: np.ndarray, tol: float = DEFAULT_TOL) -> np.ndarray:
     """Binary empirical correctness from per-sample command errors."""
-    return (np.asarray(error, dtype=np.float64).ravel() <= tol).astype(np.float64)
+    raw = np.asarray(error, dtype=np.float64).ravel()
+    if not np.all(np.isfinite(raw)):
+        raise ValueError("command errors contain NaN or infinity")
+    if not np.isfinite(tol):
+        raise ValueError(f"tol must be a finite number, got {tol!r}")
+    return (raw <= tol).astype(np.float64)
 
 
 def sigmoid(logits: np.ndarray) -> np.ndarray:
-    """Numerically stable sigmoid of held-out logits."""
-    z = np.clip(np.asarray(logits, dtype=np.float64).ravel(), -60.0, 60.0)
-    return 1.0 / (1.0 + np.exp(-z))
+    """Numerically stable sigmoid of held-out logits; LOUD on NaN/infinity."""
+    z = np.asarray(logits, dtype=np.float64).ravel()
+    if not np.all(np.isfinite(z)):
+        raise ValueError("logits contain NaN or infinity")
+    return 1.0 / (1.0 + np.exp(-np.clip(z, -60.0, 60.0)))
 
 
 def expected_calibration_error(confidence: np.ndarray, correct: np.ndarray,
@@ -83,15 +90,21 @@ def expected_calibration_error(confidence: np.ndarray, correct: np.ndarray,
     ok = np.asarray(correct, dtype=np.float64).ravel()
     if conf.shape != ok.shape or conf.size == 0:
         raise ValueError("confidence and correctness must be equal, non-empty vectors")
+    if not np.all(np.isfinite(conf)) or not np.all(np.isfinite(ok)):
+        raise ValueError("confidence and correctness must be finite (no NaN or infinity)")
     if np.any((conf < 0.0) | (conf > 1.0)):
         raise ValueError("confidences must lie in [0, 1]")
     edges = np.linspace(0.0, 1.0, bins + 1)
     total = 0.0
+    counted = 0
     for index in range(bins):
         low, high = edges[index], edges[index + 1]
         inside = (conf >= low) & (conf < high if index < bins - 1 else conf <= high)
+        counted += int(np.count_nonzero(inside))
         if np.any(inside):
             total += inside.mean() * abs(conf[inside].mean() - ok[inside].mean())
+    if counted != conf.size:
+        raise ValueError("ECE bins did not cover every sample")
     return float(total)
 
 
@@ -169,10 +182,15 @@ def apply_calibration(payload: dict, logits: np.ndarray) -> np.ndarray:
     z = np.asarray(logits, dtype=np.float64).ravel()
     method = payload["method"]
     if method == "temperature":
-        return sigmoid(z / float(payload["temperature"]))
+        temperature = float(payload["temperature"])
+        if not np.isfinite(temperature):
+            raise ValueError(f"temperature must be finite, got {payload['temperature']!r}")
+        return sigmoid(z / temperature)
     if method == "isotonic":
         bins = np.asarray(payload["bins"], dtype=np.float64)
         values = np.asarray(payload["values"], dtype=np.float64)
+        if not np.all(np.isfinite(bins)) or not np.all(np.isfinite(values)):
+            raise ValueError("isotonic payload contains NaN or infinity")
         if bins.size == values.size + 1:
             bins = bins[1:]
         if values.size == 0 or bins.size != values.size:
@@ -200,6 +218,10 @@ def conformal_calibrate(logits: np.ndarray, error: np.ndarray,
     ok = correctness(error, tol)
     if z.shape != ok.shape:
         raise ValueError("logits and error must have the same length")
+    if not np.all(np.isfinite(z)):
+        raise ValueError("logits contain NaN or infinity")
+    if not np.isfinite(target_ece):
+        raise ValueError(f"target_ece must be finite, got {target_ece!r}")
 
     raw_conf = sigmoid(z)
     raw_ece = expected_calibration_error(raw_conf, ok, bins)
@@ -233,8 +255,11 @@ def conformal_calibrate(logits: np.ndarray, error: np.ndarray,
         else:
             method, calibrated = "temperature", temperature_conf
 
+    threshold = float(np.quantile(calibrated, target_ece))
+    if not np.isfinite(threshold):
+        raise ValueError("calibrated threshold is not finite; refusing to export NaN")
     return CalibrationResult(
-        threshold=float(np.quantile(calibrated, target_ece)),
+        threshold=threshold,
         ece=expected_calibration_error(calibrated, ok, bins),
         raw_ece=raw_ece,
         temperature_ece=temperature_ece,

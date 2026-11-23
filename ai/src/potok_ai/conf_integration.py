@@ -37,6 +37,10 @@ def conformal_export(
     misconfigured inputs fail loudly, exactly as in ``fit_conformal``.
     """
     result = fit_conformal(calibration_error, alpha=alpha, tol=tol, with_bin_map=with_bin_map)
+    payload = result.as_dict()
+    if not all(np.isfinite(value) for value in payload.values()
+               if isinstance(value, (int, float))):
+        raise ValueError("refusing to export a non-finite conformal calibration")
     destination = Path(out) / CONFORMAL_FILE
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(result.to_json())

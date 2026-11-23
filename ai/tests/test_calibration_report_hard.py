@@ -199,6 +199,20 @@ def test_conformal_export_report(tmp_path):
     assert covered >= 1.0 - alpha - 0.005  # finite-sample conformal guarantee
 
 
+def test_build_metrics_refuses_nan_held_out_data(tmp_path):
+    """A diverged held-out batch must be refused before calibration.json is written."""
+    out = tmp_path / "out"
+    cfg = TrainConfig(model="lrs", stage="eval", data=tmp_path / "data", out=out,
+                      calibrate=True, seed=42)
+    for logits, error in (
+        (np.array([0.0, np.nan]), np.array([0.01, 0.5])),
+        (np.array([0.0, 1.0]), np.array([0.01, np.nan])),
+    ):
+        with pytest.raises(ValueError, match="NaN or infinity"):
+            build_metrics("lrs", cfg, {"a": 1.0}, {"a"}, 100, 200, 300, logits, error)
+        assert not (out / "calibration.json").exists()
+
+
 def test_corrupt_calibration_input_is_loud():
     """No silent fallback: malformed data, configs and payloads all raise."""
     with pytest.raises(ValueError, match="equal, non-empty"):

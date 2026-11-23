@@ -95,3 +95,19 @@ def test_export_and_coverage_reject_bad_inputs(tmp_path):
         conformal_coverage(payload, np.array([np.nan]))
     with pytest.raises(ValueError, match="non-negative"):
         conformal_coverage(dict(payload, q_hat=-1.0), errors)
+
+
+def test_export_and_coverage_refuse_non_finite_values(tmp_path):
+    out = tmp_path / "run"
+    with pytest.raises(ValueError, match="NaN or infinity"):
+        conformal_export(np.array([0.1, np.nan, 0.4]), out)
+    assert not (out / CONFORMAL_FILE).exists()
+
+    errors = np.linspace(0.0, 1.0, 25)
+    conformal_export(errors, out)
+    payload = json.loads((out / CONFORMAL_FILE).read_text())
+    assert all(np.isfinite(v) for v in payload.values() if isinstance(v, (int, float)))
+    with pytest.raises(ValueError, match="NaN or infinity"):
+        conformal_coverage(dict(payload, bins=[float("nan"), 1.0]), errors)
+    with pytest.raises(ValueError, match="NaN or infinity"):
+        conformal_coverage(payload, np.array([0.2, np.inf]))

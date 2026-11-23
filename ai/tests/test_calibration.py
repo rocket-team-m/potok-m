@@ -42,6 +42,25 @@ def test_correctness_uses_the_error_tolerance():
     assert labels.tolist() == [1.0, 1.0, 0.0, 0.0]
 
 
+def test_non_finite_inputs_are_refused_not_dropped():
+    with pytest.raises(ValueError, match="NaN or infinity"):
+        expected_calibration_error(np.array([0.5, np.nan]), np.array([1.0, 1.0]))
+    with pytest.raises(ValueError, match="NaN or infinity"):
+        expected_calibration_error(np.array([0.5, 0.5]), np.array([1.0, np.nan]))
+    with pytest.raises(ValueError, match="NaN or infinity"):
+        correctness(np.array([0.01, np.inf]))
+    with pytest.raises(ValueError, match="finite"):
+        correctness(np.array([0.01]), tol=np.nan)
+    with pytest.raises(ValueError, match="NaN or infinity"):
+        sigmoid(np.array([0.0, np.nan]))
+
+
+def test_ece_counts_every_sample_at_the_last_bin_edge():
+    assert expected_calibration_error(
+        np.array([1.0, 1.0]), np.array([1.0, 0.0])
+    ) == pytest.approx(0.5)
+
+
 def test_isotonic_maps_a_constant_head_to_its_accuracy():
     confidence = np.full(20, 0.5)
     correct = np.array([1.0] * 8 + [0.0] * 12)
@@ -144,6 +163,20 @@ def test_calibration_rejects_bad_inputs():
         conformal_calibrate(np.array([0.1, 0.2]), np.array([0.0]), max_loops=3)
     with pytest.raises(ValueError, match="max_loops"):
         conformal_calibrate(np.array([0.1, 0.2]), np.array([0.0, 0.0]), max_loops=0)
+
+
+def test_conformal_calibrate_never_exports_a_nan_threshold():
+    logits = np.array([0.0, 1.0, 2.0])
+    error = np.array([0.01, 0.5, 0.02])
+    with pytest.raises(ValueError, match="NaN or infinity"):
+        conformal_calibrate(np.array([np.nan, 0.0, 1.0]), error)
+    with pytest.raises(ValueError, match="NaN or infinity"):
+        conformal_calibrate(logits, np.array([0.01, np.nan, 0.02]))
+    with pytest.raises(ValueError, match="target_ece must be finite"):
+        conformal_calibrate(logits, error, target_ece=np.nan)
+
+    payload = conformal_calibrate(logits, error).as_dict()
+    assert all(np.isfinite(v) for v in payload.values() if isinstance(v, (int, float)))
 
 
 def test_confidence_target_tracks_uncertainty():

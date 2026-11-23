@@ -145,6 +145,20 @@ def test_json_round_trip_with_and_without_bin_map():
     )
 
 
+def test_non_finite_thresholds_are_loud():
+    good = fit_conformal(np.array([0.1, 0.3, 0.7, 1.2]), alpha=0.5,
+                         with_bin_map=True).as_dict()
+    for bins in ([float("nan"), 1.0], [0.5, float("inf")]):
+        with pytest.raises(ValueError, match="NaN or infinity"):
+            ConformalResult.from_dict(dict(good, bins=bins))
+        with pytest.raises(ValueError, match="NaN or infinity"):
+            apply_confidence(dict(good, bins=bins), np.array([0.1, 0.3]))
+    for bad in (dict(good, values=[0.0, float("nan")]),
+                dict(good, bins=None, q_hat=float("nan"))):
+        with pytest.raises(ValueError, match="NaN or infinity|finite non-negative"):
+            apply_confidence(bad, np.array([0.1, 0.3]))
+
+
 def test_json_rejects_corrupt_payloads():
     good = fit_conformal(np.array([0.1, 0.3, 0.7]), alpha=0.5,
                          with_bin_map=True).as_dict()
