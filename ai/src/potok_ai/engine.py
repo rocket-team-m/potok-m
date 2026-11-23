@@ -552,6 +552,25 @@ def _smart_frames(
     return with_cond, targets
 
 
+def assert_eval_label_blind(windows: torch.Tensor, conditions: torch.Tensor) -> None:
+    """Eval forward takes sensor features only, never labels or privileged truth.
+
+    The canonical student input is 14 frame features plus 6 conditioning values.
+    A wider tensor means a privileged/label column was concatenated, so the
+    held-out score would describe a different network than the deployed one.
+    """
+    if windows.ndim != 3 or windows.shape[-1] != SMART_FEATURES:
+        raise ValueError(
+            f"eval windows must carry {SMART_FEATURES} sensor features per tick, got "
+            f"{tuple(windows.shape)}; privileged truth and labels are teacher-only"
+        )
+    if conditions.ndim != 2 or conditions.shape[-1] != SMART_COND_FEATURES:
+        raise ValueError(
+            f"eval conditioning must carry {SMART_COND_FEATURES} values, got "
+            f"{tuple(conditions.shape)}; privileged truth and labels are teacher-only"
+        )
+
+
 def _window_held_out_predictions(model: nn.Module, groups: dict, cfg: TrainConfig,
                                  device: torch.device,
                                  pooled: bool = False) -> tuple[np.ndarray, np.ndarray]:
@@ -571,6 +590,7 @@ def _window_held_out_predictions(model: nn.Module, groups: dict, cfg: TrainConfi
             if not dataset.samples:
                 raise ValueError(f"scenario {name} has no evaluation windows")
             for windows, conditions, targets in _batches(dataset, cfg.batch):
+                assert_eval_label_blind(windows, conditions)
                 latent, _ = model.refine(windows, conditions)
                 summary = latent.mean(dim=1) if pooled else latent
                 raw = model.head_logits(summary)
