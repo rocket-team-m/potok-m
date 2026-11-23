@@ -258,3 +258,22 @@ fn profiles_have_distinct_magics_and_sizes() {
     assert_eq!((REQUEST_SIZE, REPLY_SIZE), (56, 14));
     assert_eq!((LOWLAT_REQUEST_SIZE, LOWLAT_REPLY_SIZE), (42, 16));
 }
+
+#[test]
+fn lowlat_features_view_maps_each_wire_i16_to_its_index() {
+    let frame = sample_request();
+    let mut buf = [0u8; LOWLAT_REQUEST_SIZE];
+    encode_lowlat_request(&frame, &mut buf).unwrap();
+    let view = LowlatRequestView::new(&buf).unwrap();
+    let read = view.features();
+    for (i, &got) in read.iter().enumerate() {
+        let off = LOWLAT_REQUEST_OFF_FEATURES + 2 * i;
+        assert_eq!(
+            got,
+            i16::from_le_bytes([buf[off], buf[off + 1]]),
+            "feature {i} must read its own wire slot"
+        );
+    }
+    assert_eq!(read, frame.features);
+    assert_eq!(view.to_owned().features, read);
+}

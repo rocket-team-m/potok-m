@@ -524,13 +524,9 @@ impl<'a> LowlatRequestView<'a> {
     pub fn reserved(&self) -> u8 {
         codec::get_u8(self.buf, LOWLAT_REQUEST_OFF_RESERVED)
     }
-    #[inline]
+    #[inline(always)]
     pub fn features(&self) -> [i16; 14] {
-        let mut out = [0i16; 14];
-        for (i, item) in out.iter_mut().enumerate() {
-            *item = codec::get_i16(self.buf, LOWLAT_REQUEST_OFF_FEATURES + 2 * i);
-        }
-        out
+        core::array::from_fn(|i| codec::get_i16(self.buf, LOWLAT_REQUEST_OFF_FEATURES + 2 * i))
     }
 
     #[inline]
