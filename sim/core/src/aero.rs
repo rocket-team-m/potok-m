@@ -13,6 +13,7 @@
 //!   has no measurement is `nan` and any bilinear stencil touching it is also
 //!   LOUD. Channels absent from the file (`cna`, `pitch_damping`, `cm_delta`
 //!   in the OpenRocket-derived card) are LOUD on query, never zero-filled.
+//!   The refusal carries its own provenance and escape; see `docs/AERO_CARD.md`.
 
 use std::{
     path::Path,
@@ -27,6 +28,14 @@ use crate::{
 };
 
 static PLACEHOLDER_USES: AtomicU64 = AtomicU64::new(0);
+
+/// Escape text carried by every absent-channel refusal. The OR flight data
+/// behind `config/aero_card.toml` measured only Mach (col 50), alpha (col 15),
+/// axial Cd (col 35) and pitch Cm (col 37); it has no fin-deflection,
+/// normal-force or pitch-rate signal, so `cna`, `pitch_damping` and `cm_delta`
+/// cannot be derived from it. A refusal names the escape, not just the hole.
+pub const ABSENT_CHANNEL_ESCAPE: &str =
+    "supply a measured grid in the card, or select the placeholder path";
 
 /// COUNTED marker: number of times the placeholder coefficient path was
 /// selected since process start. A reader of the run log sees it without a
@@ -145,7 +154,10 @@ impl AeroCard {
         let channels = [
             (AeroChannel::Cd0, Some(&raw.coefficients.cd0)),
             (AeroChannel::Cna, raw.coefficients.cna.as_ref()),
-            (AeroChannel::PitchDamping, raw.coefficients.pitch_damping.as_ref()),
+            (
+                AeroChannel::PitchDamping,
+                raw.coefficients.pitch_damping.as_ref(),
+            ),
             (AeroChannel::CmDelta, raw.coefficients.cm_delta.as_ref()),
             (AeroChannel::CmPitch, raw.coefficients.cm_pitch.as_ref()),
         ];
@@ -208,7 +220,7 @@ impl AeroCard {
         let grid = self.channel(ch);
         if grid.is_empty() {
             return Err(SimError::AeroCard(format!(
-                "channel {} is absent from this card; no value was invented",
+                "channel {} is absent from this card; no value was invented; {ABSENT_CHANNEL_ESCAPE}",
                 ch.name()
             )));
         }

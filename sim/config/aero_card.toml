@@ -13,8 +13,15 @@
 # no CFD, no analytic formula, no tuning, no synthetic coefficients.
 # Nodes with no measurement in their neighbourhood are `nan`; a query whose
 # bilinear stencil touches `nan` is a LOUD error, never a clamp or a zero.
-# cna, pitch_damping and cm_delta are NOT in the flight data and are absent:
-# querying any of them is LOUD. C_m is available and stored as cm_pitch.
+# cna, pitch_damping and cm_delta are NOT in the flight data and are absent.
+# OR Simulation 9 exports only Mach (50), alpha (15), axial Cd (35) and pitch
+# Cm (37). It has no fin-deflection channel, so fin authority (cm_delta) is
+# unobservable; no normal-force channel, so cna cannot be separated from the
+# CP/CG geometry; and no pitch-rate channel, so pitch damping cannot be
+# identified. The cm_pitch grid below is the raw OR pitching moment and is
+# NOT a control derivative. Querying any missing channel is LOUD: no zero, no
+# placeholder constant and no analytic stand-in is ever substituted.
+# See docs/AERO_CARD.md for the refusal contract and its gate.
 # cd parity on all 594 rows: max |error| = 0.080478, mean = 0.013610.
 # cm parity on 547 rows with finite cm: max |error| = 1.193743, mean = 0.027055.
 baseline_cd0 = 0.30
