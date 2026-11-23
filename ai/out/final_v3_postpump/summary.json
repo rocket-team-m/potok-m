@@ -1,0 +1,38 @@
+{
+  "ab_win_claimed": false,
+  "data_provenance": {
+    "config_sha256": "9c34e71f9d10bcf081c31f15f5332f7bb2fac04dddb28009a27cd30987ab5e91",
+    "heldout_sha256": "fdc1d1400b1c5f111e21f79dead37afa1dd9f058fe457edb78037dc6ebe89807",
+    "train_sha256": "34b35e0ff67f7eeecbd895b2efde8bebcfa159c1a3e78379da6750338b6930b6"
+  },
+  "gates": {
+    "ece": {
+      "detail": "three disjoint ECE scores <= 0.05 with coverage in [0, 1]",
+      "name": "ece",
+      "passed": true
+    },
+    "ece_source": {
+      "detail": "three seeds labelled with a disjoint source ['disjoint', 'held-out', 'held_out']",
+      "name": "ece_source",
+      "passed": true
+    },
+    "rmse_ratio": {
+      "detail": "three seeds, held-out/train ratio <= 1.25",
+      "name": "rmse_ratio",
+      "passed": true
+    }
+  },
+  "measurement": "post-FIXPUMP staged teacher v2, 100 epochs, CPU",
+  "rmse_held_out_by_seed": {
+    "1": 8.24616108708543,
+    "2": 7.989650488135672,
+    "3": 7.8838370152897195
+  },
+  "rmse_held_out_mean": 8.039882863503607,
+  "rmse_held_out_std": 0.18631197466074087,
+  "seeds": [
+    1,
+    2,
+    3
+  ]
+}

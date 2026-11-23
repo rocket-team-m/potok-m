@@ -1,0 +1,31 @@
+{
+  "claim": "artifacts only; no closed-loop A/B was run and no win is claimed",
+  "export_format": "student.pt (torch state_dict of the distill-stage student)",
+  "measurement": "distilled students from the post-FIXPUMP staged teacher",
+  "students": {
+    "1": {
+      "config_hash": "dd6d61685d7bb423",
+      "ece_source": "held-out",
+      "file": "teacher_v2_s1.pt",
+      "rmse_held_out": 8.24616108708543,
+      "sha256": "357d65664851d3fa1fc71861d21fe4d30e62ddd308ce3dff3aefe55f94a3ac77",
+      "student_source": "gdn2_student"
+    },
+    "2": {
+      "config_hash": "ed3cedc86e9d672d",
+      "ece_source": "held-out",
+      "file": "teacher_v2_s2.pt",
+      "rmse_held_out": 7.989650488135672,
+      "sha256": "d4f31b37a3b8798c6a85f14bdabe0091d4f9c677e72d3113157f074b04fc8b29",
+      "student_source": "gdn2_student"
+    },
+    "3": {
+      "config_hash": "58dbb010e8f2915e",
+      "ece_source": "held-out",
+      "file": "teacher_v2_s3.pt",
+      "rmse_held_out": 7.8838370152897195,
+      "sha256": "dfa796a55e33874594e2164100c11f809aca2640b08abb2f95f2c3439559b2a5",
+      "student_source": "gdn2_student"
+    }
+  }
+}

@@ -1,0 +1,172 @@
+{
+  "config_hash": "58dbb010e8f2915e",
+  "conformal_coverage": 0.9352617079889807,
+  "data_provenance": {
+    "config_sha256": "9c34e71f9d10bcf081c31f15f5332f7bb2fac04dddb28009a27cd30987ab5e91",
+    "heldout_sha256": "fdc1d1400b1c5f111e21f79dead37afa1dd9f058fe457edb78037dc6ebe89807",
+    "train_sha256": "34b35e0ff67f7eeecbd895b2efde8bebcfa159c1a3e78379da6750338b6930b6"
+  },
+  "ece": 0.5610268586475237,
+  "ece_held_out": 0.002534734698766316,
+  "ece_source": "held-out",
+  "entropy": 0.0,
+  "entropy_enabled": false,
+  "model": "teacher_v2",
+  "module_sources": {
+    "dagger": "dagger",
+    "jepa": "jepa_v2",
+    "privileged": "privileged_teacher",
+    "student": "gdn2_student"
+  },
+  "ratio": 1.0650644757223984,
+  "recipe": {
+    "batch": 64,
+    "calib_tol": 0.15,
+    "dagger_rounds": 1,
+    "data": "/home/sehaxe/potok-m/ai/out/final_v3_postpump/train_only/train_validation.bin",
+    "device": "cpu",
+    "entropy_weight": 1.0,
+    "epochs": 100,
+    "exit_entropy_alpha": 0.01,
+    "exit_gate_threshold": 0.5,
+    "heads": 2,
+    "jepa_weight": 0.05,
+    "k3_per_head": 0,
+    "k3_qk_clip": false,
+    "k3_qk_clip_tau": 100.0,
+    "learned_exit": false,
+    "limit": 1451,
+    "lr": 0.002,
+    "max_iters": 2,
+    "n_inner_held_out": 2,
+    "opt": "adamw",
+    "out": "/home/sehaxe/potok-m/ai/out/final_v3_postpump/runs/s3",
+    "rlvr_samples": 4,
+    "rlvr_temperature": 0.05,
+    "spectral_bound": 1.0,
+    "spectral_residual": false,
+    "stage": "all",
+    "student_lr": 0.001,
+    "truth_sidecar": null,
+    "width": 16,
+    "window": 12
+  },
+  "reward_provenance": {
+    "config_hash": "58dbb010e8f2915e",
+    "effort": 0.8584010594249057,
+    "formula": "R = w_lat*(mean|b-u| - mean|b+t-u|) - w_eff*mean|u| - w_risk*soft_violations; hard gate: finite u and |u| <= g_max rejects the candidate from the group baseline",
+    "lateral_gain": 0.6229888130174109,
+    "rejected": 303797,
+    "risk": 0.9458804272915231,
+    "samples": 580400,
+    "seed": 3,
+    "source": "v3:g_accel command target + frame-local physics baseline (no truth sidecar needed)",
+    "total_mean": -0.12910333094896084,
+    "weights": {
+      "effort": 0.5,
+      "lateral": 2.0,
+      "risk": 1.0
+    }
+  },
+  "rmse_held_out": 7.8838370152897195,
+  "rmse_train": 7.4022157296555875,
+  "seed": 3,
+  "stage": "distill",
+  "stages": {
+    "dagger": {
+      "details": {
+        "dagger_source": "dagger",
+        "dataset_fingerprint": "d669a51511dce689f8b139e76c088c183c62e6c41d2e6778cc1252d9066b6455",
+        "fit_samples": 17430,
+        "held_out_samples": 2490,
+        "label_source": "reference_optimizer_v3:slots22..25"
+      },
+      "ece": 0.2093066769135076,
+      "entropy": 0.0,
+      "entropy_enabled": false,
+      "ratio": 1.0643524048172737,
+      "rmse_held_out": 7.559703979764457,
+      "rmse_train": 7.102632497985754,
+      "stage": "dagger",
+      "steps": 27300
+    },
+    "distill": {
+      "details": {
+        "student_file": "student.pt",
+        "student_source": "gdn2_student"
+      },
+      "ece": 0.5610268586475237,
+      "entropy": 0.0,
+      "entropy_enabled": false,
+      "ratio": 1.0650644757223984,
+      "rmse_held_out": 7.8838370152897195,
+      "rmse_train": 7.4022157296555875,
+      "stage": "distill",
+      "steps": 2300
+    },
+    "privileged": {
+      "details": {
+        "jepa_source": "jepa_v2",
+        "privileged_batches": 0,
+        "privileged_source": "privileged_teacher"
+      },
+      "ece": 0.3190845310667213,
+      "entropy": 0.0,
+      "entropy_enabled": false,
+      "ratio": 1.0652863069900123,
+      "rmse_held_out": 8.286798314210273,
+      "rmse_train": 7.778940046291206,
+      "stage": "privileged",
+      "steps": 2300
+    },
+    "rlvr": {
+      "details": {
+        "reward": {
+          "config_hash": "58dbb010e8f2915e",
+          "effort": 0.8584010594249057,
+          "formula": "R = w_lat*(mean|b-u| - mean|b+t-u|) - w_eff*mean|u| - w_risk*soft_violations; hard gate: finite u and |u| <= g_max rejects the candidate from the group baseline",
+          "lateral_gain": 0.6229888130174109,
+          "rejected": 303797,
+          "risk": 0.9458804272915231,
+          "samples": 580400,
+          "seed": 3,
+          "source": "v3:g_accel command target + frame-local physics baseline (no truth sidecar needed)",
+          "total_mean": -0.12910333094896084,
+          "weights": {
+            "effort": 0.5,
+            "lateral": 2.0,
+            "risk": 1.0
+          }
+        },
+        "rlvr_samples_per_group": 4
+      },
+      "ece": 0.4239763063913884,
+      "entropy": 0.0,
+      "entropy_enabled": false,
+      "ratio": 1.0677731244745667,
+      "rmse_held_out": 7.8174229991455455,
+      "rmse_train": 7.32123970903685,
+      "stage": "rlvr",
+      "steps": 2300
+    },
+    "sft": {
+      "details": {},
+      "ece": 0.27923847453031436,
+      "entropy": 0.0,
+      "entropy_enabled": false,
+      "ratio": 1.0683333473169607,
+      "rmse_held_out": 8.145875519295117,
+      "rmse_train": 7.62484438003632,
+      "stage": "sft",
+      "steps": 2300
+    }
+  },
+  "stages_completed": [
+    "sft",
+    "privileged",
+    "dagger",
+    "rlvr",
+    "distill"
+  ],
+  "steps": 2300
+}
