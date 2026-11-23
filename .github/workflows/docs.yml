@@ -35,8 +35,15 @@ jobs:
       - name: Build
         working-directory: docs
         run: bun run build
-      - name: Copy landing page
-        run: cp -R site/. docs/dist/
+      - name: Assemble landing page and docs subdirectory
+        run: |
+          mkdir -p docs/dist/docs
+          shopt -s dotglob nullglob
+          for f in docs/dist/*; do
+            [ "$f" = "docs/dist/docs" ] && continue
+            mv "$f" docs/dist/docs/
+          done
+          cp -R site/. docs/dist/
       - uses: actions/upload-pages-artifact@v3
         with:
           path: docs/dist
