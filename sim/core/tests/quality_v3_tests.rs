@@ -17,9 +17,10 @@ use potok_sim::{
     read_trajectory, scenario, sidecar_path,
     trajectory::write_trajectory_v3,
     validation::{
-        read_validation, write_validation, ValidationSet, FILE_NAME, HEADER_SIZE, TARGET_NAMES,
+        read_validation, write_validation, write_validation_with_version, ValidationSet, FILE_NAME,
+        HEADER_SIZE, LEGACY_TARGET_COUNT, TARGET_COUNT, TARGET_NAMES, VERSION_V1,
     },
-    Config, Episode, Simulator, TrajectorySet, MAX_COMMAND_MPS2,
+    Config, Episode, Simulator, TrajectorySet, MAX_COMMAND_MPS2, PHYSICS_FEATURES,
 };
 
 fn temp_dir(tag: &str) -> PathBuf {
@@ -354,4 +355,76 @@ fn regeneration_is_byte_identical_and_the_gate_can_fail() {
         std::fs::read(other.join(FILE_NAME)).unwrap(),
         "a different seed must move the bytes, not just the hash"
     );
+}
+
+/// The post-separation mass floor must reach the v3 export without moving a
+/// byte of the v1/v2/v3 layouts (SIMDBG finding 2). `drag_est` is
+/// `cd0 * q_dyn * area / mass`, so the mass implied by the exported pair must
+/// equal the trajectory tick's mass on every aerodynamic frame — including
+/// after separation, where the old dry_mass clamp forged ~8.1 kg over ~6.3 kg.
+#[test]
+fn post_sep_mass_reaches_v3_features_without_layout_changes() {
+    let dir = temp_dir("post-sep-v3");
+    let mut cfg = Config::default();
+    cfg.output
+        .features
+        .extend(PHYSICS_FEATURES.iter().map(|s| s.to_string()));
+    let sim = Simulator::new(cfg.clone()).unwrap();
+    let eps = episodes(&sim, &[0]);
+    let frames = cfg.frames_per_episode() as usize;
+
+    // The fix changes feature VALUES, not the container stride.
+    for (version, meta, targets) in [
+        (VERSION_V1, 9usize, LEGACY_TARGET_COUNT),
+        (2, 17, LEGACY_TARGET_COUNT),
+        (3, 17, TARGET_COUNT),
+    ] {
+        let path = dir.join(format!("v{version}.bin"));
+        write_validation_with_version(&path, &cfg, &eps, version).unwrap();
+        assert_eq!(
+            std::fs::read(&path).unwrap().len(),
+            HEADER_SIZE + 8 + meta * 4 + frames * (14 + targets) * 4,
+            "v{version} layout changed"
+        );
+    }
+
+    let validation = dir.join(FILE_NAME);
+    let sidecar = sidecar_path(&validation);
+    let set = write_validation_of(&validation, &cfg, &eps);
+    write_trajectory_v3(&sidecar, &cfg, &eps).unwrap();
+    let traj = read_trajectory(&sidecar).unwrap();
+
+    // The episode overrides `vehicle.aero.cd0` with its sampled domain value,
+    // which is exactly what the conditioning record carries.
+    let cd0 = eps[0].meta.conditioning.cd0 as f64;
+    let area = cfg.aero.area_m2;
+    let (q_col, drag_col) = (8 + 2, 8 + 4); // q_dyn_kpa, drag_est inside the 8 raw channels
+    let mut first = 0.0_f64;
+    let mut last = None;
+    for (i, tick) in traj.episodes[0].ticks.iter().enumerate() {
+        let f = set.episodes[0].features.row(i);
+        let mass = tick.mass_kg as f64;
+        if i == 0 {
+            first = mass;
+        }
+        let qdyn = f[q_col] as f64 * 1000.0;
+        let drag = f[drag_col] as f64;
+        if qdyn < 1.0 || drag <= 0.0 {
+            continue;
+        }
+        let implied = cd0 * qdyn * area / drag;
+        assert!(
+            (implied - mass).abs() / mass < 1e-3,
+            "frame {i}: mass implied by drag_est {implied:.4} != tick mass {mass:.4}"
+        );
+        if eps[0].frames[i].time_us as f64 >= 7.0e6 {
+            last = Some(mass);
+        }
+    }
+    let last = last.expect("no post-separation frame");
+    assert!(
+        last < first - 3.0,
+        "stage separation did not lower the mass: {first:.3} -> {last:.3}"
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
 }

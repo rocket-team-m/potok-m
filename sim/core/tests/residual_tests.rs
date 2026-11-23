@@ -151,6 +151,61 @@ fn crosswind_gust_raises_lateral_residual() {
     assert!(gust.q_dyn_kpa > calm.q_dyn_kpa);
 }
 
+/// A sample taken after stage separation must be scored at the post-sep mass.
+/// The RK4 integrator drops the mass floor by `stage_sep_mass` at separation; the
+/// feature path used to clamp to `dry_mass` for the whole flight (SIMDBG finding
+/// 2: 8.09 kg instead of ~6.32 kg at t=7 s, biasing the 1/mass features ~28 %).
+#[test]
+fn post_separation_sample_uses_post_sep_mass() {
+    let cfg = Config::default();
+    let v = Vehicle::from_config(&cfg, 11.0, 1.0, [0.0, 0.0]);
+    assert!(v.stage_sep_mass > 0.0);
+    assert!(v.dry_mass > v.stage_sep_mass);
+
+    let profile =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../config/boundary_profile.csv");
+    let atm =
+        Atmosphere::load_with_fast(&profile, cfg.sim.altitude_grid_m, cfg.run.fast_field).unwrap();
+    let air = atm.at(0.0);
+
+    let pre_mass = v.dry_mass; // just before sep: state mass sits at the pre-sep floor
+    let post_mass = v.dry_mass - 0.7 * v.stage_sep_mass; // below dry_mass, above the post-sep floor
+    assert!(post_mass > v.dry_mass - v.stage_sep_mass);
+
+    let mut pre = State::new(pre_mass, 0.0, 0.0);
+    let mut post = State::new(post_mass, 0.0, 0.0);
+    for s in [&mut pre, &mut post] {
+        s.vel = [120.0, 0.0, 0.0];
+        s.omega = [0.0; 3];
+    }
+    // Zero measured specific force leaves both mass-dependent features purely
+    // proportional to 1/mass, so their ratio isolates the mass actually used.
+    let measured = [0.0_f32; 3];
+    let a = PhysicsFeatures::from_state(&pre, [0.0; 3], air, &v, measured);
+    let b = PhysicsFeatures::from_state(&post, [0.0; 3], air, &v, measured);
+
+    let want = (pre_mass / post_mass) as f32;
+    assert!(
+        (b.drag_est / a.drag_est - want).abs() < 1e-4,
+        "drag_est ratio {} != mass ratio {want}",
+        b.drag_est / a.drag_est
+    );
+    assert!(
+        (b.a_lat_resid / a.a_lat_resid - want).abs() < 1e-4,
+        "a_lat_resid ratio {} != mass ratio {want}",
+        b.a_lat_resid / a.a_lat_resid
+    );
+    // Features that do not divide by mass are untouched.
+    assert_eq!(a.alpha_deg, b.alpha_deg);
+    assert_eq!(a.beta_deg, b.beta_deg);
+    assert_eq!(a.q_dyn_kpa, b.q_dyn_kpa);
+    assert_eq!(a.static_margin_cal, b.static_margin_cal);
+    eprintln!(
+        "pre={pre_mass:.3}kg drag={:.6} | post={post_mass:.3}kg drag={:.6} | ratio={want:.4}",
+        a.drag_est, b.drag_est
+    );
+}
+
 /// Full-path check: a real gust episode flags gust frames and those frames
 /// carry a finite residual above the sensor-bias floor of a calm glide.
 #[test]

@@ -56,7 +56,17 @@ impl PhysicsFeatures {
         let speed = norm(v_rel);
         let vb = mat_t_vec(r, v_rel);
         let qdyn = 0.5 * air.density * speed * speed;
-        let mass = s.mass().max(v.dry_mass);
+        // Mirror the integrator's mass floor (dynamics.rs:508-514): after
+        // separation it drops by the jettisoned casing. The RK4 clamp keeps
+        // s.mass() >= dry_mass before sep, so a lower state mass is the signal
+        // (t is not passed here; the caller's state already carries the jettison).
+        // Clamping to dry_mass alone overstates mass by the casing mass.
+        let sep_done = if s.mass() < v.dry_mass {
+            v.stage_sep_mass
+        } else {
+            0.0
+        };
+        let mass = s.mass().max(v.dry_mass - sep_done);
         let area = v.aero.area_m2;
         let az = speed.max(1.0);
         let cna = v.effective_cna();
