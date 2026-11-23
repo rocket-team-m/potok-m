@@ -19,19 +19,25 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
 
 <CardGrid>
   <Card title="Проект" icon="rocket">
-    Цели, тактико-технические характеристики и план сезона.
+    Цели, ТТХ, карта восьми репозиториев, лицензии и порядок проверки.
   </Card>
   <Card title="Борт" icon="puzzle">
-    Электроника, авионика, системы спасения и поиска.
+    STM32H743, интерлоки, питание, спасение и поиск.
   </Card>
   <Card title="ИИ" icon="star">
-    Концепт ассистента, обучение модели и работа с телеметрией.
+    LRS-TCN, LoopWM, цель v3, watchguard, калибровка и честный статус A/B.
   </Card>
-  <Card title="Форма" icon="setting">
-    Чертежи, CAD-модели и аэродинамические расчёты.
+  <Card title="Симулятор" icon="setting">
+    6-DoF, датчики, ветер, аэрокарточка и регрессионные гейты.
+  </Card>
+  <Card title="Протокол и edge" icon="puzzle">
+    UART-кадры, CRC, seq, `no_std`, SIL и инференс на Raspberry Pi.
+  </Card>
+  <Card title="RocketCraft" icon="star">
+    CAD → mesh → CFD/FEA → аэрокарточка, возможности C01–C24 и демо.
   </Card>
   <Card title="Полёты" icon="analytics">
-    Протоколы пусков, журнал и разборы.
+    Регламент пуска и журнал; полётных записей пока нет.
   </Card>
   <Card title="Процессы" icon="list-format">
     Как мы работаем, принятые решения и словарь терминов.
@@ -40,10 +46,22 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
 
 ## Что это за репозиторий
 
-Этот репозиторий хранит документацию и общие артефакты; код живёт в отдельных репозиториях `potok-m-ai`, `potok-m-sim`, `potok-m-protocol`, `potok-m-firmware`, `potok-m-edge` и `potok-m-3d`. Тяжёлые файлы
-(CAD, логи полётов, результаты Ansys) в git не попадают, для них есть Releases.
+Этот репозиторий хранит документацию, ADR и общие артефакты. Код живёт в
+канонических репозиториях `potok-m-ai`, `potok-m-sim`, `potok-m-protocol`,
+`potok-m-firmware`, `potok-m-edge`, `potok-m-3d`, а также в приватном
+`potok-m-workbench` (RocketCraft). Тяжёлые файлы — CAD, логи полётов,
+результаты Ansys — в git не попадают, для них есть Releases.
 
 - **Сайт:** эта документация, собирается автоматически при каждом пуше в `main`.
-- **Код:** отдельные репозитории `potok-m-ai`, `potok-m-sim`, `potok-m-protocol`,
-  `potok-m-firmware`, `potok-m-edge`, `potok-m-3d`; здесь остались только документы и артефакты.
-- **Задачи:** Issues в этом же репозитории, доска — GitHub Projects.
+- **Код:** в канонических репозиториях; здесь остаются только документы и
+  лёгкие артефакты.
+- **Задачи:** Issues, доска — GitHub Projects.
+
+:::caution
+Инженерный прототип. Нет записанных полётов, плата не вводилась в строй,
+симулятор не является цифровым двойником, ИИ не допущен к управлению.
+Ни один из гейтов не заменяет лётную квалификацию.
+:::
+
+Начните с [архитектуры](/potok-m/docs/project/architecture/) и
+[запуска и проверки](/potok-m/docs/project/run/).

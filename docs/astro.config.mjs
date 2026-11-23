@@ -31,8 +31,11 @@ export default defineConfig({
           label: 'Проект',
           items: [
             { label: 'Цели и ТТХ', slug: 'project/goals' },
+            { label: 'Архитектура и репозитории', slug: 'project/architecture' },
             { label: 'План сезона', slug: 'project/roadmap' },
             { label: 'Роли', slug: 'project/roles' },
+            { label: 'Лицензии', slug: 'project/licenses' },
+            { label: 'Запуск и проверка', slug: 'project/run' },
           ],
         },
         {
@@ -48,8 +51,26 @@ export default defineConfig({
           label: 'ИИ',
           items: [
             { label: 'Концепт', slug: 'ai/concept' },
+            { label: 'Модели и экспорт', slug: 'ai/models' },
             { label: 'Обучение', slug: 'ai/training' },
             { label: 'Телеметрия', slug: 'ai/telemetry' },
+            { label: 'Безопасность и калибровка', slug: 'ai/safety' },
+            { label: 'Гейты и статус A/B', slug: 'ai/gates' },
+          ],
+        },
+        {
+          label: 'Симулятор',
+          items: [
+            { label: 'Модель симулятора', slug: 'sim/model' },
+            { label: 'Валидация и качество данных', slug: 'sim/validation' },
+          ],
+        },
+        {
+          label: 'Протокол и edge',
+          items: [
+            { label: 'UART-протокол', slug: 'protocol/uart' },
+            { label: 'Встраиваемые системы и SIL', slug: 'protocol/embedded' },
+            { label: 'Инференс на edge', slug: 'edge/inference' },
           ],
         },
         {
@@ -57,6 +78,13 @@ export default defineConfig({
           items: [
             { label: 'Чертежи и CAD', slug: 'vehicle/cad' },
             { label: 'Аэродинамика', slug: 'vehicle/aero' },
+          ],
+        },
+        {
+          label: 'RocketCraft',
+          items: [
+            { label: 'Обзор', slug: 'rocketcraft/overview' },
+            { label: 'Интерфейс', slug: 'rocketcraft/ui' },
           ],
         },
         {

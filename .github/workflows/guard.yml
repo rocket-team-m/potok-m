@@ -73,12 +73,13 @@ jobs:
                        ".pdf", ".ico", ".woff", ".woff2", ".mp4"}
           LINK = re.compile(r'!?\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+["\'][^"\']*["\'])?\s*\)')
           REF = re.compile(r'^\s*\[[^\]]+\]:\s*<?([^\s>]+)>?', re.M)
-          SITE_ROOT = "/potok-m/"
+          SITE_ROOTS = ("/potok-m/docs/", "/potok-m/")
           CONTENT = os.path.join("docs", "src", "content", "docs")
 
           def resolve(path, source):
-              if path.startswith(SITE_ROOT):
-                  roots = [os.path.join(CONTENT, path[len(SITE_ROOT):].lstrip("/"))]
+              if any(path.startswith(root) for root in SITE_ROOTS):
+                  root = next(r for r in SITE_ROOTS if path.startswith(r))
+                  roots = [os.path.join(CONTENT, path[len(root):].lstrip("/"))]
               elif path.startswith("/"):
                   rel = path.lstrip("/")
                   roots = [rel, os.path.join(CONTENT, rel)]
