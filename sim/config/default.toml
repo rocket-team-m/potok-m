@@ -129,19 +129,26 @@ control_moment_arm_m = 0.25
 pitch_damping = 0.6
 roll_damping = 0.25
 cd_mach = [[0.0, 0.30], [0.2, 0.30], [0.4, 0.31], [0.5, 0.33], [0.7, 0.36], [0.9, 0.39], [1.1, 0.39], [1.5, 0.39]]
-# Motor passports (chat PDFs):
+# Motor passports (chat PDFs; transcribed in docs/THRUST_PROVENANCE.md):
 #   stage 1 RDK-2000: 2.2-2.4 kNs, avg 390-400 N, peak 500-550 N,
 #     burn 5-6 s, propellant 1.88 kg.
 #   stage 2 RDK-1000: 1.0-1.2 kNs, avg 260-270 N, peak 550-600 N,
 #     burn 3-3.5 s, propellant 1.0 kg.
-# Motor passports: 2.2 + 1.0 kNs minimum (400 N for 5.5 s and 312.5 N for
-# 3.2 s), both below the passport peak thrusts.
-# First stage is jettisoned at 5.5 s; its RDK-2000 casing is 2.8 - 1.88 = 0.92 kg.
+# Passport total impulse: 3.2 kNs minimum (400 N x 5.5 s + 312.5 N x 3.2 s)
+# to 3.6 kNs maximum (2.4 + 1.2 kNs).
+# First stage is jettisoned at 6.0 s; the RDK-2000 casing is 2.8 - 1.88 = 0.92 kg.
 stage_sep_time_s = 6.0
 stage_sep_mass_kg = 2.55
-# Mass flows 0.342 / 0.3125 kg/s are the passport propellant masses divided
-# by the burn times. Peaks and thrust ripple are NOT modelled; only average
-# thrust and mass flow are.
+# Source label for the table below. "experimental" is an explicit declaration
+# that this curve is NOT claimed to be passport-compliant: it integrates to
+# 3627.8 Ns (passport max 3600) and peaks at 610 N in stage 1 (passport max
+# 550). config.rs refuses a "passport" label whose table is outside the
+# envelope, so the discrepancy cannot be asserted silently. See
+# docs/THRUST_PROVENANCE.md for the full arithmetic.
+thrust_source = "experimental"
+# 200-knot rippled table with no static-fire measurement behind it. Peaks and
+# ripple ARE modelled here (older docs said otherwise). The knots are kept
+# bit-for-bit so pinned trajectories and zero-command gates stay unchanged.
 thrust_profile = [
   [0.000, 0.00, 0.0000],
   [0.050, 20.00, 0.0000],
