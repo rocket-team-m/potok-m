@@ -55,6 +55,16 @@ ULP_M = float(np.spacing(np.float32(600.0)))
 # f32 sidecar resolution is ~6e-5 m; require >16 ULP before calling a win real.
 MIN_MEANINGFUL_M = 1e-3
 
+# Post-FIXPUMP recalculation. The helper is rebuilt against corrected dynamics:
+# the aerodynamic normal force no longer does positive work (584b1dc) and drag_est
+# is pinned to trajectory mass (7ddf324). The frozen v3 exports are untouched; no
+# gate, threshold, weight or physics constant was tuned for this recalculation.
+REPORT_LABEL = "post-FIXPUMP"
+DYNAMICS_BASIS = (
+    "post-FIXPUMP: aerodynamic normal force does no positive work (584b1dc), "
+    "drag_est pinned to trajectory mass (7ddf324)"
+)
+
 # The two families with a complete export for every pre-registered seed.
 STUDENTS = (
     {"name": "loopwm", "family": "loopwm", "file": "loopwm.pt", "kind": "window checkpoint"},
@@ -291,11 +301,19 @@ def summarise(b_track: dict, a_track: dict, control: dict | None) -> dict:
 
 def markdown(report: dict) -> str:
     out = [
-        "# v3 closed-loop A/B — zero command vs oracle vs exported students",
+        f"# v3 closed-loop A/B — {REPORT_LABEL} — zero command vs oracle vs exported students",
         "",
         (
-            "**This artifact supersedes the v1/v2 closed-loop A/B** (`ab_report.json/.md` at "
-            "`e57c6bf`): earlier surrogate numbers are void, and every v1/v2 held-out number "
+            f"**{REPORT_LABEL} recalculation.** The flight helper was rebuilt against corrected "
+            "dynamics (the aerodynamic normal force does no positive work); the frozen v3 "
+            "exports are unchanged and no gate, threshold, weight or physics constant was "
+            "tuned. The zero-command baseline and oracle numbers here supersede the "
+            "pre-FIXPUMP `ab_report.json/.md`."
+        ),
+        "",
+        (
+            "**This artifact also supersedes the v1/v2 closed-loop A/B** (`ab_report.json/.md` "
+            "at `e57c6bf`): earlier surrogate numbers are void, and every v1/v2 held-out number "
             "was scored on the angle-domain target that the acceleration actuator cannot consume."
         ),
         "",
@@ -308,6 +326,7 @@ def markdown(report: dict) -> str:
         "",
         f"- Measurement: {report['measurement']}.",
         f"- Sim: {report['sim_source']}",
+        f"- Dynamics: {report['dynamics_basis']}.",
         (
             f"- Config: `{report['provenance']['config']}` (config_hash "
             f"`{report['provenance']['config_hash']}`); all simulations are read-only through "
@@ -427,7 +446,8 @@ def main() -> None:
             raise FileNotFoundError(f"missing {path.relative_to(ROOT)}")
 
     manifest = json.loads(MANIFEST.read_text())
-    indices = [int(ep.index) for ep in read_validation(HELDOUT).episodes]
+    heldout = read_validation(HELDOUT)
+    indices = [int(ep.index) for ep in heldout.episodes]
     if len(indices) != 20 or any(i % 20 not in (16, 17, 18, 19) for i in indices):
         raise ValueError(f"unexpected held-out indices: {indices}")
     heldout_hash = next(f["sha256"] for f in manifest["files"] if f["name"] == "validation.bin")
@@ -436,8 +456,8 @@ def main() -> None:
 
     seed_order = sorted(args.seeds)
     report_seeds: dict[str, dict] = {}
+    baseline_shas: dict[str, str] = {}
     blockers: list[str] = []
-    read_validation(HELDOUT)
     for spec in (*STUDENTS, *PARTIAL):
         for seed in seed_order:
             path = EXPORTS / "runs" / spec["family"] / f"s{seed}" / spec["file"]
@@ -455,10 +475,36 @@ def main() -> None:
         baseline_track = read_track(baseline_dir / "validation.trajectory")
         if set(baseline_track) != set(indices):
             raise RuntimeError(f"seed {seed}: baseline episode set differs from held-out manifest")
-        if seed == 1 and sha256(baseline_dir / "validation.bin") != sha256(HELDOUT):
-            raise RuntimeError(
-                "seed 1 baseline validation.bin is not byte-identical to the v3 held-out export"
+        baseline_sha = sha256(baseline_dir / "validation.bin")
+        baseline_shas[str(seed)] = baseline_sha
+        if seed == 1:
+            # Post-FIXPUMP the zero-command flight legitimately differs from the
+            # frozen v3 export, which was recorded with the energy-pumping normal
+            # force. What must still match is the scenario set: indices and
+            # conditioning. If it is byte-identical, the helper was NOT rebuilt.
+            if [ep.index for ep in baseline.episodes] != indices:
+                raise RuntimeError("seed 1 baseline indices differ from the held-out manifest")
+            cond_delta = max(
+                float(
+                    np.max(
+                        np.abs(
+                            np.asarray(ep.conditioning, np.float64)
+                            - np.asarray(ref.conditioning, np.float64)
+                        )
+                    )
+                )
+                for ep, ref in zip(baseline.episodes, heldout.episodes)
             )
+            if cond_delta > 1e-9:
+                raise RuntimeError(
+                    f"seed 1 baseline scenarios differ from the held-out export "
+                    f"(max conditioning delta {cond_delta})"
+                )
+            if baseline_sha == sha256(HELDOUT):
+                raise RuntimeError(
+                    "seed 1 baseline is byte-identical to the PRE-FIXPUMP export: "
+                    "the helper was not rebuilt against corrected dynamics"
+                )
         for idx, values in printed.items():
             got = baseline_track[idx]
             if (
@@ -570,14 +616,24 @@ def main() -> None:
 
     if not passed:
         first = report_seeds.get("1", {}).get(primary, {}).get("aggregate", {})
-        blockers.append(
-            f"no exported student beats zero command on the pre-registered primary "
-            f"({primary}, all seeds): seed 1 lateral "
-            f"{first.get('baseline', {}).get('lateral_rms_m', float('nan')):.3f} -> "
-            f"{first.get('assisted', {}).get('lateral_rms_m', float('nan')):.3f} m; "
-            "v3 target/output range mismatch remains the leading hypothesis "
-            "(window heads bounded at g_max=1 m/s^2 while v3 demands reach 10 m/s^2)"
-        )
+        if oracle_failures:
+            blockers.append(
+                f"oracle positive control failed on {len(oracle_failures)} of "
+                f"{len(seed_order)} seeds under corrected dynamics, so no student verdict is "
+                f"valid; seed 1 primary ({primary}) lateral "
+                f"{first.get('baseline', {}).get('lateral_rms_m', float('nan')):.3f} -> "
+                f"{first.get('assisted', {}).get('lateral_rms_m', float('nan')):.3f} m is "
+                "recorded but not credited. The oracle's pre-FIXPUMP apogee authority was "
+                "the energy-pumping normal force, now removed."
+            )
+        else:
+            blockers.append(
+                f"no exported student beats zero command on the pre-registered primary "
+                f"({primary}, all seeds): seed 1 lateral "
+                f"{first.get('baseline', {}).get('lateral_rms_m', float('nan')):.3f} -> "
+                f"{first.get('assisted', {}).get('lateral_rms_m', float('nan')):.3f} m; "
+                "see per-seed tables for the corrected zero-command baseline"
+            )
 
     provenance = {
         "generated_at_utc": datetime.now(UTC).isoformat(timespec="seconds"),
@@ -594,6 +650,10 @@ def main() -> None:
         "heldout_manifest_sha256": sha256(MANIFEST),
         "heldout_sha256": sha256(HELDOUT),
         "quality_report_sha256": sha256(EXPORTS / "quality_report.json"),
+        "label": REPORT_LABEL,
+        "dynamics_basis": DYNAMICS_BASIS,
+        "post_fixpump_baseline_sha256": baseline_shas.get("1"),
+        "baseline_sha256_by_seed": baseline_shas,
         "harness": "scripts/ab_v3.py",
         "harness_sha256": sha256(Path(__file__)),
         "helper": "scripts/ab_control_v3/src/main.rs",
@@ -619,14 +679,17 @@ def main() -> None:
         "sidecar_ulp_m": ULP_M,
     }
     report = {
+        "label": REPORT_LABEL,
+        "dynamics_basis": DYNAMICS_BASIS,
         "task": "closed-loop v3 AI assist vs zero command on OR-aligned held-out scenarios",
         "measurement": "POTOKTRJ v3 flown-truth sidecar (stride 26, 6-DoF truth), not surrogate",
         "sim_source": "read-only scripts/ab_control_v3 on commit "
         + provenance["git_head"]
         + "; oracle uses run_episode_with_oracle / "
         "ReferenceOptimizer::fin_accel_command (v3 g_accel, not g_theta)",
-        "supersedes": "the v1/v2 closed-loop ab_report at e57c6bf and the earlier surrogate "
-        "A/B at 237920a; both are void, not smaller versions of these results",
+        "supersedes": "the pre-FIXPUMP v3 ab_report (energy-pumping normal force) plus the "
+        "v1/v2 closed-loop ab_report at e57c6bf and the earlier surrogate A/B at 237920a; "
+        "all are void, not smaller versions of these results",
         "seed_note": "seeds 2/3 use the seed-matched v3 exports on the same held-out indices "
         "generated with --seed 2/3; off-training generalization checks, not a "
         "re-training sweep",
@@ -667,9 +730,10 @@ def main() -> None:
         "failure_location": ""
         if passed
         else (
-            "no exported v3 student lowered pooled lateral RMS against zero command on every "
-            "pre-registered seed beyond the f32 sidecar resolution; see blockers and per-seed "
-            "tables; oracle positive control " + ("passed" if not oracle_failures else "FAILED")
+            "no exported v3 student lowered pooled lateral RMS against the corrected "
+            "zero-command baseline on every pre-registered seed beyond the f32 sidecar "
+            "resolution; see blockers and per-seed tables; oracle positive control "
+            + ("passed" if not oracle_failures else "FAILED")
         ),
         "provenance": provenance,
         "blockers": blockers,
@@ -703,6 +767,12 @@ def main() -> None:
                 "Seeds 2/3 fly seed-matched exports on regenerated held-out flights; they test "
                 "input robustness, not reproducibility of training. Missing exports are reported "
                 "as blockers and never replaced with a stand-in."
+            ),
+            (
+                "Post-FIXPUMP: the corrected zero-command baseline is NOT byte-identical to the "
+                "frozen v3 held-out export, which was flown with the energy-pumping normal "
+                "force. The 20 held-out scenario indices and their conditioning vectors are "
+                "verified identical; only the flown physics changed. Exports were not retrained."
             ),
         ],
     }
