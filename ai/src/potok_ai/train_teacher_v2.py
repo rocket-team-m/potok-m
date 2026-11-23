@@ -14,6 +14,10 @@ teacher stage, the best one is restored before distillation, and no reward
 gradient is ever taken. The reward formula, weights, hard gate and provenance
 are unchanged; only its role moves from policy update to model selection.
 
+Teacher stages compose the classical physics baseline with a bounded,
+zero-initialised learned correction (SHIELD02 ``ResidualPolicy``); the raw
+pre-SHIELD02 teacher stays available with ``--no-residual-policy``.
+
 ``--stage X`` runs every stage through X (so a later stage never starts from a
 fresh model). Determinism is structural: seeds 1/2/3 only, named child streams
 for every auxiliary RNG, split by scenario with final-eval cells 16..19 refused
@@ -46,6 +50,7 @@ from .data import Episode, SmartWindowDataset, load_episodes
 from .loopwm import LoopWM, LoopWMConfig
 from .optim import K3Config, MuonPlus
 from .physics import final_command, physics_baseline
+from .residual_policy import ResidualConfig, ResidualDecision, ResidualPolicy
 from .train_smart import generalisation_ratio, normalized_correction_loss
 
 # ---------------------------------------------------------------------------
@@ -163,6 +168,7 @@ class TeacherV2Config:
     exit_entropy_alpha: float = 0.01
     spectral_residual: bool = False
     spectral_bound: float = 1.0
+    residual_policy: bool = True  # SHIELD02: bounded superposition in teacher stages
     jepa_weight: float = 0.05
     entropy_weight: float = 1.0
     dagger_rounds: int = 1
@@ -291,6 +297,7 @@ class TeacherV2Metrics:
     entropy_enabled: bool = False
     reward_provenance: dict[str, Any] = field(default_factory=dict)
     module_sources: dict[str, str] = field(default_factory=dict)
+    residual_policy: dict[str, Any] = field(default_factory=dict)
     stages: dict[str, dict[str, Any]] = field(default_factory=dict)
     stages_completed: tuple[str, ...] = ()
 
@@ -370,6 +377,7 @@ def _predict(
     cond: torch.Tensor,
     target: torch.Tensor,
     *,
+    cfg: TeacherV2Config,
     student: bool,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Return (command, confidence logit, per-sample command error)."""
@@ -384,7 +392,7 @@ def _predict(
         raw = model.head_logits(latent)  # type: ignore[attr-defined]
         output = model.head_output(raw)  # type: ignore[attr-defined]
         correction, logit = output[:, :2], raw[:, 2]
-    command = final_command(correction, physics_baseline(window[:, -1]), residual=True)
+    command = _command(model, window, correction, residual=cfg.residual_policy and not student)
     if command.shape != target.shape:
         raise AssertionError(f"command {tuple(command.shape)} != target {tuple(target.shape)}")
     return command, logit, (command - target).abs().max(dim=1).values.detach()
@@ -411,7 +419,12 @@ def _evaluate(
             squared, count = 0.0, 0
             for window, cond, target, _ in _window_batches(group, cfg):
                 command, logit, error = _predict(
-                    model, window.to(device), cond.to(device), target.to(device), student=student
+                    model,
+                    window.to(device),
+                    cond.to(device),
+                    target.to(device),
+                    cfg=cfg,
+                    student=student,
                 )
                 squared += float((command - target.to(device)).square().sum())
                 count += target.numel()
@@ -452,7 +465,42 @@ def _teacher_config(cfg: TeacherV2Config) -> LoopWMConfig:
 
 
 def _build_teacher(cfg: TeacherV2Config, device: torch.device) -> LoopWM:
-    return LoopWM(_teacher_config(cfg)).to(device)
+    model = LoopWM(_teacher_config(cfg)).to(device)
+    if cfg.residual_policy:
+        model.add_module("residual_policy", ResidualPolicy(ResidualConfig()).to(device))
+    return model
+
+
+def _residual_decision(
+    model: nn.Module,
+    window: torch.Tensor,
+    correction: torch.Tensor,
+    *,
+    residual: bool,
+) -> ResidualDecision | None:
+    """Apply the gated superposition, or return None for the legacy path."""
+    if not residual:
+        return None
+    policy = getattr(model, "residual_policy", None)
+    if not isinstance(policy, ResidualPolicy):
+        raise TypeError(
+            "residual_policy is enabled but the model has no ResidualPolicy module"
+        )
+    return policy(physics_baseline(window[:, -1]), correction)
+
+
+def _command(
+    model: nn.Module,
+    window: torch.Tensor,
+    correction: torch.Tensor,
+    *,
+    residual: bool,
+) -> torch.Tensor:
+    """Classical baseline plus correction; the unchanged teacher path when disabled."""
+    decision = _residual_decision(model, window, correction, residual=residual)
+    if decision is None:
+        return final_command(correction, physics_baseline(window[:, -1]), residual=True)
+    return decision.command
 
 
 def _supervised_loss(
@@ -469,7 +517,7 @@ def _supervised_loss(
     latent, info = model.refine(window, cond)
     raw = model.head_logits(latent)
     output = model.head_output(raw)
-    command = final_command(output[:, :2], physics_baseline(window[:, -1]), residual=True)
+    command = _command(model, window, output[:, :2], residual=cfg.residual_policy)
     if command.shape != target.shape:
         raise AssertionError(f"command {tuple(command.shape)} != target {tuple(target.shape)}")
     error = (command - target).abs().max(dim=1).values.detach()
@@ -1020,6 +1068,13 @@ def _stage_distill(
             with torch.no_grad():
                 latent, _ = teacher.refine(window, cond)
                 target_output = teacher.head_output(teacher.head_logits(latent))
+                decision = _residual_decision(
+                    teacher, window, target_output[:, :2], residual=cfg.residual_policy
+                )
+                if decision is not None:
+                    target_output = torch.cat(
+                        [decision.correction, target_output[:, 2:3]], dim=-1
+                    )
             output = student.forward(window, cond)
             if output.shape[0] != window.shape[0] or output.shape[-1] != 3:
                 raise AssertionError(f"student output has wrong shape {tuple(output.shape)}")
@@ -1042,7 +1097,11 @@ def _stage_distill(
         cfg.out / "student.pt",
     )
     train, held, ratio, ece = _evaluate(student, fit, inner, cfg, device, student=True)
-    details = {"student_source": STUDENT_SOURCE, "student_file": "student.pt"}
+    details = {
+        "student_source": STUDENT_SOURCE,
+        "student_file": "student.pt",
+        "residual_policy_target": cfg.residual_policy,
+    }
     return StageReport("distill", steps, train, held, ratio, ece, 0.0, False, details)
 
 
@@ -1093,6 +1152,15 @@ def run(cfg: TeacherV2Config) -> TeacherV2Metrics:
         (report.entropy for report in reversed(list(reports.values())) if report.entropy_enabled),
         0.0,
     )
+    policy = getattr(model, "residual_policy", None)
+    residual_info: dict[str, Any] = {
+        "enabled": cfg.residual_policy,
+        "source": "residual_policy" if cfg.residual_policy else "legacy",
+    }
+    if isinstance(policy, ResidualPolicy):
+        residual_info["gain"] = float(policy.gain.detach())
+        residual_info["gate_reasons"] = policy.reason_counts()
+
     metrics = TeacherV2Metrics(
         stage=last.stage,
         seed=cfg.seed,
@@ -1110,7 +1178,9 @@ def run(cfg: TeacherV2Config) -> TeacherV2Metrics:
             "dagger": DAGGER_SOURCE,
             "privileged": PRIVILEGED_SOURCE,
             "student": STUDENT_SOURCE,
+            "residual_policy": residual_info["source"],
         },
+        residual_policy=residual_info,
         stages={name: report.as_dict() for name, report in reports.items()},
         stages_completed=tuple(stages),
     )
@@ -1153,6 +1223,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--exit-entropy-alpha", type=float, default=0.01)
     parser.add_argument("--spectral-residual", action="store_true")
     parser.add_argument("--spectral-bound", type=float, default=1.0)
+    parser.add_argument(
+        "--no-residual-policy",
+        dest="residual_policy",
+        action="store_false",
+        help="keep the pre-SHIELD02 teacher: raw head correction on the physics baseline",
+    )
     parser.add_argument("--jepa-weight", type=float, default=0.05)
     parser.add_argument("--entropy-weight", type=float, default=1.0)
     parser.add_argument("--dagger-rounds", type=int, default=1)
