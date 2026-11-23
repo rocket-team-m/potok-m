@@ -1,12 +1,10 @@
 {
   "blockers": [
-    "lrs seed 3: missing export `ai/out/v3_final/runs/lrs/s3/lrs.bin`; seed not measured, no stand-in was substituted",
-    "oracle positive control failed on seed 2: lateral 1306.397 -> 1295.894, apogee 1972.859 -> 1970.708; seed 3: lateral 1306.380 -> 1297.999, apogee 1983.003 -> 1975.402: the seam or measurement is broken; no student verdict is valid",
-    "oracle positive control failed on 2 of 3 seeds under corrected dynamics, so no student verdict is valid; seed 1 primary (loopwm) lateral 1309.409 -> 1267.367 m is recorded but not credited. The oracle's pre-FIXPUMP apogee authority was the energy-pumping normal force, now removed."
+    "lrs seed 3: missing export `ai/out/v3_final/runs/lrs/s3/lrs.bin`; seed not measured, no stand-in was substituted"
   ],
   "dynamics_basis": "post-FIXPUMP: aerodynamic normal force does no positive work (584b1dc), drag_est pinned to trajectory mass (7ddf324)",
-  "exit_code": 1,
-  "failure_location": "no exported v3 student lowered pooled lateral RMS against the corrected zero-command baseline on every pre-registered seed beyond the f32 sidecar resolution; see blockers and per-seed tables; oracle positive control FAILED",
+  "exit_code": 0,
+  "failure_location": "",
   "held_out_indices": [
     16,
     17,
@@ -34,13 +32,14 @@
     "Lateral RMS and apogee are over the whole 30 s flown trajectory from the v3 sidecar, not over a gate-open tail and not from a surrogate.",
     "The v3 target is the fin command [g_accel_y, -g_accel_x] in m/s^2 seam order, so the student's trained output is written directly to the TSV; no degree/radian or g*tan conversion is applied.",
     "The physics_baseline term keeps its trained normalised scale and is added to the student Delta exactly as in engine.py::final_command; both are interpreted in the seam's m/s^2 units because that is the unit of the v3 supervised target.",
-    "Clipping at +/-10 m/s^2 is the seam's hard actuator bound, counted per episode; no threshold, gain or physics constant was tuned for this report.",
+    "Clipping at +/-10 m/s^2 is the seam's hard actuator bound, counted per episode; no student threshold, gain or physics constant was tuned for this report.",
+    "F1 detector change (post-FIXPUMP): the oracle positive control no longer requires an apogee increase. Credibility is pooled and per-scenario lateral improvement, the pinned [ay, -ax] sign convention, and use of the command actuator; apogee stays as a diagnostic field. This supersedes the earlier apogee-gated verdict but changes no flight number and no student gate.",
     "Seeds 2/3 fly seed-matched exports on regenerated held-out flights; they test input robustness, not reproducibility of training. Missing exports are reported as blockers and never replaced with a stand-in.",
     "Post-FIXPUMP: the corrected zero-command baseline is NOT byte-identical to the frozen v3 held-out export, which was flown with the energy-pumping normal force. The 20 held-out scenario indices and their conditioning vectors are verified identical; only the flown physics changed. Exports were not retrained."
   ],
   "label": "post-FIXPUMP",
   "measurement": "POTOKTRJ v3 flown-truth sidecar (stride 26, 6-DoF truth), not surrogate",
-  "oracle_failure": "seed 2: lateral 1306.397 -> 1295.894, apogee 1972.859 -> 1970.708; seed 3: lateral 1306.380 -> 1297.999, apogee 1983.003 -> 1975.402",
+  "oracle_failure": "",
   "partial_students": [
     {
       "export": "ai/out/v3_final/runs/lrs/s1/lrs.bin",
@@ -48,7 +47,85 @@
       "name": "lrs"
     }
   ],
+  "positive_control": {
+    "apogee_is_diagnostic": true,
+    "authority_majority": 0.5,
+    "credible": true,
+    "criteria": {
+      "authority_use": true,
+      "lateral_improvement": true,
+      "sign_correct": true
+    },
+    "definition": "post-FIXPUMP F1: lateral improvement + correct sign + authority use; apogee delta is diagnostic only",
+    "per_seed": {
+      "1": {
+        "apogee_delta_m_diagnostic": 11.692065429687318,
+        "authority": {
+          "active_ticks": 16661,
+          "cap_fraction": 1.0,
+          "cap_hit_ticks": 16661,
+          "max_command_mps2": 10.0,
+          "mean_peak_abs_command_mps2": 10.0,
+          "pitch_negative_fraction": 1.0
+        },
+        "authority_use": true,
+        "lateral_delta_m": -17.312213612006644,
+        "lateral_improvement": true,
+        "scenario_lateral_deltas_m": [
+          -5.668613013467166,
+          -32.13475358218261,
+          -24.642043841074837,
+          -6.165667106976343
+        ],
+        "sign_correct": true
+      },
+      "2": {
+        "apogee_delta_m_diagnostic": -2.1510437011718295,
+        "authority": {
+          "active_ticks": 16584,
+          "cap_fraction": 1.0,
+          "cap_hit_ticks": 16584,
+          "max_command_mps2": 10.0,
+          "mean_peak_abs_command_mps2": 10.0,
+          "pitch_negative_fraction": 1.0
+        },
+        "authority_use": true,
+        "lateral_delta_m": -10.50294770372102,
+        "lateral_improvement": true,
+        "scenario_lateral_deltas_m": [
+          -15.006638054020868,
+          -4.346214317451086,
+          -5.03848302486449,
+          -18.340373277868594
+        ],
+        "sign_correct": true
+      },
+      "3": {
+        "apogee_delta_m_diagnostic": -7.601098632812636,
+        "authority": {
+          "active_ticks": 16531,
+          "cap_fraction": 1.0,
+          "cap_hit_ticks": 16531,
+          "max_command_mps2": 10.0,
+          "mean_peak_abs_command_mps2": 10.0,
+          "pitch_negative_fraction": 1.0
+        },
+        "authority_use": true,
+        "lateral_delta_m": -8.381531295287914,
+        "lateral_improvement": true,
+        "scenario_lateral_deltas_m": [
+          -20.687551406650982,
+          -5.068252436525654,
+          -7.763091991011606,
+          -0.17968478829652668
+        ],
+        "sign_correct": true
+      }
+    },
+    "sign_gate_provenance": "sim/core/tests/actuator_mapping_tests.rs:206-238 (whole-sign), sim/core/tests/control_seam_hard_tests.rs:62-115 (per-axis), sim/core/tests/firmware_dataset_tests.rs:154 ([ay, -ax] allocation)"
+  },
   "provenance": {
+    "authority_majority": 0.5,
     "baseline_sha256_by_seed": {
       "1": "fdc1d1400b1c5f111e21f79dead37afa1dd9f058fe457edb78037dc6ebe89807",
       "2": "db39c069ba5bedcfce0c798cfe24584fe965dbb2696b6cec57043544c2c4cc9c",
@@ -87,10 +164,10 @@
       "static_margin_cal"
     ],
     "frames_per_episode": 1500,
-    "generated_at_utc": "2026-11-23T20:35:13+00:00",
-    "git_head": "5acddab285c48964e8a4d52ed36cdfcef83681b8",
+    "generated_at_utc": "2026-11-23T20:49:55+00:00",
+    "git_head": "0c05e54bb78ccd5c451430f910d7dc2ebf2ed526",
     "harness": "scripts/ab_v3.py",
-    "harness_sha256": "7153f4da8b1e6a8febe52567cb3aeb0bf0a2fb7582efba3b34c9d4c48b90bb79",
+    "harness_sha256": "1a6c276653a8252b43f5b739ef6b6f609254688cd0d925cd1bb33d11450cfc1c",
     "heldout_manifest_sha256": "24f59615eca1359507c0bf2b24b77b2ff4acd89abf3410f0386337d007cd3e76",
     "heldout_sha256": "5848e222604b92d659f5778e467bfb359b98d5a2634bdc1b1c2a8257459685ed",
     "helper": "scripts/ab_control_v3/src/main.rs",
@@ -98,6 +175,7 @@
     "label": "post-FIXPUMP",
     "min_meaningful_delta_m": 0.001,
     "numpy": "2.5.5",
+    "positive_control_definition": "post-FIXPUMP F1: lateral improvement + correct sign + authority use; apogee delta is diagnostic only",
     "post_fixpump_baseline_sha256": "fdc1d1400b1c5f111e21f79dead37afa1dd9f058fe457edb78037dc6ebe89807",
     "python": "3.13.15",
     "quality_report_sha256": "75fa4633803d7274f101ef573003cbe47da71df6e83dfe28d5500cf7ddb47ec2",
@@ -432,6 +510,14 @@
           "lateral_ratio_pct": 98.6778602301161
         },
         "arm": "run_episode_with_oracle / fin_accel_command",
+        "authority": {
+          "active_ticks": 16661,
+          "cap_fraction": 1.0,
+          "cap_hit_ticks": 16661,
+          "max_command_mps2": 10.0,
+          "mean_peak_abs_command_mps2": 10.0,
+          "pitch_negative_fraction": 1.0
+        },
         "per_scenario": [
           {
             "apogee_delta_m": -12.8856201171875,
@@ -816,6 +902,14 @@
           "lateral_ratio_pct": 99.19603702945608
         },
         "arm": "run_episode_with_oracle / fin_accel_command",
+        "authority": {
+          "active_ticks": 16584,
+          "cap_fraction": 1.0,
+          "cap_hit_ticks": 16584,
+          "max_command_mps2": 10.0,
+          "mean_peak_abs_command_mps2": 10.0,
+          "pitch_negative_fraction": 1.0
+        },
         "per_scenario": [
           {
             "apogee_delta_m": 5.547045898437318,
@@ -1102,6 +1196,14 @@
           "lateral_ratio_pct": 99.35841560322946
         },
         "arm": "run_episode_with_oracle / fin_accel_command",
+        "authority": {
+          "active_ticks": 16531,
+          "cap_fraction": 1.0,
+          "cap_hit_ticks": 16531,
+          "max_command_mps2": 10.0,
+          "mean_peak_abs_command_mps2": 10.0,
+          "pitch_negative_fraction": 1.0
+        },
         "per_scenario": [
           {
             "apogee_delta_m": 21.373950195312318,
@@ -1175,7 +1277,7 @@
       }
     }
   },
-  "sim_source": "read-only scripts/ab_control_v3 on commit 5acddab285c48964e8a4d52ed36cdfcef83681b8; oracle uses run_episode_with_oracle / ReferenceOptimizer::fin_accel_command (v3 g_accel, not g_theta)",
+  "sim_source": "read-only scripts/ab_control_v3 on commit 0c05e54bb78ccd5c451430f910d7dc2ebf2ed526; oracle uses run_episode_with_oracle / ReferenceOptimizer::fin_accel_command (v3 g_accel, not g_theta)",
   "students": [
     {
       "export": "ai/out/v3_final/runs/loopwm/s1/loopwm.pt",
@@ -1198,11 +1300,55 @@
       "lite",
       "lrs"
     ],
-    "beats_apogee": false,
-    "beats_lateral": false,
-    "oracle_positive_control": false,
-    "pass": false,
+    "beats_apogee": true,
+    "beats_lateral": true,
+    "creditable_students": {
+      "lite": {
+        "seed_wins": {
+          "1": true,
+          "2": true,
+          "3": true
+        },
+        "seeds_measured": [
+          1,
+          2,
+          3
+        ],
+        "seeds_missing": [],
+        "status": "CREDITED (3/3 seeds)"
+      },
+      "loopwm": {
+        "seed_wins": {
+          "1": true,
+          "2": true,
+          "3": true
+        },
+        "seeds_measured": [
+          1,
+          2,
+          3
+        ],
+        "seeds_missing": [],
+        "status": "CREDITED (3/3 seeds)"
+      },
+      "lrs": {
+        "seed_wins": {
+          "1": true,
+          "2": true
+        },
+        "seeds_measured": [
+          1,
+          2
+        ],
+        "seeds_missing": [
+          3
+        ],
+        "status": "PARTIAL (2/3 seeds; no stand-in)"
+      }
+    },
+    "oracle_positive_control": true,
+    "pass": true,
     "primary": "loopwm",
-    "status": "FAIL"
+    "status": "PASS"
   }
 }

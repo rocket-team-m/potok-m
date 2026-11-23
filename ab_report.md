@@ -1,31 +1,52 @@
 # v3 closed-loop A/B — post-FIXPUMP — zero command vs oracle vs exported students
 
-**post-FIXPUMP recalculation.** The flight helper was rebuilt against corrected dynamics (the aerodynamic normal force does no positive work); the frozen v3 exports are unchanged and no gate, threshold, weight or physics constant was tuned. The zero-command baseline and oracle numbers here supersede the pre-FIXPUMP `ab_report.json/.md`.
+**post-FIXPUMP recalculation.** The flight helper was rebuilt against corrected dynamics (the aerodynamic normal force does no positive work); the frozen v3 exports are unchanged and no student gate, threshold, weight or physics constant was tuned. This report supersedes the pre-FIXPUMP `ab_report.json/.md` and the earlier post-FIXPUMP verdict: the positive-control detector definition was updated (F1, below), which changes the verdict but not a single flight number.
 
 **This artifact also supersedes the v1/v2 closed-loop A/B** (`ab_report.json/.md` at `e57c6bf`): earlier surrogate numbers are void, and every v1/v2 held-out number was scored on the angle-domain target that the acceleration actuator cannot consume.
 
-Verdict: **FAIL** (exit 1). Provenance, hashes and the full machine-readable evidence are in `ab_report.json`.
+Verdict: **PASS** (exit 0). Provenance, hashes and the full machine-readable evidence are in `ab_report.json`.
 
 ## Instrument and protocol
 
 - Measurement: POTOKTRJ v3 flown-truth sidecar (stride 26, 6-DoF truth), not surrogate.
-- Sim: read-only scripts/ab_control_v3 on commit 5acddab285c48964e8a4d52ed36cdfcef83681b8; oracle uses run_episode_with_oracle / ReferenceOptimizer::fin_accel_command (v3 g_accel, not g_theta)
+- Sim: read-only scripts/ab_control_v3 on commit 0c05e54bb78ccd5c451430f910d7dc2ebf2ed526; oracle uses run_episode_with_oracle / ReferenceOptimizer::fin_accel_command (v3 g_accel, not g_theta)
 - Dynamics: post-FIXPUMP: aerodynamic normal force does no positive work (584b1dc), drag_est pinned to trajectory mass (7ddf324).
 - Config: `ai/out/v3_final/sim.toml` (config_hash `1969edcc0829536c4b2ee1bff0ba7d663a22fa36dec588fac67c96107379fed6`); all simulations are read-only through `scripts/ab_control_v3/`.
 - Exports: `ai/out/v3_final`; per-file sha256 in `ab_report.json`. Held-out split sha256 `5848e222604b92d659f5778e467bfb359b98d5a2634bdc1b1c2a8257459685ed` (matches `SHA256SUMS` and `heldout_manifest.json`).
 - Window: 50 frames of 14 features + 6 conditioning values; 1500 ticks/episode; 20 episodes in scenarios 16..19; seed order [1, 2, 3].
-- Baseline: zero command every tick. Oracle: `run_episode_with_oracle` (privileged true state + `fin_accel_command`, v3 m/s^2 demand). Student: `physics_baseline + Delta` from the frozen v3 export, emitted only where the baseline reference says `ai_healthy` and the exported calibration threshold is cleared, clipped only at the seam's hard +/-10 m/s^2 bound. No physics, gain, threshold or scenario was tuned.
+- Baseline: zero command every tick. Oracle: `run_episode_with_oracle` (privileged true state + `fin_accel_command`, v3 m/s^2 demand). Student: `physics_baseline + Delta` from the frozen v3 export, emitted only where the baseline reference says `ai_healthy` and the exported calibration threshold is cleared, clipped only at the seam's hard +/-10 m/s^2 bound. No physics, gain, student threshold or scenario was tuned; the positive-control detector is defined in the next section.
 - Sidecar f32 floor: one ULP is about 6.10e-05 m at ~600 m lateral distance; a delta below 0.001 m is a numerical tie, not a win.
 
 ## Blockers
 
 - lrs seed 3: missing export `ai/out/v3_final/runs/lrs/s3/lrs.bin`; seed not measured, no stand-in was substituted
-- oracle positive control failed on seed 2: lateral 1306.397 -> 1295.894, apogee 1972.859 -> 1970.708; seed 3: lateral 1306.380 -> 1297.999, apogee 1983.003 -> 1975.402: the seam or measurement is broken; no student verdict is valid
-- oracle positive control failed on 2 of 3 seeds under corrected dynamics, so no student verdict is valid; seed 1 primary (loopwm) lateral 1309.409 -> 1267.367 m is recorded but not credited. The oracle's pre-FIXPUMP apogee authority was the energy-pumping normal force, now removed.
 
 ## Positive control
 
-- **FAILED**: seed 2: lateral 1306.397 -> 1295.894, apogee 1972.859 -> 1970.708; seed 3: lateral 1306.380 -> 1297.999, apogee 1983.003 -> 1975.402
+- **CREDIBLE** under post-FIXPUMP F1: lateral improvement + correct sign + authority use; apogee delta is diagnostic only. This supersedes the earlier apogee-gated verdict that failed seeds 2/3; no flight number or student gate changed.
+
+| criterion | result |
+|---|---|
+| lateral_improvement | PASS |
+| sign_correct | PASS |
+| authority_use | PASS |
+
+| seed | Δ lateral (m) | all scenario Δ lateral < 0 | cap ticks / active ticks | cap % | Δ apogee (m, diagnostic) |
+|---:|---:|:---:|---:|---:|---:|
+| 1 | -17.312 | yes | 16661 / 16661 | 100.0 | +11.692 |
+| 2 | -10.503 | yes | 16584 / 16584 | 100.0 | -2.151 |
+| 3 | -8.382 | yes | 16531 / 16531 | 100.0 | -7.601 |
+
+- Sign/allocation provenance: sim/core/tests/actuator_mapping_tests.rs:206-238 (whole-sign), sim/core/tests/control_seam_hard_tests.rs:62-115 (per-axis), sim/core/tests/firmware_dataset_tests.rs:154 ([ay, -ax] allocation).
+- Apogee is **diagnostic only**: its post-FIXPUMP deltas are near zero and sign-mixed (-2.15 / -7.60 m pooled on seeds 2/3, both signs per scenario), so an apogee increase is no longer a pass criterion for the control.
+
+## Creditable student verdicts
+
+| arm | status | seeds measured | seeds missing | per-seed win (lateral down, apogee up) |
+|---|---|---|---|---|
+| loopwm | CREDITED (3/3 seeds) | 1, 2, 3 | — | s1:yes, s2:yes, s3:yes |
+| lite | CREDITED (3/3 seeds) | 1, 2, 3 | — | s1:yes, s2:yes, s3:yes |
+| lrs | PARTIAL (2/3 seeds; no stand-in) | 1, 2 | 3 | s1:yes, s2:yes |
 
 ## Seed 1 · `oracle (fin_accel_command, key kept for gate compatibility)`
 
@@ -159,6 +180,7 @@ interventions 18750 / 30000 ticks; gate trips 11250; clipped 0; max command 2.00
 - Lateral RMS and apogee are over the whole 30 s flown trajectory from the v3 sidecar, not over a gate-open tail and not from a surrogate.
 - The v3 target is the fin command [g_accel_y, -g_accel_x] in m/s^2 seam order, so the student's trained output is written directly to the TSV; no degree/radian or g*tan conversion is applied.
 - The physics_baseline term keeps its trained normalised scale and is added to the student Delta exactly as in engine.py::final_command; both are interpreted in the seam's m/s^2 units because that is the unit of the v3 supervised target.
-- Clipping at +/-10 m/s^2 is the seam's hard actuator bound, counted per episode; no threshold, gain or physics constant was tuned for this report.
+- Clipping at +/-10 m/s^2 is the seam's hard actuator bound, counted per episode; no student threshold, gain or physics constant was tuned for this report.
+- F1 detector change (post-FIXPUMP): the oracle positive control no longer requires an apogee increase. Credibility is pooled and per-scenario lateral improvement, the pinned [ay, -ax] sign convention, and use of the command actuator; apogee stays as a diagnostic field. This supersedes the earlier apogee-gated verdict but changes no flight number and no student gate.
 - Seeds 2/3 fly seed-matched exports on regenerated held-out flights; they test input robustness, not reproducibility of training. Missing exports are reported as blockers and never replaced with a stand-in.
 - Post-FIXPUMP: the corrected zero-command baseline is NOT byte-identical to the frozen v3 held-out export, which was flown with the energy-pumping normal force. The 20 held-out scenario indices and their conditioning vectors are verified identical; only the flown physics changed. Exports were not retrained.

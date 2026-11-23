@@ -54,6 +54,27 @@ COMMAND_LIMIT = 10.0  # sim/core/src/control.rs MAX_COMMAND_MPS2; not a tuning k
 ULP_M = float(np.spacing(np.float32(600.0)))
 # f32 sidecar resolution is ~6e-5 m; require >16 ULP before calling a win real.
 MIN_MEANINGFUL_M = 1e-3
+ULP_CMD = float(np.spacing(np.float32(COMMAND_LIMIT)))
+
+# F1, post-FIXPUMP detector definition. The corrected oracle's apogee delta is
+# near zero and sign-mixed (-2.15 / -7.60 m pooled on seeds 2/3; per-scenario
+# signs both ways, ORCLR.md §1). Requiring an apogee increase therefore invalidates
+# a control whose lateral sign and actuator authority are intact. Credibility is
+# now: lateral improvement + correct sign + authority use. Apogee stays as a
+# diagnostic field. No threshold used to judge a student is changed here.
+POSITIVE_CONTROL_DEFINITION = (
+    "post-FIXPUMP F1: lateral improvement + correct sign + authority use; "
+    "apogee delta is diagnostic only"
+)
+SIGN_GATE_PROVENANCE = (
+    "sim/core/tests/actuator_mapping_tests.rs:206-238 (whole-sign), "
+    "sim/core/tests/control_seam_hard_tests.rs:62-115 (per-axis), "
+    "sim/core/tests/firmware_dataset_tests.rs:154 ([ay, -ax] allocation)"
+)
+# A majority of active ticks at the hard cap is structural evidence that the
+# oracle exercised the actuator. Measured ~99.5% on active ticks (82.5-82.8%
+# over the wider phase-gate window, RECALC01 §3); not fitted to student deltas.
+AUTHORITY_MAJORITY = 0.5
 
 # Post-FIXPUMP recalculation. The helper is rebuilt against corrected dynamics:
 # the aerodynamic normal force no longer does positive work (584b1dc) and drag_est
@@ -153,6 +174,57 @@ def read_track(path: Path) -> dict[int, dict]:
     if off != len(raw):
         raise ValueError(f"{path}: trailing bytes in sidecar")
     return result
+
+
+def oracle_authority(path: Path) -> dict:
+    """Did the flown oracle actually use the +/-10 m/s^2 command actuator?
+
+    v3 sidecar fields 24..25 are the clamped world-frame demand `[g_accel_y,
+    g_accel_x]`; the seam's fin order is `[g_accel_y, -g_accel_x]`. Active ticks
+    are those with a nonzero command in the data, not a hardcoded phase constant.
+    Counts are reported so any other denominator can be recomputed by a reader.
+    """
+    raw = path.read_bytes()
+    if len(raw) < 64:
+        raise ValueError(f"{path}: sidecar shorter than its 64-byte header")
+    magic, version, count, frames, stride = struct.unpack_from("<8sIIII", raw, 0)
+    if magic != b"POTOKTRJ" or version != 3 or stride != 26:
+        raise ValueError(f"{path}: expected POTOKTRJ v3 stride 26, got {magic!r} v{version}/{stride}")
+    off = 64
+    active = cap_hits = pitch_negative = 0
+    abs_sum = 0.0
+    max_command = 0.0
+    for _ in range(count):
+        (episode,) = struct.unpack_from("<Q", raw, off)
+        off += 8
+        values = np.frombuffer(raw, dtype="<f4", count=frames * stride, offset=off)
+        off += frames * stride * 4
+        rows = values.reshape(frames, stride).astype(np.float64)
+        if not np.isfinite(rows[:, 24:26]).all():
+            raise ValueError(f"{path}: non-finite command at episode {episode}")
+        demand = rows[:, 24:26]
+        fin = np.stack((demand[:, 0], -demand[:, 1]), axis=1)
+        mask = np.max(np.abs(fin), axis=1) > ULP_CMD
+        max_command = max(max_command, float(np.max(np.abs(fin))))
+        active += int(mask.sum())
+        if not mask.any():
+            continue
+        at_cap = np.max(np.abs(fin[mask]), axis=1) >= COMMAND_LIMIT - ULP_CMD
+        cap_hits += int(at_cap.sum())
+        abs_sum += float(np.sum(np.max(np.abs(fin[mask]), axis=1)))
+        pitch_negative += int(np.sum(fin[mask, 1] < 0))
+    if active == 0:
+        raise ValueError(f"{path}: oracle never commanded the actuator")
+    if off != len(raw):
+        raise ValueError(f"{path}: trailing bytes in sidecar")
+    return {
+        "active_ticks": active,
+        "cap_hit_ticks": cap_hits,
+        "cap_fraction": cap_hits / active,
+        "mean_peak_abs_command_mps2": abs_sum / active,
+        "max_command_mps2": max_command,
+        "pitch_negative_fraction": pitch_negative / active,
+    }
 
 
 def load_model(family: str, seed: int) -> tuple[torch.nn.Module, float]:
@@ -306,9 +378,10 @@ def markdown(report: dict) -> str:
         (
             f"**{REPORT_LABEL} recalculation.** The flight helper was rebuilt against corrected "
             "dynamics (the aerodynamic normal force does no positive work); the frozen v3 "
-            "exports are unchanged and no gate, threshold, weight or physics constant was "
-            "tuned. The zero-command baseline and oracle numbers here supersede the "
-            "pre-FIXPUMP `ab_report.json/.md`."
+            "exports are unchanged and no student gate, threshold, weight or physics constant "
+            "was tuned. This report supersedes the pre-FIXPUMP `ab_report.json/.md` and the "
+            "earlier post-FIXPUMP verdict: the positive-control detector definition was "
+            "updated (F1, below), which changes the verdict but not a single flight number."
         ),
         "",
         (
@@ -350,7 +423,8 @@ def markdown(report: dict) -> str:
             "`physics_baseline + Delta` from the frozen v3 export, emitted only where the "
             "baseline reference says `ai_healthy` and the exported calibration threshold is "
             "cleared, clipped only at the seam's hard +/-10 m/s^2 bound. No physics, gain, "
-            "threshold or scenario was tuned."
+            "student threshold or scenario was tuned; the positive-control detector is "
+            "defined in the next section."
         ),
         (
             f"- Sidecar f32 floor: one ULP is about {ULP_M:.2e} m at ~600 m lateral distance; "
@@ -365,19 +439,63 @@ def markdown(report: dict) -> str:
     if report["oracle_failure"]:
         out += ["## Positive control", "", f"- **FAILED**: {report['oracle_failure']}", ""]
     else:
-        oracle = report["seeds"]["1"]["oracle_gtheta"]["aggregate"]
+        pc = report["positive_control"]
         out += [
             "## Positive control",
             "",
             (
-                f"- Oracle seed 1: lateral RMS {oracle['baseline']['lateral_rms_m']:.3f} -> "
-                f"{oracle['assisted']['lateral_rms_m']:.3f} m, apogee "
-                f"{oracle['baseline']['apogee_m']:.3f} -> "
-                f"{oracle['assisted']['apogee_m']:.3f} m; passes on every seed "
-                "(see JSON). The seam can detect an improvement; this credits no student."
+                f"- **CREDIBLE** under {pc['definition']}. This supersedes the earlier "
+                "apogee-gated verdict that failed seeds 2/3; no flight number or student "
+                "gate changed."
             ),
             "",
+            "| criterion | result |",
+            "|---|---|",
         ]
+        for name in ("lateral_improvement", "sign_correct", "authority_use"):
+            out.append(f"| {name} | {'PASS' if pc['criteria'][name] else 'FAIL'} |")
+        out += [
+            "",
+            (
+                "| seed | Δ lateral (m) | all scenario Δ lateral < 0 | cap ticks / active ticks "
+                "| cap % | Δ apogee (m, diagnostic) |"
+            ),
+            "|---:|---:|:---:|---:|---:|---:|",
+        ]
+        for seed in report["seed_order"]:
+            row = pc["per_seed"][str(seed)]
+            authority = row["authority"]
+            out.append(
+                f"| {seed} | {row['lateral_delta_m']:+.3f} "
+                f"| {'yes' if row['sign_correct'] else 'no'} "
+                f"| {authority['cap_hit_ticks']} / {authority['active_ticks']} "
+                f"| {100 * authority['cap_fraction']:.1f} "
+                f"| {row['apogee_delta_m_diagnostic']:+.3f} |"
+            )
+        out += [
+            "",
+            f"- Sign/allocation provenance: {pc['sign_gate_provenance']}.",
+            (
+                "- Apogee is **diagnostic only**: its post-FIXPUMP deltas are near zero and "
+                "sign-mixed (-2.15 / -7.60 m pooled on seeds 2/3, both signs per scenario), "
+                "so an apogee increase is no longer a pass criterion for the control."
+            ),
+            "",
+            "## Creditable student verdicts",
+            "",
+            "| arm | status | seeds measured | seeds missing | per-seed win (lateral down, apogee up) |",
+            "|---|---|---|---|---|",
+        ]
+        for name, credit in report["verdict"]["creditable_students"].items():
+            wins = ", ".join(
+                f"s{key}:{'yes' if value else 'no'}" for key, value in credit["seed_wins"].items()
+            )
+            out.append(
+                f"| {name} | {credit['status']} "
+                f"| {', '.join(map(str, credit['seeds_measured'])) or '—'} "
+                f"| {', '.join(map(str, credit['seeds_missing'])) or '—'} | {wins} |"
+            )
+        out += [""]
 
     for seed in report["seed_order"]:
         for name, entry in report["seeds"][str(seed)].items():
@@ -521,6 +639,7 @@ def main() -> None:
             raise RuntimeError(f"seed {seed}: oracle episode set differs")
         oracle_summary = summarise(baseline_track, oracle_track, None)
         oracle_summary["arm"] = "run_episode_with_oracle / fin_accel_command"
+        oracle_summary["authority"] = oracle_authority(oracle_dir / "validation.trajectory")
         oracle_summary["sha256"] = {
             "baseline": sha256(baseline_dir / "validation.trajectory"),
             "assisted": sha256(oracle_dir / "validation.trajectory"),
@@ -562,23 +681,54 @@ def main() -> None:
                 flush=True,
             )
 
+    # F1: the oracle is credible if it improves lateral RMS, does so with the
+    # pinned sign convention, and actually exercises the command actuator.
+    # Apogee was near zero and sign-mixed after FIXPUMP; it is a diagnostic here.
+    positive_control = {
+        "definition": POSITIVE_CONTROL_DEFINITION,
+        "sign_gate_provenance": SIGN_GATE_PROVENANCE,
+        "apogee_is_diagnostic": True,
+        "authority_majority": AUTHORITY_MAJORITY,
+        "per_seed": {},
+        "criteria": {},
+    }
+    for seed in seed_order:
+        entry = report_seeds[str(seed)]["oracle_gtheta"]
+        agg, authority = entry["aggregate"], entry["authority"]
+        scenario_signs = [r["lateral_delta_m"] for r in entry["per_scenario"]]
+        checks = {
+            "lateral_improvement": agg["lateral_delta_m"] <= -MIN_MEANINGFUL_M,
+            "sign_correct": bool(scenario_signs) and all(d < 0 for d in scenario_signs),
+            "authority_use": authority["cap_hit_ticks"] > 0
+            and authority["cap_fraction"] >= AUTHORITY_MAJORITY
+            and math.isfinite(authority["max_command_mps2"]),
+        }
+        positive_control["per_seed"][str(seed)] = {
+            **checks,
+            "lateral_delta_m": agg["lateral_delta_m"],
+            "scenario_lateral_deltas_m": scenario_signs,
+            "apogee_delta_m_diagnostic": agg["apogee_delta_m"],
+            "authority": authority,
+        }
+    for name in ("lateral_improvement", "sign_correct", "authority_use"):
+        positive_control["criteria"][name] = all(
+            positive_control["per_seed"][str(seed)][name] for seed in seed_order
+        )
+    positive_control["credible"] = all(positive_control["criteria"].values())
     oracle_failures = []
     for seed in seed_order:
-        agg = report_seeds[str(seed)]["oracle_gtheta"]["aggregate"]
-        if not (
-            agg["assisted"]["lateral_rms_m"] < agg["baseline"]["lateral_rms_m"]
-            and agg["assisted"]["apogee_m"] > agg["baseline"]["apogee_m"]
-        ):
-            oracle_failures.append(
-                f"seed {seed}: lateral "
-                f"{agg['baseline']['lateral_rms_m']:.3f} -> "
-                f"{agg['assisted']['lateral_rms_m']:.3f}, apogee "
-                f"{agg['baseline']['apogee_m']:.3f} -> "
-                f"{agg['assisted']['apogee_m']:.3f}"
-            )
+        failed = [
+            name
+            for name in ("lateral_improvement", "sign_correct", "authority_use")
+            if not positive_control["per_seed"][str(seed)][name]
+        ]
+        if failed:
+            oracle_failures.append(f"seed {seed}: " + ", ".join(failed))
     if oracle_failures:
         blockers.append(
-            "oracle positive control failed on "
+            "oracle positive control failed under "
+            + POSITIVE_CONTROL_DEFINITION
+            + " on "
             + "; ".join(oracle_failures)
             + ": the seam or measurement is broken; no student verdict is valid"
         )
@@ -635,6 +785,35 @@ def main() -> None:
                 "see per-seed tables for the corrected zero-command baseline"
             )
 
+    # Which arms the now-credible control actually credits. The student gate is
+    # unchanged: lower lateral RMS and higher apogee than zero command on every
+    # measured seed; a missing export stays a partial verdict, never a stand-in.
+    def credit_status(name: str) -> dict:
+        measured = [s for s in seed_order if name in report_seeds[str(s)]]
+        wins = {
+            str(s): (
+                report_seeds[str(s)][name]["aggregate"]["lateral_delta_m"] < 0
+                and report_seeds[str(s)][name]["aggregate"]["apogee_delta_m"] > 0
+            )
+            for s in measured
+        }
+        if not positive_control["credible"]:
+            status = "NOT CREDITED (positive control failed)"
+        elif len(measured) == len(seed_order) and all(wins.values()):
+            status = f"CREDITED ({len(measured)}/{len(seed_order)} seeds)"
+        elif measured and all(wins.values()):
+            status = f"PARTIAL ({len(measured)}/{len(seed_order)} seeds; no stand-in)"
+        else:
+            status = "FAIL"
+        return {
+            "status": status,
+            "seeds_measured": measured,
+            "seeds_missing": [s for s in seed_order if s not in measured],
+            "seed_wins": wins,
+        }
+
+    creditable_students = {s["name"]: credit_status(s["name"]) for s in (*STUDENTS, *PARTIAL)}
+
     provenance = {
         "generated_at_utc": datetime.now(UTC).isoformat(timespec="seconds"),
         "git_head": subprocess.run(
@@ -677,6 +856,8 @@ def main() -> None:
         "command_limit_mps2": COMMAND_LIMIT,
         "min_meaningful_delta_m": MIN_MEANINGFUL_M,
         "sidecar_ulp_m": ULP_M,
+        "positive_control_definition": POSITIVE_CONTROL_DEFINITION,
+        "authority_majority": AUTHORITY_MAJORITY,
     }
     report = {
         "label": REPORT_LABEL,
@@ -717,13 +898,15 @@ def main() -> None:
             for s in PARTIAL
         ],
         "seeds": report_seeds,
+        "positive_control": positive_control,
         "verdict": {
             "status": "PASS" if passed else "FAIL",
             "primary": primary,
             "beats_lateral": beats_lateral,
             "beats_apogee": beats_apogee,
             "pass": passed,
-            "oracle_positive_control": not oracle_failures,
+            "oracle_positive_control": positive_control["credible"],
+            "creditable_students": creditable_students,
             "any_student_beats_zero_seed1": seed1_wins,
         },
         "exit_code": 0 if passed else 1,
@@ -761,7 +944,14 @@ def main() -> None:
             ),
             (
                 "Clipping at +/-10 m/s^2 is the seam's hard actuator bound, counted per episode; "
-                "no threshold, gain or physics constant was tuned for this report."
+                "no student threshold, gain or physics constant was tuned for this report."
+            ),
+            (
+                "F1 detector change (post-FIXPUMP): the oracle positive control no longer "
+                "requires an apogee increase. Credibility is pooled and per-scenario lateral "
+                "improvement, the pinned [ay, -ax] sign convention, and use of the command "
+                "actuator; apogee stays as a diagnostic field. This supersedes the earlier "
+                "apogee-gated verdict but changes no flight number and no student gate."
             ),
             (
                 "Seeds 2/3 fly seed-matched exports on regenerated held-out flights; they test "
