@@ -160,11 +160,14 @@ fn validation_header_pins_stream_width() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-/// Freeze the measurement of a calm coast frame, then inject a 20 m/s
+/// Freeze the measurement of a calm coast frame, then inject a 50 m/s
 /// crosswind into the true wind only. That isolates the quantity
 /// `a_lat_resid` is designed to expose: the gap between measured specific
-/// force and the drag+normal baseline. The same value must land in the
-/// stream's column 11, not in any other physics slot.
+/// force and the projected-normal + drag baseline. With the corrected metric
+/// that gap is the drag change at this airspeed (~1.25 m/s^2), above the
+/// test's 1 m/s^2 gate; the stale along-wind normal instead left a ~15.9
+/// m/s^2 calm floor. The same value must land in the stream's column 11,
+/// not in any other physics slot.
 #[test]
 fn crosswind_opens_lateral_residual_at_stream_column_eleven() {
     let cfg = Config::default();
@@ -182,7 +185,7 @@ fn crosswind_opens_lateral_residual_at_stream_column_eleven() {
     let measured = [body[0] as f32, body[1] as f32, body[2] as f32];
 
     let calm = PhysicsFeatures::from_state(&state, [0.0; 3], air, &vehicle, measured);
-    let gust = PhysicsFeatures::from_state(&state, [0.0, 20.0, 0.0], air, &vehicle, measured);
+    let gust = PhysicsFeatures::from_state(&state, [0.0, 50.0, 0.0], air, &vehicle, measured);
 
     assert_eq!(calm.as_array()[A_LAT_RESID_SLOT], calm.a_lat_resid);
     assert_eq!(gust.as_array()[A_LAT_RESID_SLOT], gust.a_lat_resid);

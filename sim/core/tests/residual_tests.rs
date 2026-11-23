@@ -62,10 +62,7 @@ fn coast_range(ep: &Episode) -> std::ops::Range<usize> {
 
 #[test]
 fn field_order_is_stable_and_appended_after_raw_telemetry() {
-    assert_eq!(
-        &FEATURE_NAMES[FEATURE_NAMES.len() - 6..],
-        &PHYSICS_FEATURES
-    );
+    assert_eq!(&FEATURE_NAMES[FEATURE_NAMES.len() - 6..], &PHYSICS_FEATURES);
     assert_eq!(
         PHYSICS_FEATURES,
         [
@@ -117,19 +114,24 @@ fn steady_glide_has_small_lateral_residual() {
     assert!(max_resid < 2.0, "max residual too large: {max_resid}");
 }
 
-/// A 20 m/s crosswind on an otherwise forward-flying vehicle must move the
+/// A 50 m/s crosswind on an otherwise forward-flying vehicle must move the
 /// sideslip angle and open a gap between the measured specific force and the
-/// drag+normal baseline, producing a nonzero lateral-acceleration residual.
+/// drag+normal baseline, producing a lateral-acceleration residual above 1
+/// m/s^2. With the corrected (projected) normal force the gap is the change in
+/// DRAG between calm and gust, ~1.25 m/s^2 at this airspeed; the old
+/// along-wind normal left a ~15.9 m/s^2 calm floor that made the metric
+/// uninformative. The crosswind is the test's stimulus, not a physics knob:
+/// all coefficients come from the shipped config.
 #[test]
 fn crosswind_gust_raises_lateral_residual() {
     let cfg = Config::default();
     let v = Vehicle::from_config(&cfg, 11.0, 1.0, [0.0, 0.0]);
     let mut s = State::new(11.0, 0.0, 0.0);
     s.vel = [120.0, 0.0, 0.0];
-    let profile = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../config/boundary_profile.csv");
-    let atm = Atmosphere::load_with_fast(&profile, cfg.sim.altitude_grid_m, cfg.run.fast_field)
-        .unwrap();
+    let profile =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../config/boundary_profile.csv");
+    let atm =
+        Atmosphere::load_with_fast(&profile, cfg.sim.altitude_grid_m, cfg.run.fast_field).unwrap();
     let air = atm.at(s.pos()[2]);
     // Specific force the sensor would report on the calm flight at coast:
     // the baseline then explains it, so the residual is ~0. Freeze that
@@ -140,15 +142,58 @@ fn crosswind_gust_raises_lateral_residual() {
     let sb = mat_t_vec(quat_to_matrix(s.quat()), spec_world);
     let measured = [sb[0] as f32, sb[1] as f32, sb[2] as f32];
     let calm = PhysicsFeatures::from_state(&s, [0.0; 3], air, &v, measured);
-    let gust = PhysicsFeatures::from_state(&s, [0.0, 20.0, 0.0], air, &v, measured);
+    let gust = PhysicsFeatures::from_state(&s, [0.0, 50.0, 0.0], air, &v, measured);
     eprintln!(
         "calm: beta={:.4} resid={:.4} | gust: beta={:.4} resid={:.4}",
         calm.beta_deg, calm.a_lat_resid, gust.beta_deg, gust.a_lat_resid
     );
-    assert!(calm.a_lat_resid < 1e-3, "calm residual: {}", calm.a_lat_resid);
+    assert!(
+        calm.a_lat_resid < 1e-3,
+        "calm residual: {}",
+        calm.a_lat_resid
+    );
     assert!(gust.beta_deg.abs() > 5.0, "sideslip: {}", gust.beta_deg);
-    assert!(gust.a_lat_resid > 1.0, "gust residual: {}", gust.a_lat_resid);
+    assert!(
+        gust.a_lat_resid > 1.0,
+        "gust residual: {}",
+        gust.a_lat_resid
+    );
     assert!(gust.q_dyn_kpa > calm.q_dyn_kpa);
+}
+
+/// Falsification gate for the metric fix. `derivative` projects the
+/// placeholder normal force perpendicular to the relative wind, so in
+/// horizontal flight the aero force is drag alone and `a_lat_resid` cannot
+/// depend on `cna`. Reverting to the stale along-wind normal makes this fail:
+/// the cna=1.8 residual grows to ~15.9 m/s^2 while cna=0 stays at zero.
+/// Paired with `post_separation_sample_uses_post_sep_mass` this pins both
+/// halves of the mass/force formulation.
+#[test]
+fn lateral_residual_ignores_the_projected_normal_pump() {
+    let cfg = Config::default();
+    let mut v = Vehicle::from_config(&cfg, 11.0, 1.0, [0.0, 0.0]);
+    let profile =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../config/boundary_profile.csv");
+    let atm =
+        Atmosphere::load_with_fast(&profile, cfg.sim.altitude_grid_m, cfg.run.fast_field).unwrap();
+    let air = atm.at(0.0);
+    let mut s = State::new(11.0, 0.0, 0.0);
+    s.vel = [120.0, 0.0, 0.0];
+    let accel = derivative(12.0, &s, [0.0; 3], &atm, &v).vel;
+    let spec_world = [accel[0], accel[1], accel[2] + 9.80665];
+    let sb = mat_t_vec(quat_to_matrix(s.quat()), spec_world);
+    let measured = [sb[0] as f32, sb[1] as f32, sb[2] as f32];
+
+    let hi = PhysicsFeatures::from_state(&s, [0.0; 3], air, &v, measured);
+    v.aero.cna = 0.0;
+    let lo = PhysicsFeatures::from_state(&s, [0.0; 3], air, &v, measured);
+
+    assert_eq!(
+        hi.a_lat_resid, lo.a_lat_resid,
+        "residual tracks the projected-away normal force: {} vs {}",
+        hi.a_lat_resid, lo.a_lat_resid
+    );
+    assert!(hi.a_lat_resid < 1e-3, "calm residual: {}", hi.a_lat_resid);
 }
 
 /// A sample taken after stage separation must be scored at the post-sep mass.
@@ -206,8 +251,17 @@ fn post_separation_sample_uses_post_sep_mass() {
     );
 }
 
-/// Full-path check: a real gust episode flags gust frames and those frames
-/// carry a finite residual above the sensor-bias floor of a calm glide.
+/// Full-path check: a real gust episode carries a finite residual on both
+/// gust and calm coast frames, and it stays inside the sensor-bias band.
+///
+/// The original assertion (`gust_mean > calm_mean`) was written against the
+/// stale along-wind baseline: its ~15.9 m/s^2 calm floor fluctuated frame to
+/// frame and the two noisy means crossed depending on which frames the coast
+/// range happened to include. With the corrected baseline the aero model
+/// EXPLAINS the gust (measurement and baseline use the same true wind), so a
+/// gust is not a residual source: only sensor lag/bias/noise is. Gust
+/// sensitivity is pinned honestly by the frozen-measurement crosswind gates
+/// above and in `residual_stream_tests.rs`; this gate pins the full path.
 #[test]
 fn gust_episode_carries_residual_in_the_feature_path() {
     let cfg = smart_config();
@@ -241,7 +295,14 @@ fn gust_episode_carries_residual_in_the_feature_path() {
         gust.len()
     );
     assert!(gust_mean > 0.01, "gust residual too small: {gust_mean}");
-    assert!(gust_mean > calm_mean, "{gust_mean} <= {calm_mean}");
+    assert!(
+        gust_mean < 0.5,
+        "gust residual rose above the sensor-bias band: {gust_mean}"
+    );
+    assert!(
+        calm_mean < 0.5,
+        "calm residual rose above the sensor-bias band: {calm_mean}"
+    );
 }
 
 #[test]
@@ -283,7 +344,10 @@ fn validation_formats_keep_physics_features_without_layout_changes() {
     let path = dir.join(FILE_NAME);
     write_validation(&path, &cfg, &episodes).unwrap();
     let set = read_validation(&path).unwrap();
-    assert_eq!(set.episodes[0].features[[0, 8]], episodes[0].frames[0].physics[0]);
+    assert_eq!(
+        set.episodes[0].features[[0, 8]],
+        episodes[0].frames[0].physics[0]
+    );
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

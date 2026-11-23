@@ -6,7 +6,7 @@
 use crate::{
     atmosphere::Air,
     dynamics::{State, Vehicle},
-    math::{mat_t_vec, norm, quat_to_matrix, scale, sub},
+    math::{dot, mat_t_vec, norm, quat_to_matrix, scale, sub},
 };
 
 /// Order is load-bearing: the last six entries of `sensor::FEATURE_NAMES`
@@ -56,7 +56,7 @@ impl PhysicsFeatures {
         let speed = norm(v_rel);
         let vb = mat_t_vec(r, v_rel);
         let qdyn = 0.5 * air.density * speed * speed;
-        // Mirror the integrator's mass floor (dynamics.rs:508-514): after
+        // Mirror the integrator's mass floor in `dynamics::derivative`: after
         // separation it drops by the jettisoned casing. The RK4 clamp keeps
         // s.mass() >= dry_mass before sep, so a lower state mass is the signal
         // (t is not passed here; the caller's state already carries the jettison).
@@ -79,11 +79,23 @@ impl PhysicsFeatures {
         let q_dyn_kpa = qdyn / 1000.0;
 
         // Lateral specific force minus the base aero model's lateral estimate
-        // (normal force + mach-table drag), in m/s^2.
-        let normal = [
+        // (normal force + mach-table drag), in m/s^2. Mirror the integrator's
+        // normal force exactly: `derivative` projects the placeholder normal
+        // perpendicular to the relative wind so only drag does work; the old
+        // along-wind form left a ~cna*qdyn*A/m calm floor that swamped the
+        // gust signal (stale pin after the no-positive-work fix).
+        let normal_raw = [
             qdyn * area * cna * (vb[0] / az),
             qdyn * area * cna * (vb[1] / az),
+            0.0,
         ];
+        let normal3 = if speed > 1e-6 {
+            let along = dot(normal_raw, vb) / (speed * speed);
+            sub(normal_raw, scale(vb, along))
+        } else {
+            normal_raw
+        };
+        let normal = [normal3[0], normal3[1]];
         let mach = speed / air.speed_of_sound.max(1.0);
         let cd = v.effective_cd(mach);
         let vhat = if speed > 1e-6 {
