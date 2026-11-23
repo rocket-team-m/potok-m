@@ -46,7 +46,13 @@ from torch.nn import functional as F
 from torch.optim import AdamW, Optimizer
 
 from .calibration import confidence_target, correctness, expected_calibration_error, sigmoid
-from .data import Episode, SmartWindowDataset, load_episodes
+from .data import (
+    SMART_COND_FEATURES,
+    SMART_FEATURES,
+    Episode,
+    SmartWindowDataset,
+    load_episodes,
+)
 from .loopwm import LoopWM, LoopWMConfig
 from .optim import K3Config, MuonPlus
 from .physics import final_command, physics_baseline
@@ -74,12 +80,20 @@ except (ImportError, SyntaxError):  # pragma: no cover - depends on sibling task
     JEPA_SOURCE = "local"
 
 try:
-    from .dagger import RolloutState
+    from .dagger import RolloutState, on_policy_rollout, sample_sha256
     from .dagger import build_dagger_dataset as _upstream_build_dagger
 
     DAGGER_SOURCE = "dagger"
 except (ImportError, SyntaxError):  # pragma: no cover - depends on sibling task
     _upstream_build_dagger = None
+
+    def on_policy_rollout(**_kwargs):  # type: ignore[no-redef]
+        raise RuntimeError(
+            "on-policy DAgger needs potok_ai.dagger; the local fallback cannot roll the student"
+        )
+
+    def sample_sha256(*_args):  # type: ignore[no-redef]
+        raise RuntimeError("on-policy DAgger needs potok_ai.dagger for SHA provenance")
 
     @dataclass(frozen=True, eq=False)
     class RolloutState:  # type: ignore[no-redef]
@@ -127,6 +141,12 @@ class StudentLike(Protocol):
 STAGE_ORDER = ("sft", "privileged", "dagger", "distill")
 RLVR_STAGE = "rlvr"
 SEEDS = (1, 2, 3)
+# POTOKTRJ v3 slot boundary, pinned to sim/core/src/trajectory.rs:93-120.
+# 0..21 are privileged truth, 22..25 are the reference optimizer's labels.
+# Local constants keep the trainer loud even when the sibling builder is absent.
+TRUTH_PRIV_END = 22
+TRUTH_LABEL_START = 22
+TRUTH_V3_STRIDE = 26
 EVAL_SCENARIO_IDS = frozenset({16, 17, 18, 19})
 JEPA_HORIZONS = (3, 6, 10)
 REWARD_WEIGHTS = {"lateral": 2.0, "effort": 0.5, "risk": 1.0}
@@ -428,6 +448,11 @@ def _evaluate(
             group = [e for e in (*fit, *inner) if int(e.scenario_id) == sid]
             squared, count = 0.0, 0
             for window, cond, target, _ in _window_batches(group, cfg):
+                if window.shape[-1] != SMART_FEATURES or cond.shape[-1] != SMART_COND_FEATURES:
+                    raise AssertionError(
+                        "eval forward must see only the 14 sensor + 6 conditioning columns; "
+                        "privileged truth and labels are teacher-only"
+                    )
                 command, logit, error = _predict(
                     model,
                     window.to(device),
@@ -493,9 +518,7 @@ def _residual_decision(
         return None
     policy = getattr(model, "residual_policy", None)
     if not isinstance(policy, ResidualPolicy):
-        raise TypeError(
-            "residual_policy is enabled but the model has no ResidualPolicy module"
-        )
+        raise TypeError("residual_policy is enabled but the model has no ResidualPolicy module")
     return policy(physics_baseline(window[:, -1]), correction)
 
 
@@ -635,6 +658,7 @@ class _LocalProvenance:
     split: str
     expert: str
     label_source: str
+    rollout_sha256: str = ""
 
 
 @dataclass(eq=False)
@@ -643,6 +667,8 @@ class _LocalDaggerSample:
     correction: np.ndarray
     authoritative: np.ndarray | None
     provenance: _LocalProvenance
+    action: np.ndarray | None = None
+    drift: float | None = None
 
 
 class _LocalDaggerDataset:
@@ -698,9 +724,65 @@ def _build_jepa(encoder: nn.Module, cfg: TeacherV2Config) -> JepaObjective:
 
 
 def _build_privileged(cfg: TeacherV2Config) -> Any | None:
-    if cfg.truth_sidecar is None or _UpstreamPrivilegedBuilder is None:
+    if cfg.truth_sidecar is None:
         return None
+    if _UpstreamPrivilegedBuilder is None:
+        raise RuntimeError(
+            "truth_sidecar is configured but the POTOKTRJ v3 privileged builder is "
+            "unavailable; a privileged teacher cannot run without reading the truth "
+            "sidecar (no silent zero fill)"
+        )
     return _UpstreamPrivilegedBuilder(cfg.truth_sidecar, seed=child_seed(cfg.seed, "privileged"))
+
+
+def _v3_truth_parts(snapshot: np.ndarray, *, where: str) -> tuple[np.ndarray, np.ndarray]:
+    """Split a 26-slot v3 snapshot at the privilege boundary, loudly.
+
+    Slots 0..21 are the only fields a teacher may read; 22..25 are labels and
+    belong to the loss only. The two halves are disjoint by construction.
+    """
+    arr = np.asarray(snapshot, dtype=np.float32)
+    if arr.shape[-1] != TRUTH_V3_STRIDE:
+        raise ValueError(
+            f"{where}: a v3 truth snapshot needs {TRUTH_V3_STRIDE} slots, got {arr.shape}; "
+            "regenerate with write_trajectory_v3"
+        )
+    privileged = arr[..., :TRUTH_PRIV_END]
+    labels = arr[..., TRUTH_LABEL_START:]
+    if (
+        privileged.shape[-1] != TRUTH_PRIV_END
+        or labels.shape[-1] != TRUTH_V3_STRIDE - TRUTH_PRIV_END
+    ):
+        raise AssertionError(f"{where}: privilege/label slots are not disjoint")
+    return privileged, labels
+
+
+def _privileged_snapshot(builder: Any, episode_index: int, tick: int, *, where: str) -> np.ndarray:
+    """Assemble a v3 snapshot from the sidecar; zeroed truth is a loud failure.
+
+    The privileged half comes only from the sidecar's truth slots, never from
+    episode targets. IDEAL_DATA_RESEARCH R3: a teacher whose truth channel is
+    zero is a contract violation, not a result.
+    """
+    record = next((r for r in builder.records if r.episode_index == int(episode_index)), None)
+    if record is None:
+        raise ValueError(f"{where}: episode {episode_index} is not in the truth sidecar")
+    if not 0 <= tick < record.privileged.shape[0]:
+        raise ValueError(
+            f"{where}: tick {tick} is outside the sidecar's {record.privileged.shape[0]} frames"
+        )
+    privileged = np.asarray(record.privileged[tick], dtype=np.float32)
+    labels = np.asarray(record.labels[tick], dtype=np.float32)
+    snapshot = np.concatenate([privileged, labels])
+    _v3_truth_parts(snapshot, where=where)  # pin the 22/26 boundary
+    if not np.isfinite(privileged).all():
+        raise ValueError(f"{where}: non-finite privileged truth at episode {episode_index}")
+    if not np.any(privileged):
+        raise AssertionError(
+            f"{where}: privileged slots 0..21 are all zero at episode {episode_index} "
+            f"tick {tick}; a privileged teacher cannot run on a zeroed truth channel"
+        )
+    return snapshot
 
 
 def _stage_privileged(
@@ -738,6 +820,10 @@ def _stage_privileged(
                 ).to(device)
                 if z_priv.shape[0] != window.shape[0]:
                     raise ValueError("every privileged batch row needs a sidecar episode index")
+                if not torch.isfinite(z_priv).all() or not bool(z_priv.abs().sum() > 0):
+                    raise AssertionError(
+                        "privileged latent is non-finite or all zero: the teacher never saw truth"
+                    )
                 privileged_terms += 1
             result = _supervised_loss(
                 model,
@@ -754,10 +840,17 @@ def _stage_privileged(
             entropy = result["entropy"]
             steps += 1
     train, held, ratio, ece = _evaluate(model, fit, inner, cfg, device)
+    if cfg.truth_sidecar is not None and privileged_terms == 0:
+        raise AssertionError(
+            "truth_sidecar is configured but the privileged stage consumed 0 truth rows; "
+            "the privileged teacher did not run (no silent label-only stage)"
+        )
     details = {
         "jepa_source": JEPA_SOURCE,
-        "privileged_source": PRIVILEGED_SOURCE,
+        "privileged_source": "privileged_teacher" if builder is not None else "disabled",
+        "truth_sidecar": str(cfg.truth_sidecar) if cfg.truth_sidecar is not None else None,
         "privileged_batches": privileged_terms,
+        "eval_label_blind": True,
     }
     return StageReport(
         "privileged", steps, train, held, ratio, ece, entropy, cfg.learned_exit, details
@@ -765,84 +858,182 @@ def _stage_privileged(
 
 
 def _expert_label(privileged: np.ndarray) -> np.ndarray:
-    """The v3 reference optimizer's answer lives in truth slots 22..25."""
-    if privileged.shape[-1] < 26:
-        raise ValueError(f"privileged snapshot needs 26 slots, got {privileged.shape}")
-    return np.asarray([privileged[24], -privileged[25]], dtype=np.float32)
+    """The v3 reference optimizer's answer lives in label slots 22..25 only."""
+    labels = _v3_truth_parts(privileged, where="expert label")[1]
+    return np.asarray([labels[2], -labels[3]], dtype=np.float32)
 
 
-def _dagger_rollout(cfg: TeacherV2Config) -> Any:
-    def rollout(episode: Episode, _rng: random.Random) -> list[RolloutState]:
-        frames = np.asarray(episode.frames[:, :14], dtype=np.float32)
-        if len(frames) < cfg.window:
-            raise ValueError("episode shorter than the teacher window")
-        cond = np.asarray(episode.conditioning, dtype=np.float32)
-        target = episode.command_target()
-        states: list[RolloutState] = []
-        for start in range(0, len(frames) - cfg.window + 1, max(1, cfg.window // 2)):
-            window = np.concatenate(
-                [frames[start : start + cfg.window], np.tile(cond, (cfg.window, 1))], axis=1
-            )
-            tick = start + cfg.window - 1
-            truth4 = np.zeros(4, dtype=np.float32)
-            if episode.targets is not None:
-                truth4[:2] = episode.targets[tick, :2]
-            if episode.g_accel is not None:
-                truth4[2:] = episode.g_accel[tick]
+def _student_rollout_action(student: nn.Module, device: torch.device):
+    """One student command from sensor history only; no privileged field is read."""
+    student.eval()
+
+    def act(observation: np.ndarray, _rng: random.Random) -> np.ndarray:
+        window = torch.as_tensor(observation[:, :14], dtype=torch.float32).unsqueeze(0).to(device)
+        cond = torch.as_tensor(observation[-1, 14:20], dtype=torch.float32).unsqueeze(0).to(device)
+        with torch.no_grad():
+            if hasattr(student, "step"):
+                correction, _confidence = student.step(window[0, -1], cond[0])
             else:
-                truth4[2:] = (target[tick, 0], -target[tick, 1])
-            # No truth sidecar: wind slots are a documented CPU fixture of zeros;
-            # the correction still comes only from the reference optimizer slots.
-            privileged = np.concatenate([np.zeros(22, dtype=np.float32), truth4])
-            states.append(RolloutState(window, privileged, target[tick]))
-        return states
+                output = student.forward(window, cond)
+                correction = output[0, -1, :2]
+        action = np.asarray(correction.detach().cpu(), dtype=np.float32).reshape(-1)
+        if action.shape != (2,) or not np.isfinite(action).all():
+            raise ValueError("student rollout action must be two finite commands")
+        return action
 
-    return rollout
+    return act
+
+
+def _student_world_step(frame: np.ndarray, action: np.ndarray, rng: random.Random) -> np.ndarray:
+    """Advance the student-visible sensor frame from the student's own command.
+
+    ponytail: the Rust simulator is not importable here, so only the onboard
+    features drift; upgrade path is to replay its real dynamics step on
+    (state, command) once a Python binding exists. Physics constants and the
+    baseline+correction composition come from physics.py unchanged.
+    """
+    tensor = torch.as_tensor(frame, dtype=torch.float32)
+    baseline = physics_baseline(tensor.unsqueeze(0))[0].numpy()
+    command = final_command(torch.as_tensor(action), torch.as_tensor(baseline)).numpy()
+    error = np.asarray(command - baseline, dtype=np.float32)
+    nxt = np.asarray(frame, dtype=np.float32).copy()
+    nxt[8] = np.clip(frame[8] + 0.4 * error[1] + 0.02 * rng.uniform(-1.0, 1.0), -30.0, 30.0)
+    nxt[9] = np.clip(frame[9] + 0.4 * error[0] + 0.02 * rng.uniform(-1.0, 1.0), -30.0, 30.0)
+    nxt[11] = np.clip(frame[11] + 0.2 * error[0], -10.0, 10.0)
+    return nxt
+
+
+def _dagger_rollout(
+    cfg: TeacherV2Config,
+    builder: Any | None = None,
+    *,
+    student: nn.Module | None = None,
+    device: torch.device | None = None,
+) -> Any:
+    """Student-in-the-loop rollout; the teacher labels the states the student visits."""
+    device = device or torch.device(cfg.device)
+    policy = student if student is not None else _build_student(cfg, device)
+    actor = _student_rollout_action(policy, device)
+
+    def snapshot(episode: Episode, step: int, _rng: random.Random) -> np.ndarray:
+        tick = cfg.window - 1 + step
+        where = f"dagger episode {episode.index} tick {tick}"
+        if builder is not None:
+            if episode.index is None:
+                raise ValueError(f"{where}: episode has no index; cannot locate its truth row")
+            return _privileged_snapshot(builder, episode.index, tick, where=where)
+        # No sidecar: the recorded command is a documented CPU fixture. The
+        # zeroed privileged half is reported as such, never sold as a teacher.
+        target = episode.command_target()
+        truth4 = np.zeros(4, dtype=np.float32)
+        if episode.targets is not None:
+            truth4[:2] = episode.targets[tick, :2]
+        if episode.g_accel is not None:
+            truth4[2:] = episode.g_accel[tick]
+        else:
+            truth4[2:] = (target[tick, 0], -target[tick, 1])
+        return np.concatenate([np.zeros(TRUTH_PRIV_END, dtype=np.float32), truth4])
+
+    def authoritative(episode: Episode, tick: int, _frame: np.ndarray) -> np.ndarray:
+        return np.asarray(episode.command_target()[tick], dtype=np.float32)
+
+    def reset(episode: Episode) -> None:
+        if hasattr(policy, "reset_state"):
+            policy.reset_state()  # type: ignore[attr-defined]
+
+    return on_policy_rollout(
+        window=cfg.window,
+        student_action=actor,
+        world_step=_student_world_step,
+        privileged_snapshot=snapshot,
+        authoritative_target=authoritative,
+        on_episode_start=reset,
+    )
+
+
+def _dagger_info(cfg: TeacherV2Config, dataset: Any, builder: Any | None) -> dict[str, Any]:
+    """Provenance of the rollout mechanism, recorded in the DAgger stage details."""
+    samples = dataset.samples
+    induced = sum(1 for s in samples if s.drift is not None and s.drift > 1e-6)
+    rollout_digest = hashlib.sha256()
+    for sample in samples:
+        rollout_digest.update(sample.provenance.rollout_sha256.encode())
+    return {
+        "rollout_source": f"on_policy_student:{STUDENT_SOURCE}",
+        "privileged_source": (
+            "v3_truth_sidecar" if builder is not None else "recorded_command_fixture"
+        ),
+        "privileged_fields_present": builder is not None,
+        "student_induced_rows": induced,
+        "total_rows": len(samples),
+        "rollout_sha256": rollout_digest.hexdigest(),
+    }
 
 
 def _build_dagger_dataset(
     cfg: TeacherV2Config, episodes: list[Episode], held_ids: frozenset[int]
 ) -> Any:
+    builder = _build_privileged(cfg)
+    student = _build_student(cfg, torch.device(cfg.device))
+    rollout = _dagger_rollout(cfg, builder, student=student)
     if _upstream_build_dagger is not None:
-        return _upstream_build_dagger(
+        dataset = _upstream_build_dagger(
             seed=cfg.seed,
             episodes=episodes,
-            rollout=_dagger_rollout(cfg),
+            rollout=rollout,
             teacher=_expert_label,
             rounds=cfg.dagger_rounds,
             rollouts_per_round=1,
         )
-    # Local fallback: identical shapes/provenance, no extra dependency.
-    samples: list[_LocalDaggerSample] = []
-    rollout = _dagger_rollout(cfg)
-    for episode in episodes:
-        sid = int(episode.scenario_id)
-        rng = random.Random(f"{cfg.seed}:dagger:episode:{episode.index}")
-        for step, state in enumerate(rollout(episode, rng)):
-            correction = _expert_label(state.privileged)
-            if not np.isfinite(correction).all():
-                raise ValueError(f"non-finite expert label at episode {sid} step {step}")
-            samples.append(
-                _LocalDaggerSample(
-                    observation=state.observation,
-                    correction=correction,
-                    authoritative=state.authoritative,
-                    provenance=_LocalProvenance(
-                        sample_id=f"{cfg.seed}:dagger:{sid}:{step}",
-                        seed=cfg.seed,
-                        scenario_id=sid,
-                        split="held_out" if sid in held_ids else "fit",
-                        expert="reference_optimizer_v3",
-                        label_source="expert",
-                    ),
+    else:
+        # Local fallback: identical shapes/provenance, no extra dependency.
+        samples: list[_LocalDaggerSample] = []
+        for episode in episodes:
+            sid = int(episode.scenario_id)
+            rng = random.Random(f"{cfg.seed}:dagger:{episode.index}")
+            for step, state in enumerate(rollout(episode, rng)):
+                correction = _expert_label(state.privileged)
+                if not np.isfinite(correction).all():
+                    raise ValueError(f"non-finite expert label at episode {sid} step {step}")
+                sample_id = f"{cfg.seed}:dagger:{sid}:{step}"
+                sha = sample_sha256(
+                    sample_id,
+                    state.observation,
+                    state.privileged,
+                    state.action,
+                    state.authoritative,
                 )
-            )
-    digest = hashlib.sha256()
-    for sample in samples:
-        digest.update(sample.provenance.sample_id.encode())
-        digest.update(np.asarray(sample.observation, dtype=np.float32).tobytes())
-        digest.update(sample.correction.tobytes())
-    return _LocalDaggerDataset(samples, digest.hexdigest())
+                drift = (
+                    None
+                    if state.recorded_frame is None
+                    else float(np.linalg.norm(state.observation[-1, :14] - state.recorded_frame))
+                )
+                samples.append(
+                    _LocalDaggerSample(
+                        observation=state.observation,
+                        correction=correction,
+                        authoritative=state.authoritative,
+                        provenance=_LocalProvenance(
+                            sample_id=sample_id,
+                            seed=cfg.seed,
+                            scenario_id=sid,
+                            split="held_out" if sid in held_ids else "fit",
+                            expert="reference_optimizer_v3",
+                            label_source="expert",
+                            rollout_sha256=sha,
+                        ),
+                        action=state.action,
+                        drift=drift,
+                    )
+                )
+        digest = hashlib.sha256()
+        for sample in samples:
+            digest.update(sample.provenance.sample_id.encode())
+            digest.update(np.asarray(sample.observation, dtype=np.float32).tobytes())
+            digest.update(sample.correction.tobytes())
+        dataset = _LocalDaggerDataset(samples, digest.hexdigest())
+    dataset.dagger_info = _dagger_info(cfg, dataset, builder)
+    return dataset
 
 
 def _stage_dagger(
@@ -878,10 +1069,18 @@ def _stage_dagger(
     train, held, ratio, ece = _evaluate(model, fit, inner, cfg, device)
     details = {
         "dagger_source": DAGGER_SOURCE,
+        **getattr(dataset, "dagger_info", {}),
         "dataset_fingerprint": dataset.fingerprint(),
         "fit_samples": len(rows),
         "held_out_samples": len(held_rows),
-        "label_source": "reference_optimizer_v3:slots22..25",
+        "label_source": (
+            "reference_optimizer_v3:truth_sidecar_slots22..25"
+            if cfg.truth_sidecar is not None
+            else "reference_optimizer_v3:recorded_target(no_truth_sidecar)"
+        ),
+        "truth_sidecar": str(cfg.truth_sidecar) if cfg.truth_sidecar is not None else None,
+        "privileged_fields_zeroed": cfg.truth_sidecar is None,
+        "eval_label_blind": True,
     }
     return StageReport("dagger", steps, train, held, ratio, ece, entropy, cfg.learned_exit, details)
 
@@ -1105,9 +1304,7 @@ def _stage_distill(
                     teacher, window, target_output[:, :2], residual=cfg.residual_policy
                 )
                 if decision is not None:
-                    target_output = torch.cat(
-                        [decision.correction, target_output[:, 2:3]], dim=-1
-                    )
+                    target_output = torch.cat([decision.correction, target_output[:, 2:3]], dim=-1)
             output = student.forward(window, cond)
             if output.shape[0] != window.shape[0] or output.shape[-1] != 3:
                 raise AssertionError(f"student output has wrong shape {tuple(output.shape)}")
