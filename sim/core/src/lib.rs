@@ -29,6 +29,7 @@ pub mod sensor;
 pub mod trajectory;
 pub mod validation;
 pub mod wind;
+pub mod wind_spectral;
 
 pub use aero::{AeroCard, AeroChannel, AeroCoeffs};
 pub use atmosphere::Atmosphere;
@@ -54,3 +55,4 @@ pub use trajectory::{
 };
 pub use validation::{TruthRecord, LEGACY_TARGET_COUNT, META_V2_TRUTH, TRUTH_COUNT};
 pub use wind::Wind;
+pub use wind_spectral::{SpectralConfig, WindSpectral};

@@ -23,6 +23,7 @@ use crate::{
     trajectory::TrajectoryTick,
     validation::TruthRecord,
     wind::Wind,
+    wind_spectral::WindSpectral,
 };
 
 #[derive(Debug, Clone)]
@@ -268,6 +269,23 @@ impl Simulator {
         };
         let mut state = State::new(mass, pitch_deg.to_radians(), yaw_deg.to_radians());
         let wind = Wind::new(&ep_cfg, index);
+        // SIMWIND: the spectral field is a separate opt-in wind model. It is
+        // built once per episode; when disabled there is no field and the
+        // shipped `Wind` path below executes exactly as before.
+        let spectral = if cfg.spectral.enabled {
+            Some(
+                WindSpectral::new(
+                    &cfg.spectral,
+                    cfg.run.seed,
+                    index,
+                    cfg.run.dt,
+                    cfg.run.duration_s,
+                )
+                .map_err(|e| SimError::Config(e.to_string()))?,
+            )
+        } else {
+            None
+        };
         let mut sensor = Sensor::new(&ep_cfg, index);
         let optimizer = ReferenceOptimizer::new(cfg);
 
@@ -305,12 +323,33 @@ impl Simulator {
         let mut trajectory = Vec::with_capacity(nf);
         // Sampled at the frame tick, held across the step's RK4 sub-steps.
         let mut command_deg = [0.0_f64; 2];
-        let gust_info = wind.gust_info();
+        // Truth metadata follows the same wind model as the flown field, so an
+        // enabled spectral run never reports the shipped field's gust/shear.
+        let (gust_info, wind_v_10, wind_shear_altitude, wind_shear_delta, wind_shear_thickness) =
+            match &spectral {
+                Some(s) => (
+                    s.gust_info(),
+                    cfg.spectral.mean_wind_mps,
+                    cfg.spectral.shear_altitude_m,
+                    cfg.spectral.shear_delta_mps,
+                    cfg.spectral.shear_thickness_m,
+                ),
+                None => (
+                    wind.gust_info(),
+                    wind.v_10(),
+                    wind.shear_altitude(),
+                    wind.shear_delta(),
+                    wind.shear_thickness(),
+                ),
+            };
 
         for step in 0..steps {
             let t = step as f64 * cfg.run.dt;
             let air = self.atm.at(state.pos()[2]);
-            let w = wind.at(step, state.pos()[2], air.wind_factor);
+            let w = match &spectral {
+                Some(s) => s.at(step, state.pos()[2]),
+                None => wind.at(step, state.pos()[2], air.wind_factor),
+            };
             let phase = phase_at(t, &state, &vehicle);
 
             // Tick coefficients for the exported physics features. The
@@ -334,9 +373,9 @@ impl Simulator {
                     wind: [w[0] as f32, w[1] as f32, w[2] as f32],
                     gust_start_s: gust_info.map(|g| g.0).unwrap_or(-1.0) as f32,
                     gust_amplitude: gust_info.map(|g| g.2).unwrap_or(0.0) as f32,
-                    shear_altitude_m: wind.shear_altitude() as f32,
-                    shear_delta: wind.shear_delta() as f32,
-                    shear_thickness_m: wind.shear_thickness() as f32,
+                    shear_altitude_m: wind_shear_altitude as f32,
+                    shear_delta: wind_shear_delta as f32,
+                    shear_thickness_m: wind_shear_thickness as f32,
                     pos: cast3(state.pos()),
                     vel: cast3(state.vel()),
                     quat: [
@@ -362,9 +401,9 @@ impl Simulator {
                     wind: cast3(w),
                     gust_start_s: gust_info.map(|g| g.0).unwrap_or(-1.0) as f32,
                     gust_amplitude: gust_info.map(|g| g.2).unwrap_or(0.0) as f32,
-                    shear_altitude_m: wind.shear_altitude() as f32,
-                    shear_delta: wind.shear_delta() as f32,
-                    shear_thickness_m: wind.shear_thickness() as f32,
+                    shear_altitude_m: wind_shear_altitude as f32,
+                    shear_delta: wind_shear_delta as f32,
+                    shear_thickness_m: wind_shear_thickness as f32,
                     ..TrajectoryTick::default()
                 });
 
@@ -381,8 +420,17 @@ impl Simulator {
                         atm: &self.atm,
                         wind: w,
                         phase,
-                        gust: wind.gust_active_step(step),
-                        shear: wind.shear_active(state.pos()[2]),
+                        gust: match &spectral {
+                            Some(s) => s.gust_at(t) > 0.0,
+                            None => wind.gust_active_step(step),
+                        },
+                        shear: match &spectral {
+                            Some(_) => {
+                                (state.pos()[2] - cfg.spectral.shear_altitude_m).abs()
+                                    <= 2.0 * cfg.spectral.shear_thickness_m
+                            }
+                            None => wind.shear_active(state.pos()[2]),
+                        },
                     });
                     frame.physics =
                         PhysicsFeatures::from_state(&state, w, air, &vehicle, frame.accel)
@@ -546,8 +594,8 @@ impl Simulator {
             gust_start_s: gust_info.map(|g| g.0),
             gust_duration_s: gust_info.map(|g| g.1).unwrap_or(0.0),
             gust_amplitude: gust_info.map(|g| g.2).unwrap_or(0.0),
-            v_10: wind.v_10(),
-            shear_delta: wind.shear_delta(),
+            v_10: wind_v_10,
+            shear_delta: wind_shear_delta,
             scenario_id: sc.id,
             split: sc.split,
             conditioning,

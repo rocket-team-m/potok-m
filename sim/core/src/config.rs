@@ -10,6 +10,7 @@ use crate::{
     math::episode_seed,
     parachute::ParachuteConfig,
     scenario::{scenario, Split, SCENARIO_COUNT},
+    wind_spectral::SpectralConfig,
 };
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq)]
@@ -611,6 +612,11 @@ pub struct Config {
     #[serde(default = "ParachuteConfig::default")]
     #[serde(deserialize_with = "deserialize_parachute")]
     pub parachute: ParachuteConfig,
+    /// SIMWIND: opt-in von Kármán spectral wind field. `enabled = false` by
+    /// default, so every existing trajectory, golden hash and A/B stays
+    /// bit-identical.
+    #[serde(default)]
+    pub spectral: SpectralConfig,
 }
 
 impl Config {
@@ -804,6 +810,11 @@ impl Config {
         // CHUTE03: validate even when disabled, so a malformed canopy config
         // cannot lie dormant waiting for someone to flip the switch.
         self.parachute
+            .validate()
+            .map_err(|e| SimError::Config(e.to_string()))?;
+        // SIMWIND: validate even when disabled, so a malformed spectral config
+        // cannot lie dormant waiting for someone to flip the switch.
+        self.spectral
             .validate()
             .map_err(|e| SimError::Config(e.to_string()))?;
         Ok(())

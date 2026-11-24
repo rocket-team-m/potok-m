@@ -64,6 +64,9 @@ struct Args {
     /// Append the six physics features to the eight default channels (14 total).
     #[arg(long)]
     physics_features: bool,
+    /// Enable the opt-in von Kármán spectral wind field (overrides [spectral] enabled).
+    #[arg(long)]
+    spectral_wind: bool,
     /// TSV control file: frame_index, g_roll_deg, g_pitch_deg (one row per tick).
     /// Commands reach the vehicle dynamics through the fin-control seam.
     #[arg(long, value_name = "PATH")]
@@ -108,6 +111,9 @@ enum DatasetCommand {
         /// provenance companion (default: <repo>/config/measurements).
         #[arg(long, value_name = "DIR")]
         measurement_dir: Option<PathBuf>,
+        /// Enable the opt-in von Kármán spectral wind field (overrides config).
+        #[arg(long)]
+        spectral_wind: bool,
     },
 }
 
@@ -150,6 +156,7 @@ fn run(args: Args) -> Result<(), CliError> {
         control_file,
         protocol_schema,
         measurement_dir,
+        spectral_wind,
     }) = &args.command
     {
         return generate_dataset(
@@ -162,6 +169,7 @@ fn run(args: Args) -> Result<(), CliError> {
             control_file.as_deref(),
             protocol_schema.as_deref(),
             measurement_dir.as_deref(),
+            *spectral_wind,
         );
     }
     if args.episodes == 0 {
@@ -173,6 +181,9 @@ fn run(args: Args) -> Result<(), CliError> {
     };
     if let Some(seed) = args.seed {
         cfg.run.seed = seed;
+    }
+    if args.spectral_wind {
+        cfg.spectral.enabled = true;
     }
     if args.physics_features {
         cfg.output
@@ -373,6 +384,7 @@ fn generate_dataset(
     control_file: Option<&Path>,
     protocol_schema: Option<&Path>,
     measurement_dir: Option<&Path>,
+    spectral_wind: bool,
 ) -> Result<(), CliError> {
     if train_episodes == 0 || held_out_episodes == 0 {
         return Err(CliError::NoEpisodes);
@@ -382,6 +394,9 @@ fn generate_dataset(
         None => Config::default(),
     };
     cfg.run.seed = seed;
+    if spectral_wind {
+        cfg.spectral.enabled = true;
+    }
     // The dataset's model frame is the canonical 14 channels: eight raw plus
     // six physics features. Appending is idempotent for custom configs.
     for name in PHYSICS_FEATURES {

@@ -1,10 +1,12 @@
 # SIMWIND — von Kármán spectral wind (opt-in)
 
-Status: **implemented and gated, not wired into the default simulator path.**
-A self-contained module at `core/src/wind_spectral.rs` with gates in
-`core/tests/wind_spectral_tests.rs`. Nothing in `core/src/lib.rs`,
-`core/src/config.rs`, `core/src/wind.rs`, `cli/` or `config/default.toml` was
-changed by this task. The shipped `wind::Wind` path stays bit-identical.
+Status: **implemented, gated and wired into the live simulator as an opt-in**
+(SIMWINDWIRE). The module at `core/src/wind_spectral.rs` is exported from
+`core/src/lib.rs`, held in `Config.spectral` (`#[serde(default)]`), validated at
+the config boundary, and branched into the episode's wind call site. The CLI
+exposes `--spectral-wind` as an override. `enabled = false` by default: no
+field is built and the shipped `wind::Wind` path stays bit-identical.
+`config/default.toml` is unchanged.
 
 ## What it models
 
@@ -57,22 +59,27 @@ construction cannot change a trajectory. `from_toml_str` accepts a bare table
 or a `[spectral]` wrapper; every field is validated LOUD before use (field
 name, bad value, fix).
 
-## Wiring seam (not done in this task)
+## Wiring (SIMWINDWIRE, done)
 
-1. `core/src/lib.rs`: add `pub mod wind_spectral;`.
-2. `core/src/config.rs`: add `#[serde(default)] pub spectral: SpectralConfig`
-   to `Config`, and call
-   `cfg.spectral.validate().map_err(|e| SimError::Config(e.to_string()))?`
-   from `Config::validate`.
-3. At the wind call site in `core/src/episode.rs`: when `spectral.enabled`,
-   build `WindSpectral::new(&cfg.spectral, cfg.run.seed, episode, cfg.run.dt,
-   cfg.run.duration_s)` and use `at(step, alt)` in place of `Wind::at`; when
-   disabled, keep `Wind` exactly as today.
-4. CLI: expose `--spectral-wind` as an override of `spectral.enabled`.
+1. `core/src/lib.rs`: `pub mod wind_spectral;` plus root re-exports of
+   `SpectralConfig` / `WindSpectral`.
+2. `core/src/config.rs`: `#[serde(default)] pub spectral: SpectralConfig` on
+   `Config`, and `spectral.validate()` called from `Config::validate` even when
+   disabled, so a malformed field is LOUD before the switch is flipped.
+3. `core/src/episode.rs`: one `WindSpectral::new(&cfg.spectral, cfg.run.seed,
+   episode, cfg.run.dt, cfg.run.duration_s)` per episode when enabled. At the
+   wind call site `at(step, alt)` replaces `Wind::at`; `gust`, `shear` and the
+   v_10 / gust / shear metadata follow the same model, so truth never reports
+   the shipped field while the spectral arm is flown. Disabled keeps the exact
+   `Wind` expression, including the `air.wind_factor` multiplier.
+4. `cli/src/main.rs`: `--spectral-wind` sets `cfg.spectral.enabled = true`
+   after config load, in both the headless path and `generate-dataset`.
 
-Pass the effective (scenario-sampled) wind values rather than the raw config
-scalars if the spectral arm is to see the same domain-randomised gust/shear/
-direction as the shipped field.
+Domain randomisation is deliberately NOT forwarded: the spectral arm uses its
+own typed `mean_wind_mps` / `direction_deg` / gust / shear scalars, not the
+domain-randomised `[wind]` scalars or `air.wind_factor`. This keeps the two
+wind models cleanly separable for an A/B. No comparison between them has been
+run, and nothing was fitted.
 
 ## Gates
 
@@ -98,6 +105,18 @@ periodogram along the advection line was tried and rejected: with a finite
 lattice the along-line projection starves wavenumbers above `kL ≈ 8`, which
 drives any such fit to −14 regardless of the code's correctness. The radial
 spectrum has tens of modes per bin and is stable across seeds.
+
+## Integration gates
+
+`cargo test -p potok-sim --test wind_wiring_tests` (5 tests):
+
+| gate | proves |
+|---|---|
+| `disabled_switch_is_bit_identical_to_the_default_program` | an aggressively non-default but disabled `[spectral]` block changes no flown value |
+| `enabled_spectral_changes_wind_truth` | enabled mode actually changes the trajectory and last-tick wind truth |
+| `enabled_wind_truth_is_deterministic_by_seed` | same `(seed, episode)` is bitwise equal; either input changes it |
+| `enabled_metadata_describes_the_spectral_field` | gust/shear/v_10 metadata follows the flown spectral model |
+| `malformed_spectral_config_is_loud_even_when_disabled` | config-boundary validation names the offending field |
 
 ## What is not claimed
 
