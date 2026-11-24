@@ -34,6 +34,7 @@ export default defineConfig({
           label: 'Проект',
           items: [
             { label: 'Цели и ТТХ', slug: 'project/goals' },
+            { label: 'Текущий статус', slug: 'project/status' },
             { label: 'Архитектура и репозитории', slug: 'project/architecture' },
             { label: 'План сезона', slug: 'project/roadmap' },
             { label: 'Роли', slug: 'project/roles' },
