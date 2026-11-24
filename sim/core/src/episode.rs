@@ -9,7 +9,8 @@ use crate::{
     aero::{count_placeholder, AeroCard},
     atmosphere::Atmosphere,
     config::{
-        episode_config, sample_domain, AeroSource, Conditioning, Config, CurriculumKnobs, Range,
+        episode_config, sample_domain, AeroSource, Conditioning, Config, CurriculumKnobs,
+        PitotProfileConfig, Range,
     },
     control::validate_command,
     dynamics::{self, phase_at, rk4, Phase, State, Vehicle},
@@ -19,7 +20,7 @@ use crate::{
     parachute::{ChutePhase, FlightCtx, LandingDispersion, Parachute},
     physics::PhysicsFeatures,
     scenario::{scenario, Split},
-    sensor::{feature, Frame, SampleContext, Sensor, FEATURE_NAMES},
+    sensor::{feature, Frame, PitotProfile, SampleContext, Sensor, FEATURE_NAMES},
     trajectory::TrajectoryTick,
     validation::TruthRecord,
     wind::Wind,
@@ -286,7 +287,14 @@ impl Simulator {
         } else {
             None
         };
-        let mut sensor = Sensor::new(&ep_cfg, index);
+        // SIMPITOTWIRE: the typed config flag selects the modeled pitot
+        // instrument. Production (default) is the byte-identical legacy path;
+        // Extended is experimental, widens the full scale and changes no gate.
+        let pitot_profile = match cfg.sensor.pitot_profile {
+            PitotProfileConfig::Production => PitotProfile::Production,
+            PitotProfileConfig::Extended => PitotProfile::ExtendedRange,
+        };
+        let mut sensor = Sensor::with_pitot_profile(&ep_cfg, index, pitot_profile);
         let optimizer = ReferenceOptimizer::new(cfg);
 
         // CHUTE03: one canopy per episode. `None` while disabled keeps the
