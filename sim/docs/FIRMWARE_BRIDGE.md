@@ -17,7 +17,7 @@ the *real bridge* part stays open until a Cargo-linked implementation of
 | item | value |
 |---|---|
 | reference checkout | `/home/sehaxe/potok-m-firmware` (read-only) |
-| pinned commit | `87118e07c243a89db2c5247c0a7e3bac9a74a8cf` |
+| pinned commit | `ce0acbecdb082523230d2210ad85c54a56abe566` |
 | decision sources | `firmware/src/lib.rs:41-78`, `firmware/src/interlocks.rs:35-112,130-137,239-321`, `firmware/src/control.rs:205-279` |
 | owner in sim | `cli/src/firmware_cosim.rs` (`FIRMWARE_COMMIT`, `FIRMWARE_SOURCES`) |
 
@@ -74,8 +74,11 @@ the escape: *re-derive the host port, then bump `FIRMWARE_COMMIT` in
 `cli/src/firmware_cosim.rs`*. Nothing is defaulted or skipped.
 
 The gate is exercised by `pinned_firmware_baseline_is_green_and_mismatches_are_loud`
-in `cli/tests/firmware_cosim_tests.rs`, which also injects a wrong commit and
-a changed gate constant to prove the failure is loud. The older gate set in
+in `cli/tests/firmware_cosim_tests.rs`, which injects the stale SIMCANOPY commit
+(`87118e07c243a89db2c5247c0a7e3bac9a74a8cf`) and a changed gate constant to prove
+the failure is loud. Refreshing the pin to `ce0acbe` was docs-only upstream: the
+three decision-bearing source paths and every refusal marker are unchanged, and
+the falsification check now proves the old hash is still rejected. The older gate set in
 `core/tests/firmware_cosim_tests.rs` still pins constants, decision order,
 zero-command bit identity, once-per-frame cadence and the oracle positive
 control on both host-port and transform paths.

@@ -44,7 +44,7 @@ use potok_sim::{
 
 /// Git commit of the read-only firmware checkout this port was transcribed
 /// from. The baseline gate refuses a stale port when that checkout moves.
-pub const FIRMWARE_COMMIT: &str = "87118e07c243a89db2c5247c0a7e3bac9a74a8cf";
+pub const FIRMWARE_COMMIT: &str = "ce0acbecdb082523230d2210ad85c54a56abe566";
 /// Reference checkout; never edited by this crate and never executed.
 pub const FIRMWARE_REPO: &str = "/home/sehaxe/potok-m-firmware";
 /// Decision-bearing sources and line ranges read from that checkout.
@@ -54,7 +54,10 @@ pub const FIRMWARE_SOURCES: &[(&str, &str)] = &[
         "firmware/src/interlocks.rs",
         "35-112,130-137,239-321: phase gate, limits, latch/reset",
     ),
-    ("firmware/src/control.rs", "205-279: miss latch, on_reply, command veto"),
+    (
+        "firmware/src/control.rs",
+        "205-279: miss latch, on_reply, command veto",
+    ),
 ];
 
 /// A baseline check failed. Every variant carries the cause; `Display` adds
@@ -80,10 +83,9 @@ impl std::fmt::Display for ProvenanceError {
                 f,
                 "firmware HEAD is {found}, but this port was derived from {expected}"
             ),
-            Self::SourceMismatch { file, marker } => write!(
-                f,
-                "firmware source {file} no longer contains `{marker}`"
-            ),
+            Self::SourceMismatch { file, marker } => {
+                write!(f, "firmware source {file} no longer contains `{marker}`")
+            }
         }?;
         write!(
             f,
@@ -97,8 +99,14 @@ impl std::error::Error for ProvenanceError {}
 /// Constants and gates the host port was transcribed from. A changed marker
 /// means the copy may no longer be faithful and the sim must say so loudly.
 const BASELINE_MARKERS: &[(&str, &str)] = &[
-    ("firmware/src/lib.rs", "pub const MAX_CONSECUTIVE_MISSES: u8 = 3;"),
-    ("firmware/src/lib.rs", "pub const MAX_CORRECTION_RAW: i16 = 100;"),
+    (
+        "firmware/src/lib.rs",
+        "pub const MAX_CONSECUTIVE_MISSES: u8 = 3;",
+    ),
+    (
+        "firmware/src/lib.rs",
+        "pub const MAX_CORRECTION_RAW: i16 = 100;",
+    ),
     ("firmware/src/interlocks.rs", "max_command: 100,"),
     ("firmware/src/interlocks.rs", "max_delta: 10,"),
     ("firmware/src/interlocks.rs", "min_interval_us: 1_000,"),
@@ -136,20 +144,23 @@ where
         }
     }
     let interlocks = source("firmware/src/interlocks.rs").map_err(ProvenanceError::Unavailable)?;
-    let preflight = interlocks.split("fn preflight(").nth(1).ok_or(
-        ProvenanceError::SourceMismatch {
-            file: "firmware/src/interlocks.rs",
-            marker: "fn preflight(",
-        },
-    )?;
+    let preflight =
+        interlocks
+            .split("fn preflight(")
+            .nth(1)
+            .ok_or(ProvenanceError::SourceMismatch {
+                file: "firmware/src/interlocks.rs",
+                marker: "fn preflight(",
+            })?;
     let mut cursor = 0;
     for token in PREFLIGHT_TOKENS {
-        let at = preflight[cursor..].find(token).ok_or(
-            ProvenanceError::SourceMismatch {
+        let at = preflight[cursor..]
+            .find(token)
+            .ok_or(ProvenanceError::SourceMismatch {
                 file: "firmware/src/interlocks.rs",
                 marker: token,
-            },
-        )? + cursor;
+            })?
+            + cursor;
         cursor = at + token.len();
     }
     Ok(())

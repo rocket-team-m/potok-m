@@ -18,6 +18,10 @@ use firmware_cosim::{
 };
 use potok_sim::{Config, Frame, Simulator};
 
+/// The stale pin from SIMCANOPY. The gate must refuse it: this is the
+/// falsification proof that the refreshed pin is load-bearing.
+const STALE_FIRMWARE_COMMIT: &str = "87118e07c243a89db2c5247c0a7e3bac9a74a8cf";
+
 fn sim(seed: u64) -> Simulator {
     let mut cfg = Config::default();
     cfg.run.seed = seed;
@@ -84,7 +88,10 @@ fn controller_is_a_compile_time_adapter_that_reaches_the_dynamics() {
 
 #[test]
 fn host_port_identifies_itself_as_a_port_not_firmware() {
-    assert_eq!(FirmwareGuard::new().implementation(), Implementation::HostPort);
+    assert_eq!(
+        FirmwareGuard::new().implementation(),
+        Implementation::HostPort
+    );
     assert_eq!(FIRMWARE_COMMIT.len(), 40);
     assert!(FIRMWARE_SOURCES
         .iter()
@@ -122,7 +129,9 @@ fn pinned_firmware_baseline_is_green_and_mismatches_are_loud() {
     let files = pinned_sources();
     check_with(&files, FIRMWARE_COMMIT).expect("pinned sources match the port");
 
-    let wrong_head = check_with(&files, "0000000000000000000000000000000000000000").unwrap_err();
+    // Falsification: the exact stale hash from SIMCANOPY must be refused even
+    // with otherwise-valid pinned sources. If it is accepted, the pin is dead.
+    let wrong_head = check_with(&files, STALE_FIRMWARE_COMMIT).unwrap_err();
     assert!(matches!(wrong_head, ProvenanceError::CommitMismatch { .. }));
     assert!(
         wrong_head.to_string().contains("bump FIRMWARE_COMMIT"),
