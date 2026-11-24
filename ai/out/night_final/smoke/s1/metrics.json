@@ -1,0 +1,124 @@
+{
+  "config_hash": "ff500c9dc6bc9c21",
+  "conformal_coverage": 0.9393939393939394,
+  "ece": 0.0,
+  "ece_held_out": 0.0,
+  "ece_source": "held-out",
+  "entropy": 0.0,
+  "entropy_enabled": false,
+  "module_sources": {
+    "dagger": "dagger",
+    "jepa": "jepa_v2",
+    "privileged": "privileged_teacher",
+    "residual_policy": "residual_policy",
+    "student": "gdn2_student"
+  },
+  "ratio": 0.7951004029085602,
+  "residual_policy": {
+    "enabled": true,
+    "gain": -1.5976380109786987,
+    "gate_reasons": {
+      "clamped": 0,
+      "disabled": 0,
+      "non_finite": 0,
+      "ok": 178097,
+      "zero_gain": 64
+    },
+    "source": "residual_policy"
+  },
+  "reward_provenance": {},
+  "rmse_held_out": 4.966140392837877,
+  "rmse_train": 6.245928658407438,
+  "seed": 1,
+  "stage": "distill",
+  "stages": {
+    "dagger": {
+      "details": {
+        "dagger_source": "dagger",
+        "dataset_fingerprint": "80ee97265cb12ce47635eb1be8afe4ddd70052355ddb3541ce37db32bb44563a",
+        "eval_label_blind": true,
+        "fit_samples": 104160,
+        "held_out_samples": 14880,
+        "label_source": "reference_optimizer_v3:truth_sidecar_slots22..25",
+        "privileged_fields_present": true,
+        "privileged_fields_zeroed": false,
+        "privileged_source": "v3_truth_sidecar",
+        "rollout_sha256": "6e79fb5572d419683e9e58475a5d289e92e9e060f5fdb996c8bcb00c99db8edd",
+        "rollout_source": "on_policy_student:gdn2_student",
+        "student_induced_rows": 118960,
+        "total_rows": 119040,
+        "truth_sidecar": "/home/sehaxe/potok-m/ai/out/final_v3_postpump/data/train/validation.trajectory"
+      },
+      "ece": 0.3717934914464321,
+      "ece_source": "in-sample",
+      "entropy": 0.0,
+      "entropy_enabled": false,
+      "ratio": 1.0314240478009977,
+      "rmse_held_out": 7.1281584293742934,
+      "rmse_train": 6.910987236114545,
+      "stage": "dagger",
+      "steps": 1628
+    },
+    "distill": {
+      "details": {
+        "legacy_student_bound": false,
+        "residual_policy_target": true,
+        "student_command_bound": 10.0,
+        "student_file": "student.pt",
+        "student_source": "gdn2_student"
+      },
+      "ece": 0.4291555184065584,
+      "ece_source": "in-sample",
+      "entropy": 0.0,
+      "entropy_enabled": false,
+      "ratio": 0.7951004029085602,
+      "rmse_held_out": 4.966140392837877,
+      "rmse_train": 6.245928658407438,
+      "stage": "distill",
+      "steps": 23
+    },
+    "privileged": {
+      "details": {
+        "eval_label_blind": true,
+        "jepa_source": "jepa_v2",
+        "objective": {
+          "formula": "L = mean[((a_lat_resid - u_lat)/g0)^2 + (drag_est/g0)*gamma(u)^2]; gamma = atan2(vz_next, hypot(vx_next, vy_next)), vx_next = vx - u_pitch*dt, vy_next = vy + u_lat*dt, vz_next = vz",
+          "legacy": false,
+          "reason": null,
+          "source": "impact"
+        },
+        "privileged_batches": 23,
+        "privileged_source": "privileged_teacher",
+        "truth_sidecar": "/home/sehaxe/potok-m/ai/out/final_v3_postpump/data/train/validation.trajectory"
+      },
+      "ece": 0.3661997918493317,
+      "ece_source": "in-sample",
+      "entropy": 0.0,
+      "entropy_enabled": false,
+      "ratio": 1.0610765028076434,
+      "rmse_held_out": 8.367463270241386,
+      "rmse_train": 7.885824677203578,
+      "stage": "privileged",
+      "steps": 23
+    },
+    "sft": {
+      "details": {},
+      "ece": 0.4091824860154567,
+      "ece_source": "in-sample",
+      "entropy": 0.0,
+      "entropy_enabled": false,
+      "ratio": 1.0606364249581437,
+      "rmse_held_out": 8.363636583579954,
+      "rmse_train": 7.885488737490805,
+      "stage": "sft",
+      "steps": 23
+    }
+  },
+  "stages_completed": [
+    "sft",
+    "privileged",
+    "dagger",
+    "distill"
+  ],
+  "steps": 23
+}

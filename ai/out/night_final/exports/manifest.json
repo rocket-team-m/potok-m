@@ -1,0 +1,78 @@
+{
+  "claim": "artifacts only; no closed-loop A/B was run and no win is claimed",
+  "export_format": "student.pt (torch state_dict of the distill-stage student)",
+  "fixes": {
+    "adversarial": "not opted in (see summary.json adversarial_arm)",
+    "command_bound": 10.0,
+    "confidence": "AICAL split-conformal, disjoint inner-held-out split",
+    "objective": "AIOBJ impact default (no --legacy-objective)",
+    "online_shield": "module verified in shield.json; not invoked by the trainer",
+    "residual_policy": "enabled by trainer default (SHIELD02)",
+    "rollout": "on_policy_student",
+    "truth_sidecar": "/home/sehaxe/potok-m/ai/out/final_v3_postpump/data/train/validation.trajectory"
+  },
+  "measurement": "distilled students from the RETRAIN-NIGHT default four-stage pipeline",
+  "rlvr": "not run (opt-in checkpoint selection only)",
+  "stage_order": [
+    "sft",
+    "privileged",
+    "dagger",
+    "distill"
+  ],
+  "students": {
+    "1": {
+      "config_hash": "9fa5322f40c26dda",
+      "conformal_coverage": 0.9545454545454546,
+      "ece_source": "held-out",
+      "file": "teacher_v2_s1.pt",
+      "objective": {
+        "formula": "L = mean[((a_lat_resid - u_lat)/g0)^2 + (drag_est/g0)*gamma(u)^2]; gamma = atan2(vz_next, hypot(vx_next, vy_next)), vx_next = vx - u_pitch*dt, vy_next = vy + u_lat*dt, vz_next = vz",
+        "legacy": false,
+        "reason": null,
+        "source": "impact"
+      },
+      "privileged_batches": 2300,
+      "rmse_held_out": 5.474855702777769,
+      "rollout_source": "on_policy_student:gdn2_student",
+      "sha256": "e76e525b90153c15ff5865ac8b59fca53eb64720e3e22cbfcdb9bf0ad949c398",
+      "student_command_bound": 10.0,
+      "student_source": "gdn2_student"
+    },
+    "2": {
+      "config_hash": "a05354a6beafa806",
+      "conformal_coverage": 0.9559228650137741,
+      "ece_source": "held-out",
+      "file": "teacher_v2_s2.pt",
+      "objective": {
+        "formula": "L = mean[((a_lat_resid - u_lat)/g0)^2 + (drag_est/g0)*gamma(u)^2]; gamma = atan2(vz_next, hypot(vx_next, vy_next)), vx_next = vx - u_pitch*dt, vy_next = vy + u_lat*dt, vz_next = vz",
+        "legacy": false,
+        "reason": null,
+        "source": "impact"
+      },
+      "privileged_batches": 2300,
+      "rmse_held_out": 9.697134087735868,
+      "rollout_source": "on_policy_student:gdn2_student",
+      "sha256": "71925d887c6c3ae94bfe5b4e2ac8cde3bce42057bc83ec398d6c401530bbd47f",
+      "student_command_bound": 10.0,
+      "student_source": "gdn2_student"
+    },
+    "3": {
+      "config_hash": "bd3258dfa048304b",
+      "conformal_coverage": 0.9641873278236914,
+      "ece_source": "held-out",
+      "file": "teacher_v2_s3.pt",
+      "objective": {
+        "formula": "L = mean[((a_lat_resid - u_lat)/g0)^2 + (drag_est/g0)*gamma(u)^2]; gamma = atan2(vz_next, hypot(vx_next, vy_next)), vx_next = vx - u_pitch*dt, vy_next = vy + u_lat*dt, vz_next = vz",
+        "legacy": false,
+        "reason": null,
+        "source": "impact"
+      },
+      "privileged_batches": 2300,
+      "rmse_held_out": 6.9021205724498405,
+      "rollout_source": "on_policy_student:gdn2_student",
+      "sha256": "7d18fbfe9ddb3dbb9150ecb0c576732157b808de0f1df078f55031cec8ca06e3",
+      "student_command_bound": 10.0,
+      "student_source": "gdn2_student"
+    }
+  }
+}

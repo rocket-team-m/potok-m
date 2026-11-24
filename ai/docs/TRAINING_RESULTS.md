@@ -1,3 +1,53 @@
+<!-- night-final:begin -->
+# Teacher-v2 results — RETRAIN-NIGHT (current)
+
+The shipped four-stage default (`sft -> privileged -> dagger -> distill`) was rerun on the frozen post-FIXPUMP split with the train-split v3 truth sidecar, **3 seeds x 100 epochs, CPU**, and no physics/gate/envelope/weight tuning. Two upgrades that landed after RETRAIN-ALLFIX are active through trainer defaults: the privileged **impact objective (AIOBJ)**, on because a truth sidecar with records is supplied and `--legacy-objective` is NOT passed, and the **split-conformal confidence (AICAL)** hook, whose disjoint ECE and coverage are read from the trainer's own `metrics.json` and `conformal.json`. AIFIX1/2/3, SHIELD01/02 and on-policy DAgger are inherited defaults and are re-checked per seed. RLVR stayed opt-in and was not run. `--limit 1451` caps WINDOWS per batch builder, not episodes.
+
+Held-out RMSE: **7.358037 +/- 2.147744 m/s^2** (sample std).
+
+| seed | train RMSE | held-out RMSE | ratio | disjoint ECE | conformal coverage |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 6.111624 | 5.474856 | 0.8958 | 0.0231 | 0.9545 |
+| 2 | 9.050627 | 9.697134 | 1.0714 | 0.0091 | 0.9559 |
+| 3 | 7.132454 | 6.902121 | 0.9677 | 0.0214 | 0.9642 |
+
+## Comparison to RETRAIN-ALLFIX — descriptive, no A/B win claim
+
+| run | held-out RMSE, mean +/- std (m/s^2) |
+|---|---:|
+| RETRAIN-NIGHT (impact objective + conformal) | 7.358037 +/- 2.147744 |
+| RETRAIN-ALLFIX (all root-cause fixes, earlier code) | 7.855551 +/- 2.604600 |
+
+Difference of means: -0.497515 m/s^2; the allfix sample std is 2.604600, so the difference is within one allfix seed spread. The two runs differ in the privileged objective and the confidence measurement at once, no arm isolates either, and there is no closed-loop harness, no independent flight-truth anchor, no positive control and no unweakened gate evaluation. `ab_win_claimed: false` in `summary.json`: **no win is claimed**.
+
+## Adversarial curriculum (AICURR)
+
+**RUN** — 3 seeds, 100 epochs, `--adversarial`; teacher gates: rmse_ratio=PASS, ece_source=PASS, ece=PASS. Descriptive second arm only; no win claimed.
+
+## Gate verdict (teacher gates only)
+
+| check | verdict | detail |
+|---|---|---|
+| rmse_ratio | PASS | three seeds, held-out/train ratio <= 1.25 |
+| ece_source | PASS | three seeds labelled with a disjoint source ['disjoint', 'held-out', 'held_out'] |
+| ece | PASS | three disjoint ECE scores <= 0.05 with coverage in [0, 1] |
+
+Closed-loop A/B gates (`seed_spread`, `closed_loop_improvement`, `oracle_positive_control`) are **not evaluated**: no A/B report, no independent truth sidecar and no positive control. The ECE is a disjoint inner-held-out score; stage-local ECE values remain in-sample diagnostics.
+
+## Binding limitation — stated loudly
+
+AIFIX3's `world_step` advances only onboard sensor features through the unchanged `physics_baseline`/`final_command` plus named noise — a surrogate, not a Rust simulator step on (state, command). The v3 truth sidecar is emitted by that same simulator, so generator and verifier share a source; it is not an independent flight-truth anchor. The impact objective uses measured sensor columns and true velocity as an additional training term, not a new closed-loop measurement. A held-out RMSE near the target's own RMS (~7.7 m/s²) is the expected shape of that binding.
+
+## Provenance
+
+- train sha256: `34b35e0ff67f7eeecbd895b2efde8bebcfa159c1a3e78379da6750338b6930b6`; held-out sha256: `fdc1d1400b1c5f111e21f79dead37afa1dd9f058fe457edb78037dc6ebe89807`
+- sim config sha256: `9c34e71f9d10bcf081c31f15f5332f7bb2fac04dddb28009a27cd30987ab5e91`; train-split truth sidecar sha256: `7f25bb69124638ea7542be99f43330fda1c5248513f1971f6bfd125f5f759cb8`
+- per-seed evidence: `ai/out/night_final/runs/s*/metrics.json` and `conformal.json`; shield: `ai/out/night_final/shield.json`; exports: `ai/out/night_final/exports/manifest.json`; full summary: `ai/out/night_final/summary.json`.
+<!-- night-final:end -->
+
+
+---
+
 # Post-FIXPUMP teacher-v2 results (all AI root-cause fixes active)
 
 The four-stage default (`sft -> privileged -> dagger -> distill`) was run with every landed fix active and checked in each `metrics.json`: the +/-10 m/s² student bound (AIFIX1), the real train-split POTOKTRJ v3 truth sidecar in the privileged stage (AIFIX2), the on-policy student-in-the-loop DAgger rollout (AIFIX3), and the default-on bounded residual policy (SHIELD02). The online shield (SHIELD01) is verified and counted in `ai/out/final_v3_allfix/shield.json`; it is **not** invoked by the staged teacher-v2 trainer, so no training intervention count is claimed. RLVR remains opt-in checkpoint selection and was not run. **100 epochs**, CPU only, seeds [1, 2, 3]. Data, seeds, epochs and every recorded numeric knob are identical to RETRAIN-DAGGER; no physics constant, gate, threshold, weight or recipe value was tuned. `--limit 1451` caps WINDOWS per batch builder, not episodes.
