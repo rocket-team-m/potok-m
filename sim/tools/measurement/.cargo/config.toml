@@ -1,0 +1,5 @@
+# Reuse the sim workspace's compiled dependencies instead of paying for a
+# second full rebuild. Relative to tools/measurement/, so ../../target is
+# sim/target.
+[build]
+target-dir = "../../target"

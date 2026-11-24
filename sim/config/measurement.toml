@@ -1,0 +1,31 @@
+# Measurement ingest recipe for the SYNTHETIC self-test fixtures only.
+#
+# NO REAL MEASUREMENT SHIPS WITH THIS TREE. Every path below is a synthetic
+# fixture under tools/measurement/fixtures/, labelled SYNTHETIC in its header.
+# A source label is recorded verbatim as provenance, never verified against
+# hardware. Replacing these paths with operator data is an explicit act and
+# does not make a hardware claim by itself.
+#
+# Paths are relative to the repo root so the caller's cwd cannot change which
+# bytes are read or hashed.
+
+schema_version = 1
+expected_source_label = "SYNTHETIC"
+
+[sources.thrust_stand]
+path = "tools/measurement/fixtures/thrust_synthetic.csv"
+measurement = "thrust_stand"
+
+[sources.imu_allan_gyro]
+path = "tools/measurement/fixtures/imu_allan_gyro_synthetic.csv"
+measurement = "imu_allan"
+channel = "gyro"
+
+[sources.imu_allan_accel]
+path = "tools/measurement/fixtures/imu_allan_accel_synthetic.csv"
+measurement = "imu_allan"
+channel = "accel"
+
+[sources.servo_step]
+path = "tools/measurement/fixtures/servo_step_synthetic.csv"
+measurement = "servo_step"

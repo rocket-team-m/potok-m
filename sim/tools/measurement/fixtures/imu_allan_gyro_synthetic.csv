@@ -1,0 +1,11 @@
+# measurement: imu_allan
+# source: SYNTHETIC
+# channel: gyro
+# units: tau_s=seconds, sigma=rad/s Allan deviation
+# Synthetic decreasing curve for parser self-test only. NOT an IMU measurement.
+tau_s,sigma
+0.01,0.1000
+0.10,0.0316
+1.00,0.0100
+10.0,0.0032
+100.0,0.0030

@@ -1,0 +1,16 @@
+# measurement: servo_step
+# source: SYNTHETIC
+# units: t_s=seconds, commanded/measured=fin degrees
+# Identified parameters are part of this synthetic record; they are NOT fitted
+# by the harness and are NOT a measurement of any real servo.
+# delay_s: 0.02
+# rate_per_s: 120.0
+# deadband: 0.15
+t_s,commanded,measured
+0.00,0.0,0.0
+0.01,1.0,0.0
+0.02,1.0,0.0
+0.03,1.0,1.2
+0.05,1.0,3.6
+0.10,1.0,0.85
+0.20,1.0,0.85

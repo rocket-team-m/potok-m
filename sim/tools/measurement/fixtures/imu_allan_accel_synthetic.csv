@@ -1,0 +1,11 @@
+# measurement: imu_allan
+# source: SYNTHETIC
+# channel: accel
+# units: tau_s=seconds, sigma=m/s^2 Allan deviation
+# Synthetic decreasing curve for parser self-test only. NOT an IMU measurement.
+tau_s,sigma
+0.01,1.0000
+0.10,0.3162
+1.00,0.1000
+10.0,0.0316
+100.0,0.0300

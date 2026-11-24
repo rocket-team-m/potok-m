@@ -1,0 +1,17 @@
+[package]
+name = "potok-measurement"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "LOUD ingest of thrust/Allan/servo CSV into typed calibration inputs"
+
+# Standalone workspace: the sim workspace member list is out of scope for this
+# tool, so this crate owns its own workspace root and Cargo.lock.
+[workspace]
+
+[dependencies]
+potok-sim = { path = "../../core" }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "=1.0.145"
+toml = "0.8.23"
+thiserror = "2.0.17"
