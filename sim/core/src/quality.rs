@@ -2,6 +2,7 @@
 //! naming the dataset, the gate and the offending value. No clamping, no
 //! skip, no silent fallback.
 
+use std::cmp::Ordering;
 use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
@@ -520,7 +521,8 @@ pub fn check_dataset(
     let mut bad_truth = Vec::new();
     for e in &t.episodes {
         for (i, tick) in e.ticks.iter().enumerate() {
-            if !(tick.mass_kg > 0.0) {
+            // NaN must fail this gate too, matching `!(mass > 0.0)`.
+            if tick.mass_kg.partial_cmp(&0.0) != Some(Ordering::Greater) {
                 bad_truth.push(format!(
                     "episode {} tick {i} mass={}",
                     e.index, tick.mass_kg

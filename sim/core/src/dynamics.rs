@@ -661,7 +661,7 @@ pub fn rk4(t: f64, s: &State, dt: f64, wind: Vec3, atm: &Atmosphere, v: &Vehicle
     // deflection. Demand solving uses the same moment balance as `derivative`
     // (step-start qdyn/mass/Cm_delta); only its authority is frozen at t, the
     // per-stage authority still scales with each sub-stage's qdyn.
-    if v.servo.is_some() {
+    if let Some(channels) = &v.servo {
         let air = atm.at(s.pos[2]);
         let speed = norm(sub(s.vel, wind));
         let qdyn = 0.5 * air.density * speed * speed;
@@ -672,7 +672,6 @@ pub fn rk4(t: f64, s: &State, dt: f64, wind: Vec3, atm: &Atmosphere, v: &Vehicle
         };
         let mass = s.mass[0].max(v.dry_mass - sep_done);
         let cm_delta = v.effective_cm_delta();
-        let channels = v.servo.as_ref().expect("servo installed");
         let mut out = [0.0; 2];
         for axis in 0..2 {
             match solve_fin_deflection(

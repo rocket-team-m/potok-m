@@ -19,7 +19,7 @@ use crate::{
     parachute::{ChutePhase, FlightCtx, LandingDispersion, Parachute},
     physics::PhysicsFeatures,
     scenario::{scenario, Split},
-    sensor::{feature, Frame, Sensor, FEATURE_NAMES},
+    sensor::{feature, Frame, SampleContext, Sensor, FEATURE_NAMES},
     trajectory::TrajectoryTick,
     validation::TruthRecord,
     wind::Wind,
@@ -316,16 +316,12 @@ impl Simulator {
             // Tick coefficients for the exported physics features. The
             // integrator queries the card at each RK4 sub-stage; both queries
             // are fallible, so out-of-grid is LOUD, never clamped.
-            if vehicle.aero_card.is_some() {
+            if let Some(card) = &vehicle.aero_card {
                 let v_rel = sub(state.vel(), w);
                 let mach = norm(v_rel) / air.speed_of_sound.max(1.0);
                 let vb = mat_t_vec(quat_to_matrix(state.quat()), v_rel);
                 let alpha_deg = state.omega()[2].atan2(vb[0]).to_degrees();
-                let coeffs = vehicle.aero_card.as_ref().unwrap().coeffs(
-                    mach,
-                    alpha_deg,
-                    vehicle.aero.cd0,
-                )?;
+                let coeffs = card.coeffs(mach, alpha_deg, vehicle.aero.cd0)?;
                 vehicle.card_coeffs = coeffs;
             }
 
@@ -377,17 +373,17 @@ impl Simulator {
                 // exported and the sensor RNG has no observable consumer.
                 let mut control_frame = None;
                 if cfg.sim.sensors || control.is_some() {
-                    let mut frame = sensor.measure(
-                        (step / spf) as u16,
+                    let mut frame = sensor.measure(SampleContext {
+                        seq: (step / spf) as u16,
                         t,
-                        &state,
-                        &vehicle,
-                        &self.atm,
-                        w,
+                        state: &state,
+                        vehicle: &vehicle,
+                        atm: &self.atm,
+                        wind: w,
                         phase,
-                        wind.gust_active_step(step),
-                        wind.shear_active(state.pos()[2]),
-                    );
+                        gust: wind.gust_active_step(step),
+                        shear: wind.shear_active(state.pos()[2]),
+                    });
                     frame.physics =
                         PhysicsFeatures::from_state(&state, w, air, &vehicle, frame.accel)
                             .as_array();

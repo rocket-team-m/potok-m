@@ -182,6 +182,20 @@ struct Delayed {
     spike: bool,
 }
 
+/// Per-frame inputs to [`Sensor::measure`]. Grouped so the sampling entry
+/// point stays a one-argument method instead of a flat argument list.
+pub struct SampleContext<'a> {
+    pub seq: u16,
+    pub t: f64,
+    pub state: &'a State,
+    pub vehicle: &'a Vehicle,
+    pub atm: &'a Atmosphere,
+    pub wind: Vec3,
+    pub phase: Phase,
+    pub gust: bool,
+    pub shear: bool,
+}
+
 pub struct Sensor {
     cfg: SensorConfig,
     /// Measurement sample period (1 / frame_rate_hz), not the RK4 step dt.
@@ -260,18 +274,18 @@ impl Sensor {
         }
     }
 
-    pub fn measure(
-        &mut self,
-        seq: u16,
-        t: f64,
-        s: &State,
-        v: &Vehicle,
-        atm: &Atmosphere,
-        wind: Vec3,
-        phase: Phase,
-        gust: bool,
-        shear: bool,
-    ) -> Frame {
+    pub fn measure(&mut self, ctx: SampleContext<'_>) -> Frame {
+        let SampleContext {
+            seq,
+            t,
+            state: s,
+            vehicle: v,
+            atm,
+            wind,
+            phase,
+            gust,
+            shear,
+        } = ctx;
         let r = quat_to_matrix(s.quat());
         // `derivative.vel` is the inertial acceleration (SoA convention).
         let accel_world = derivative(t, s, wind, atm, v).vel;

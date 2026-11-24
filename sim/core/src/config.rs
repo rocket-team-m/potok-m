@@ -247,36 +247,26 @@ fn default_accel_noise_range() -> Range {
     Range(0.008, 0.014)
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum AeroSource {
     /// Legacy analytic coefficients (default). Prints a COUNTED marker.
+    #[default]
     Placeholder,
     /// Bilinear interpolation of a 2-D (Mach, alpha) TOML coefficient card.
     Card,
 }
 
-impl Default for AeroSource {
-    fn default() -> Self {
-        Self::Placeholder
-    }
-}
-
 /// Provenance label for `aero.thrust_profile`. Neither variant claims a
 /// static-fire measurement: no such record ships with the crate.
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ThrustSource {
     /// The curve is explicitly NOT claimed to be passport-compliant.
+    #[default]
     Experimental,
     /// The curve claims the RDK passport envelope; validated LOUD on load.
     Passport,
-}
-
-impl Default for ThrustSource {
-    fn default() -> Self {
-        Self::Experimental
-    }
 }
 
 /// Skipped in canonical config serialization so a pre-existing config without

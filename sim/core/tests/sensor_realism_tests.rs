@@ -15,8 +15,8 @@ use potok_sim::{
     dynamics::{Phase, State, Vehicle},
     math::{mat_t_vec, quat_to_matrix},
     sensor::{
-        gating, wire_flags, Frame, Sensor, FLAG_AI_READY, FLAG_BARO_OK, FLAG_FAULT, FLAG_IMU_OK,
-        FLAG_MOTOR_ARMED, FLAG_PITOT_OK,
+        gating, wire_flags, Frame, SampleContext, Sensor, FLAG_AI_READY, FLAG_BARO_OK, FLAG_FAULT,
+        FLAG_IMU_OK, FLAG_MOTOR_ARMED, FLAG_PITOT_OK,
     },
 };
 
@@ -96,17 +96,17 @@ impl Rig {
     }
 
     fn frame(&self, sensor: &mut Sensor, k: usize, st: &State, phase: Phase) -> Frame {
-        sensor.measure(
-            k as u16,
-            k as f64 * SAMPLE_DT,
-            st,
-            &self.vehicle,
-            &self.atm,
-            [0.0; 3],
+        sensor.measure(SampleContext {
+            seq: k as u16,
+            t: k as f64 * SAMPLE_DT,
+            state: st,
+            vehicle: &self.vehicle,
+            atm: &self.atm,
+            wind: [0.0; 3],
             phase,
-            false,
-            false,
-        )
+            gust: false,
+            shear: false,
+        })
     }
 }
 
