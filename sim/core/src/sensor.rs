@@ -29,6 +29,107 @@ pub const FLAG_AI_READY: u8 = proto::flags::AI_READY;
 pub const FLAG_MOTOR_ARMED: u8 = proto::flags::MOTOR_ARMED;
 pub const FLAG_FAULT: u8 = proto::flags::FAULT;
 
+/// Full scale of the experimental extended-range pitot, in Pa. The shipped
+/// 30 kPa instrument saturates over the 26-31 kPa gate-open dynamic pressure;
+/// this profile models a wider-range sensor so that window stays in range.
+pub const EXTENDED_FULL_SCALE_PA: f64 = 35_000.0;
+
+/// Which pitot differential-pressure instrument the sensor models.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PitotProfile {
+    /// Shipped instrument. Full scale comes from `sensor.pitot_sat` in config
+    /// (30 kPa). This is the only profile used by shipped presets and keeps
+    /// the default wire bytes unchanged.
+    Production,
+    /// Experimental wider-range instrument (opt-in, not a shipped preset).
+    /// Select with [`Sensor::with_pitot_profile`].
+    ExtendedRange,
+}
+
+impl PitotProfile {
+    /// Effective full scale in Pa for this profile.
+    pub const fn full_scale_pa(self, configured: f64) -> f64 {
+        match self {
+            Self::Production => configured,
+            Self::ExtendedRange => EXTENDED_FULL_SCALE_PA,
+        }
+    }
+
+    pub const fn is_experimental(self) -> bool {
+        match self {
+            Self::Production => false,
+            Self::ExtendedRange => true,
+        }
+    }
+}
+
+/// Named reason a pitot sample is outside its modeled range. Sim-only: the
+/// canonical frame has a single FAULT bit and no field for the cause.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PitotRangeFault {
+    /// Sample is NaN or infinite.
+    NonFinite,
+    /// |dp| exceeds the instrument full scale: the sensor is saturated.
+    FullScale,
+    /// dp exceeds the i16 wire field maximum (32767 Pa).
+    WireOverflow,
+    /// dp is below the i16 wire field minimum (-32768 Pa).
+    WireUnderflow,
+}
+
+impl std::fmt::Display for PitotRangeFault {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Self::NonFinite => "non-finite pitot sample",
+            Self::FullScale => "pitot beyond sensor full scale",
+            Self::WireOverflow => "pitot above i16 wire range",
+            Self::WireUnderflow => "pitot below i16 wire range",
+        };
+        f.write_str(s)
+    }
+}
+
+/// Typed outcome of classifying one pitot sample against its range.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PitotRangeStatus {
+    InRange,
+    OutOfRange(PitotRangeFault),
+}
+
+impl PitotRangeStatus {
+    pub const fn is_out_of_range(self) -> bool {
+        match self {
+            Self::InRange => false,
+            Self::OutOfRange(_) => true,
+        }
+    }
+
+    pub const fn fault(self) -> Option<PitotRangeFault> {
+        match self {
+            Self::InRange => None,
+            Self::OutOfRange(f) => Some(f),
+        }
+    }
+}
+
+/// Pure classifier: no clamp, no hidden state; the named reason is the result.
+/// Priority: non-finite, instrument full scale, then i16 wire limits.
+pub fn classify_pitot_range(pitot_pa: f64, full_scale_pa: f64) -> PitotRangeStatus {
+    if !pitot_pa.is_finite() {
+        return PitotRangeStatus::OutOfRange(PitotRangeFault::NonFinite);
+    }
+    if pitot_pa.abs() > full_scale_pa {
+        return PitotRangeStatus::OutOfRange(PitotRangeFault::FullScale);
+    }
+    if pitot_pa > i16::MAX as f64 {
+        return PitotRangeStatus::OutOfRange(PitotRangeFault::WireOverflow);
+    }
+    if pitot_pa < i16::MIN as f64 {
+        return PitotRangeStatus::OutOfRange(PitotRangeFault::WireUnderflow);
+    }
+    PitotRangeStatus::InRange
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Frame {
     pub seq: u16,
@@ -221,10 +322,30 @@ pub struct Sensor {
     /// Frame-delay line. Capacity 0 returns the current measurement.
     latency: usize,
     delayed: VecDeque<Delayed>,
+    /// Active pitot instrument range profile.
+    pitot_profile: PitotProfile,
+    /// Named range status of the most recent pitot sample (loud reason).
+    last_pitot_range: PitotRangeStatus,
 }
 
 impl Sensor {
+    /// Production instrument: byte-identical to the legacy sensor path.
     pub fn new(cfg: &Config, episode: u64) -> Self {
+        Self::with_pitot_profile(cfg, episode, PitotProfile::Production)
+    }
+
+    /// Opt into a pitot range profile. `ExtendedRange` is experimental: it
+    /// models a wider-range instrument and is not used by any shipped preset.
+    pub fn with_pitot_profile(cfg: &Config, episode: u64, pitot_profile: PitotProfile) -> Self {
+        if pitot_profile.is_experimental() {
+            eprintln!(
+                "[potok-sim] pitot profile=EXTENDED_RANGE full_scale={} Pa \
+                 (EXPERIMENTAL, not a shipped preset; wire field still caps at {} Pa; \
+                 use Sensor::new for the production instrument)",
+                pitot_profile.full_scale_pa(cfg.sensor.pitot_sat),
+                i16::MAX
+            );
+        }
         let mut rng = StdRng::seed_from_u64(episode_seed(cfg.run.seed, episode ^ 0x53454E53));
         let mut bias_scale = [0.0; 4];
         let mut noise_scale = [0.0; 4];
@@ -271,7 +392,19 @@ impl Sensor {
             allan_accel,
             latency,
             delayed: VecDeque::with_capacity(latency + 1),
+            pitot_profile,
+            last_pitot_range: PitotRangeStatus::InRange,
         }
+    }
+
+    /// Active pitot range profile.
+    pub fn pitot_profile(&self) -> PitotProfile {
+        self.pitot_profile
+    }
+
+    /// Named range status of the most recently sampled pitot reading.
+    pub fn pitot_range(&self) -> PitotRangeStatus {
+        self.last_pitot_range
     }
 
     pub fn measure(&mut self, ctx: SampleContext<'_>) -> Frame {
@@ -404,9 +537,16 @@ impl Sensor {
             saturated = true;
         }
         let pitot = out.pitot;
-        if pitot.abs() > self.cfg.pitot_sat || pitot > i16::MAX as f64 || pitot < i16::MIN as f64 {
+        let full_scale = self.pitot_profile.full_scale_pa(self.cfg.pitot_sat);
+        let pitot_range = classify_pitot_range(pitot, full_scale);
+        self.last_pitot_range = pitot_range;
+        if pitot_range.is_out_of_range() {
             saturated = true;
         }
+        // The wire field is i16 Pa and its layout is frozen. This clamp is an
+        // encoding step only: the named reason already lives in `pitot_range`
+        // and `Sensor::pitot_range`, so an out-of-range reading is never
+        // silently treated as in-range.
         let pitot_dp = clamp(pitot, i16::MIN as f64, i16::MAX as f64).round() as i16;
         let pitot_valid = norm(v_rel) > 3.0 && pitot_dp > 0;
         if out.spike {
