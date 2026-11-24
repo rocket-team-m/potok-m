@@ -23,6 +23,13 @@
 //! the integral of those velocities. One launch-to-landing pass is idempotent:
 //! a stage never deploys twice and `Landed` fires exactly once.
 //!
+//! Calibration: each settled descent speed is a typed [`DescentCalibration`]
+//! input (value + source). Both shipped defaults are explicitly `PLACEHOLDER`:
+//! no drop test exists in this tree. [`ParachuteConfig::calibration_harness`]
+//! is the only promotion path to `MEASURED` and refuses it without signed
+//! [`SignedProvenance`] bound to the exact f64 value. `config/parachute.toml`
+//! is the ingest example. No value here is fitted to a landing target.
+//!
 //! Integration note for the crate owner: this file is intentionally not wired
 //! into `lib.rs` by this task. Add `pub mod parachute;` there, hold
 //! `ParachuteConfig` in `Config` with `#[serde(default)]`, and call
@@ -32,6 +39,7 @@
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 /// Under canopy the AI has no command path at all. Not a config knob: recovery
 /// is classical hardware logic and must not become controllable.
@@ -94,14 +102,120 @@ impl DeployTrigger {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+/// Authority behind a descent speed. Only `Measured` may claim a drop test,
+/// and it is unreachable without a signature over the exact attested value.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum DescentSource {
+    /// Derived from an explicit stated basis; still not a drop test.
+    Calculated { basis: String },
+    /// Engineering stand-in: no measurement, no derivation claim.
+    Placeholder { note: String },
+    /// Drop-test value; requires a signed provenance record.
+    Measured { provenance: SignedProvenance },
+}
+
+impl DescentSource {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Calculated { .. } => "CALCULATED",
+            Self::Placeholder { .. } => "PLACEHOLDER",
+            Self::Measured { .. } => "MEASURED",
+        }
+    }
+
+    pub fn is_measured(&self) -> bool {
+        matches!(self, Self::Measured { .. })
+    }
+}
+
+/// Attestation of a real drop test. `signature` is a SHA-256 digest over the
+/// canonical statement in [`provenance_signature`]: a process gate, not PKI.
+/// It binds the record id, signer, date AND the exact speed bit pattern, so a
+/// signature cannot be carried over to a different value or stage.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SignedProvenance {
+    pub record_id: String,
+    pub signer: String,
+    pub date: String,
+    pub signature: String,
+}
+
+/// Canonical statement an operator signs (records its digest as `signature`).
+pub fn provenance_signature(value_mps: f64, p: &SignedProvenance) -> String {
+    let statement = format!(
+        "potok-m.sim.parachute.descent.v1\nvalue_bits={:016x}\nrecord_id={}\nsigner={}\ndate={}\n",
+        value_mps.to_bits(),
+        p.record_id,
+        p.signer,
+        p.date
+    );
+    let mut out = String::with_capacity(64);
+    for byte in Sha256::digest(statement.as_bytes()) {
+        out.push_str(&format!("{byte:02x}"));
+    }
+    out
+}
+
+impl SignedProvenance {
+    /// Issue an attestation for `value_mps` (the harness's signing side).
+    pub fn sign(
+        value_mps: f64,
+        record_id: impl Into<String>,
+        signer: impl Into<String>,
+        date: impl Into<String>,
+    ) -> Self {
+        let this = Self {
+            record_id: record_id.into(),
+            signer: signer.into(),
+            date: date.into(),
+            signature: String::new(),
+        };
+        let signature = provenance_signature(value_mps, &this);
+        Self { signature, ..this }
+    }
+}
+
+/// Typed descent input. `value_mps` is the attested value; when absent (legacy
+/// numeric-only config) the stage's `target_descent_mps` is what the source
+/// label applies to. The harness binds the two and never infers provenance.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DescentCalibration {
+    pub value_mps: Option<f64>,
+    pub source: DescentSource,
+}
+
+impl Default for DescentCalibration {
+    fn default() -> Self {
+        Self {
+            value_mps: None,
+            source: DescentSource::Placeholder {
+                note: "legacy numeric-only config; no drop test".to_string(),
+            },
+        }
+    }
+}
+
+impl DescentCalibration {
+    /// Effective speed: typed attested value when supplied, numeric mirror
+    /// otherwise. Validation requires them to agree when both are present.
+    pub fn value_mps(&self, mirror_mps: f64) -> f64 {
+        self.value_mps.unwrap_or(mirror_mps)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct StageConfig {
     pub trigger: DeployTrigger,
-    /// Positive magnitude of the settled descent rate, m/s.
+    /// Positive magnitude of the settled descent rate, m/s. Runtime mirror of
+    /// the typed [`DescentCalibration`]; validation binds the two.
     pub target_descent_mps: f64,
     /// First-order time constant for inflation and descent relaxation, s.
     pub inflation_s: f64,
+    #[serde(default)]
+    pub descent: DescentCalibration,
 }
 
 impl Default for StageConfig {
@@ -110,6 +224,12 @@ impl Default for StageConfig {
             trigger: DeployTrigger::TimeSinceApogeeS { value: 2.0 },
             target_descent_mps: 25.0,
             inflation_s: 1.2,
+            descent: DescentCalibration {
+                value_mps: Some(25.0),
+                source: DescentSource::Placeholder {
+                    note: "CHUTE01 design stand-in; no drop test exists".to_string(),
+                },
+            },
         }
     }
 }
@@ -141,6 +261,12 @@ impl Default for ParachuteConfig {
                 trigger: DeployTrigger::AltitudeM { value: 1500.0 },
                 target_descent_mps: 6.5,
                 inflation_s: 2.0,
+                descent: DescentCalibration {
+                    value_mps: Some(6.5),
+                    source: DescentSource::Placeholder {
+                        note: "CHUTE01 design stand-in; no drop test exists".to_string(),
+                    },
+                },
             },
         }
     }
@@ -226,7 +352,81 @@ fn validate_stage(prefix: &'static str, s: &StageConfig) -> Result<(), ChuteErro
     Ok(())
 }
 
+fn valid_signed_text(s: &str) -> bool {
+    !s.trim().is_empty() && !s.chars().any(char::is_control)
+}
+
+fn validate_descent_calibration(
+    value_field: &'static str,
+    source_field: &'static str,
+    mirror_mps: f64,
+    cal: &DescentCalibration,
+) -> Result<(), ChuteError> {
+    if let Some(v) = cal.value_mps {
+        finite(value_field, v)?;
+        if v != mirror_mps {
+            return Err(ChuteError::new(
+                value_field,
+                format!(
+                    "{v} disagrees with target_descent_mps {mirror_mps}; set both to the same attested value"
+                ),
+            ));
+        }
+    }
+    match &cal.source {
+        DescentSource::Calculated { basis } if !valid_signed_text(basis) => Err(ChuteError::new(
+            source_field,
+            "CALCULATED needs a non-empty basis; state the derivation or use PLACEHOLDER",
+        )),
+        DescentSource::Placeholder { note } if !valid_signed_text(note) => Err(ChuteError::new(
+            source_field,
+            "PLACEHOLDER needs a non-empty note; keep this value explicitly unmeasured",
+        )),
+        DescentSource::Measured { provenance } => {
+            if !valid_signed_text(&provenance.record_id)
+                || !valid_signed_text(&provenance.signer)
+                || !valid_signed_text(&provenance.date)
+            {
+                return Err(ChuteError::new(
+                    source_field,
+                    "MEASURED needs a non-empty record_id, signer and date; sign a real drop test or revert to PLACEHOLDER",
+                ));
+            }
+            let expected = provenance_signature(mirror_mps, provenance);
+            if provenance.signature != expected {
+                return Err(ChuteError::new(
+                    source_field,
+                    format!(
+                        "MEASURED signature does not attest this value: expected {expected}, got {:?}; sign the drop-test record or keep the input PLACEHOLDER/CALCULATED",
+                        provenance.signature
+                    ),
+                ));
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
 impl ParachuteConfig {
+    /// Calibration harness: the only promotion path to `MEASURED`. Audits both
+    /// stages before any flight; a value cannot be tuned to a landing target
+    /// and thereby acquire provenance. LOUD on failure, names the exact field.
+    pub fn calibration_harness(&self) -> Result<(), ChuteError> {
+        validate_descent_calibration(
+            "drogue.descent.value_mps",
+            "drogue.descent.source",
+            self.drogue.target_descent_mps,
+            &self.drogue.descent,
+        )?;
+        validate_descent_calibration(
+            "main.descent.value_mps",
+            "main.descent.source",
+            self.main.target_descent_mps,
+            &self.main.descent,
+        )
+    }
+
     /// Called even when `enabled = false`: a malformed config must never lie
     /// dormant waiting for someone to switch the feature on.
     pub fn validate(&self) -> Result<(), ChuteError> {
@@ -280,18 +480,17 @@ impl ParachuteConfig {
             (
                 DeployTrigger::TimeSinceApogeeS { value: d },
                 DeployTrigger::TimeSinceApogeeS { value: m },
-            ) => {
-                if m <= d {
-                    return Err(ChuteError::new(
-                        "main.trigger",
-                        format!(
-                            "main offset {m} must be AFTER drogue offset {d}; main cannot precede drogue"
-                        ),
-                    ));
-                }
+            ) if m <= d => {
+                return Err(ChuteError::new(
+                    "main.trigger",
+                    format!(
+                        "main offset {m} must be AFTER drogue offset {d}; main cannot precede drogue"
+                    ),
+                ));
             }
             _ => {}
         }
+        self.calibration_harness()?;
         Ok(())
     }
 }
@@ -405,10 +604,7 @@ impl LandingDispersion {
             ("chute_deploy_altitude_m", self.deploy_altitude_m),
             ("chute_deploy_x_m", self.deploy_pos_m[0]),
             ("chute_deploy_y_m", self.deploy_pos_m[1]),
-            (
-                "chute_landing_dispersion_m",
-                self.lateral_offset_m(),
-            ),
+            ("chute_landing_dispersion_m", self.lateral_offset_m()),
             ("chute_landing_radius_m", self.radial_from_pad_m()),
         ]
     }
@@ -534,18 +730,11 @@ impl Parachute {
             return Ok(());
         }
 
-        let (stage, settled, stable) = match self.st.phase {
-            ChutePhase::MainInflating | ChutePhase::Main => (
-                self.cfg.main,
-                self.cfg.main.target_descent_mps,
-                ChutePhase::Main,
-            ),
-            _ => (
-                self.cfg.drogue,
-                self.cfg.drogue.target_descent_mps,
-                ChutePhase::Drogue,
-            ),
+        let (stage, stable) = match self.st.phase {
+            ChutePhase::MainInflating | ChutePhase::Main => (&self.cfg.main, ChutePhase::Main),
+            _ => (&self.cfg.drogue, ChutePhase::Drogue),
         };
+        let settled = stage.descent.value_mps(stage.target_descent_mps);
 
         // Main only considered after drogue latched; a mixed trigger pair can
         // therefore never invert the stages even if its numbers overlap.
@@ -562,10 +751,8 @@ impl Parachute {
         let alpha_w = 1.0 - (-dt / self.cfg.wind_coupling_s).exp();
         let target_vz = -settled;
         let vz = self.st.vz_mps + (target_vz - self.st.vz_mps) * alpha;
-        let vx = self.st.vel_xy_mps[0]
-            + (ctx.true_wind_xy[0] - self.st.vel_xy_mps[0]) * alpha_w;
-        let vy = self.st.vel_xy_mps[1]
-            + (ctx.true_wind_xy[1] - self.st.vel_xy_mps[1]) * alpha_w;
+        let vx = self.st.vel_xy_mps[0] + (ctx.true_wind_xy[0] - self.st.vel_xy_mps[0]) * alpha_w;
+        let vy = self.st.vel_xy_mps[1] + (ctx.true_wind_xy[1] - self.st.vel_xy_mps[1]) * alpha_w;
         self.st.inflation = (self.st.inflation + (1.0 - self.st.inflation) * alpha).min(1.0);
         if self.st.inflation >= 0.999 {
             self.st.phase = stable;

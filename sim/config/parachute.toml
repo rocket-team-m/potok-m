@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SIMCANOPY — typed descent calibration inputs for the two-stage canopy.
+#
+# This file deserializes directly into `potok_sim::parachute::ParachuteConfig`
+# (it is NOT a full `sim/config/default.toml`). `ParachuteConfig::validate()`
+# runs the calibration harness even while `enabled = false`.
+#
+# NO DROP TEST EXISTS IN THIS TREE. Both speeds below are explicitly
+# PLACEHOLDER: they are the CHUTE01 design stand-ins, not measurements and not
+# fitted to any landing target. Promoting either to `kind = "measured"` without
+# signed provenance is refused loudly by the harness; see
+# `SignedProvenance::sign` / `provenance_signature` in `core/src/parachute.rs`
+# for the canonical SHA-256 statement that a real drop test would sign.
+#
+# Never change a speed to make a simulated landing land nearer the pad. That
+# is target-fitting, not calibration. Only a signed drop-test record may move
+# `value_mps`, and it must be mirrored exactly in `target_descent_mps`.
+
+enabled = false
+require_descent_confirm = true
+wind_coupling_s = 3.0       # s, canopy -> true-wind first-order coupling (model, not measured)
+landing_altitude_m = 0.0    # m AGL, one-shot landing event
+
+[drogue]
+trigger = { kind = "time_since_apogee_s", value = 2.0 }
+target_descent_mps = 25.0   # runtime mirror of [drogue.descent].value_mps
+inflation_s = 1.2
+
+[drogue.descent]
+value_mps = 25.0
+source = { kind = "placeholder", note = "CHUTE01 design stand-in; no drop test exists" }
+
+[main]
+trigger = { kind = "altitude_m", value = 1500.0 }
+target_descent_mps = 6.5    # runtime mirror of [main.descent].value_mps
+inflation_s = 2.0
+
+[main.descent]
+value_mps = 6.5
+source = { kind = "placeholder", note = "CHUTE01 design stand-in; no drop test exists" }
+
+# MEASURED form (not used here; no record to attest):
+# source = { kind = "measured", provenance = { record_id = "...", signer = "...",
+#            date = "YYYY-MM-DD", signature = "<64 hex digits from SignedProvenance::sign>" } }
