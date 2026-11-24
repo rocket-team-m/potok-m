@@ -304,10 +304,10 @@
       "teacher_v2_s2.pt": "b2a0a521c7e70070c1f704d776200d643e82ec3c58732738b0756e3f9a9bb3b2",
       "teacher_v2_s3.pt": "6d4d89d2bd896808edbbe40c176354f51c2186681da7fb7d2a91066812f4a968"
     },
-    "generated_at_utc": "2026-11-24T00:25:43+00:00",
-    "git_head": "07a5e43ebcd123065227665a5d6b71c46f0acd7d",
+    "generated_at_utc": "2026-11-24T00:28:34+00:00",
+    "git_head": "65e06bbdac3f348a8178829d348710d556998707",
     "harness": "scripts/ablation_residual.py",
-    "harness_sha256": "2fa2269374d458fb8e78a4bc50c55c6cf5981da4779781efa10b79a5130d91d6",
+    "harness_sha256": "09481e8550dc067cae4665b1e767822b437a3316ddd96dc00fd8c5e75dcbf489",
     "heldout": "ai/out/final_v3_postpump/data/held-out/validation.bin",
     "heldout_manifest_sha256": "a9ff19947618f17790f1257ef6f7e85ba537915f5a2aca782befefa874db675e",
     "heldout_sha256": "fdc1d1400b1c5f111e21f79dead37afa1dd9f058fe457edb78037dc6ebe89807",
@@ -2206,7 +2206,7 @@
       }
     }
   },
-  "sim_source": "read-only scripts/ab_control_v3 on git 07a5e43ebcd123065227665a5d6b71c46f0acd7d; oracle uses run_episode_with_oracle / fin_accel_command",
+  "sim_source": "read-only scripts/ab_control_v3 on git 65e06bbdac3f348a8178829d348710d556998707; oracle uses run_episode_with_oracle / fin_accel_command",
   "students": [
     {
       "definition": "no TSV; Simulator::run_episode ControlMode::None; paired gate control",

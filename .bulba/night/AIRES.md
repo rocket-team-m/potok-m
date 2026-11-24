@@ -7,7 +7,7 @@
 
 Exactly four files:
 
-- `scripts/ablation_residual.py` (new, executable, sha256 `2fa2269374d458fb8e78a4bc50c55c6cf5981da4779781efa10b79a5130d91d6`).
+- `scripts/ablation_residual.py` (new, executable, sha256 `09481e8550dc067cae4665b1e767822b437a3316ddd96dc00fd8c5e75dcbf489`).
 - `scripts/ablation_residual.json` / `scripts/ablation_residual.md` (new; generated evidence and table report).
 - this report.
 
@@ -87,7 +87,7 @@ Unweakened limits reused verbatim: deployment lateral ≤ 1000 m and apogee ≥ 
 | helper source / binary | `1f5564e30d66d82e081e5e435bcac3932a862638163cb0fac9a7261920559fed` / `c8fea0bbee7c8e8604a8ad8575aee5b0ba12073ae7570766941e935e12935e36` |
 | dynamics source | `6159cf4bd24862a8ac89f97529e1133d49ef6bd8f6ba2289f2b4d70987063cc2` |
 | v5 harness / v5 report | `98cc203a7452a5bc58a043fae64cfc7665da100ce3959a5b558827ddfb079e90` / `ae61b430b957c7d86d65de9ca83658dbfb7cb5448bc587e8dc2452ff6328ae9a` |
-| harness / git HEAD | `2fa2269374d458fb8e78a4bc50c55c6cf5981da4779781efa10b79a5130d91d6` / `07a5e43ebcd123065227665a5d6b71c46f0acd7d` |
+| harness / git HEAD | `09481e8550dc067cae4665b1e767822b437a3316ddd96dc00fd8c5e75dcbf489` / `07a5e43ebcd123065227665a5d6b71c46f0acd7d` |
 | Python / torch / numpy / sample_dt | `3.13.15` / `2.15.0+cpu` / `2.5.5` / `0.02 s` |
 
 Full per-arm assisted-trajectory SHA-256 map is in `ablation_residual.json:provenance.assisted_trajectory_sha256`.
@@ -97,6 +97,7 @@ Full per-arm assisted-trajectory SHA-256 map is in `ablation_residual.json:prove
 - `residual_on` **exactly reproduces** the shipped `ab_report_v5.json` `teacher_v2` assisted aggregates on all three seeds (deployment lateral, apogee, whole-trajectory RMS; 1e-6 relative tolerance). This is the check that the new harness did not change the shipped arm — it passed.
 - Seed-1 zero-command sidecar is bit-identical to the frozen post-FIXPUMP held-out trajectory (`9b1d680d…`), the loud check that the helper is the corrected-physics binary.
 - `sha256sum scripts/ablation_residual.py` equals `provenance.harness_sha256` after the final run.
+- Determinism: three independent runs (canonical plus two into `/tmp/opencode/ablation_residual_repeat{2}`) produced byte-identical `seeds`, `model_quality`, `fidelity` and `gates` JSON sections; only `generated_at_utc` differs.
 - `ai/.venv/bin/ruff check scripts/ablation_residual.py` — All checks passed; `ruff format --check` — already formatted.
 - `ai/.venv/bin/python scripts/ablation_residual.py` — exit 1 (gate verdict), both report files written. No test was skipped or deleted.
 

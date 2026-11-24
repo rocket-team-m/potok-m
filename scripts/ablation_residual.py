@@ -68,6 +68,14 @@ ARM_DEFINITIONS = {
 }
 
 
+def rel(path: Path) -> str:
+    """Printable path for repo-relative or external --out-* locations."""
+    try:
+        return str(path.relative_to(ROOT))
+    except ValueError:
+        return str(path)
+
+
 def verify_inputs() -> tuple[dict, dict, dict, list[int], dict]:
     """Loud arm-identity checks. No substitute export, split or physics is allowed."""
     for path in (
@@ -717,7 +725,7 @@ def main() -> None:
 
     args.out_json.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     args.out_md.write_text(markdown(report))
-    print(f"wrote {args.out_json.relative_to(ROOT)} and {args.out_md.relative_to(ROOT)}")
+    print(f"wrote {rel(args.out_json)} and {rel(args.out_md)}")
     print(
         f"verdict: {report['verdict']['status']} (exit {report['exit_code']}), "
         f"gates failed={report['verdict']['gates_failed']}, blockers={len(blockers)}"

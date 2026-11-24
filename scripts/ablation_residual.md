@@ -83,8 +83,8 @@ Verdict: **FAIL** (exit 1). Simulator measurement only; no win is claimed unless
 
 | field | value |
 |---|---|
-| generated_at_utc | `2026-11-24T00:25:43+00:00` |
-| git_head | `07a5e43ebcd123065227665a5d6b71c46f0acd7d` |
+| generated_at_utc | `2026-11-24T00:28:34+00:00` |
+| git_head | `65e06bbdac3f348a8178829d348710d556998707` |
 | config | `ai/out/v3_final/sim.toml` |
 | config_sha256 | `9c34e71f9d10bcf081c31f15f5332f7bb2fac04dddb28009a27cd30987ab5e91` |
 | config_hash | `9c34e71f9d10bcf081c31f15f5332f7bb2fac04dddb28009a27cd30987ab5e91` |
@@ -114,7 +114,7 @@ Verdict: **FAIL** (exit 1). Simulator measurement only; no win is claimed unless
 | arm_definitions | `{"classical_only": "clip(physics_baseline); learned correction removed = ResidualPolicy(enabled=False)", "oracle_gtheta": "run_episode_with_oracle / fin_accel_command; positive control", "residual_off": "clip(export_delta); classical superposition removed", "residual_on": "clip(physics_baseline + export_delta); shipped all-fix v5 arm", "zero_command": "no TSV; Simulator::run_episode ControlMode::None; paired gate control"}` |
 | source_of_off_semantics | `residual_policy.py:139-149 (gain*correction, enabled=False -> baseline.clone()); physics.py:53-56 final_command(residual=True) = baseline + prediction` |
 | harness | `scripts/ablation_residual.py` |
-| harness_sha256 | `2fa2269374d458fb8e78a4bc50c55c6cf5981da4779781efa10b79a5130d91d6` |
+| harness_sha256 | `09481e8550dc067cae4665b1e767822b437a3316ddd96dc00fd8c5e75dcbf489` |
 | helper | `scripts/ab_control_v3/src/main.rs` |
 | helper_sha256 | `1f5564e30d66d82e081e5e435bcac3932a862638163cb0fac9a7261920559fed` |
 | helper_binary | `scripts/ab_control_v3/target/release/ab-control-v3` |
