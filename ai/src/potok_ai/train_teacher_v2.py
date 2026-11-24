@@ -35,6 +35,7 @@ import argparse
 import hashlib
 import json
 import random
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
@@ -47,6 +48,8 @@ from torch.optim import AdamW, Optimizer
 
 from .calibration import confidence_target, correctness, expected_calibration_error, sigmoid
 from .conf_integration import DISJOINT_ECE_SOURCE, IN_SAMPLE_ECE_SOURCE, split_confidence_score
+from .curriculum import STAGES as CURRICULUM_STAGES
+from .curriculum import AdversarialCurriculum, refuse_eval_episode, refuse_eval_episodes
 from .data import (
     SMART_COND_FEATURES,
     SMART_FEATURES,
@@ -55,6 +58,7 @@ from .data import (
     load_episodes,
 )
 from .loopwm import LoopWM, LoopWMConfig
+from .objective import IMPACT_FORMULA, ImpactObjective
 from .optim import K3Config, MuonPlus
 from .physics import final_command, physics_baseline
 from .residual_policy import (
@@ -156,6 +160,23 @@ REWARD_FORMULA = (
     "R = w_lat*(mean|b-u| - mean|b+t-u|) - w_eff*mean|u| - w_risk*soft_violations; "
     "hard gate: finite u and |u| <= g_max rejects the candidate from the group baseline"
 )
+# Stage-scoped adversarial context; only train=True window builders read it.
+_ADV_CONTEXT: ContextVar[tuple[AdversarialCurriculum, str, dict[str, int]] | None] = ContextVar(
+    "potok_adversarial", default=None
+)
+
+
+def adversarial_budget(stage: str, adv: AdversarialCurriculum) -> float:
+    """Map a pipeline stage to the adversary's cap-bounded sampling budget.
+
+    sft -> calm (clean), privileged -> gust, dagger -> shear, distill -> sensor_fault.
+    RLVR and other non-training stages get no budget.
+    """
+    if stage in CURRICULUM_STAGES:
+        return adv.intensity_for_stage(stage)
+    if stage in STAGE_ORDER:
+        return adv.intensity(STAGE_ORDER.index(stage))
+    return 0.0
 
 
 def child_seed(seed: int, name: str) -> int:
@@ -180,6 +201,7 @@ class TeacherV2Config:
     data: Path
     out: Path
     stage: str = "all"
+    adversarial: bool = False  # opt-in: bounded adversarial windows in training stages
     seed: int = 1
     device: str = "cpu"
     epochs: int = 1
@@ -197,6 +219,9 @@ class TeacherV2Config:
     spectral_residual: bool = False
     spectral_bound: float = 1.0
     residual_policy: bool = True  # SHIELD02: bounded superposition in teacher stages
+    # AIOBJ: the privileged impact objective is the default when truth is available.
+    # --legacy-objective restores the supervised-only privileged stage.
+    legacy_objective: bool = False
     # Explicit opt-in to the pre-v3 +/-1 m/s^2 student head (AITRAINIDEAL B1).
     # Default off: the student must be able to represent the v3 target.
     legacy_student_bound: bool = False
@@ -381,13 +406,31 @@ def partition_episodes(
 # Data helpers.
 # ---------------------------------------------------------------------------
 def _window_batches(
-    episodes: list[Episode], cfg: TeacherV2Config
+    episodes: list[Episode], cfg: TeacherV2Config, *, train: bool = False
 ) -> list[tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[int | None]]]:
-    """Materialise tiny CPU windows once; return (window, cond, target, episode ids)."""
+    """Materialise tiny CPU windows once; return (window, cond, target, episode ids).
+
+    Only ``train=True`` reads the stage-scoped adversarial context. Eval and
+    verifier windows stay untouched, and an eval cell is refused before a single
+    augmentation draw.
+    """
+    ctx = _ADV_CONTEXT.get() if train else None
     samples: list[tuple[np.ndarray, np.ndarray, np.ndarray, int | None]] = []
     for episode in episodes:
         dataset = SmartWindowDataset([episode], window=cfg.window, limit=cfg.limit)
-        for window, cond, target in dataset.samples:
+        for window_index, (window, cond, target) in enumerate(dataset.samples):
+            if ctx is not None:
+                adv, stage, stats = ctx
+                refuse_eval_episode(episode)
+                stats["offered"] += 1
+                result = adv.perturb(
+                    window,
+                    tag=f"{stage}:{episode.index}:{window_index}",
+                    intensity=adversarial_budget(stage, adv),
+                )
+                if result.won:
+                    stats["won"] += 1
+                window = result.window
             samples.append((window, cond, target, episode.index))
     if cfg.limit is not None:
         samples = samples[: cfg.limit]
@@ -509,9 +552,7 @@ def _confidence_hook(
     with torch.no_grad():
         for batch in _window_batches(inner, cfg):
             window, cond, target = (t.to(device) for t in batch[:3])
-            _command, logit, error = _predict(
-                model, window, cond, target, cfg=cfg, student=student
-            )
+            _command, logit, error = _predict(model, window, cond, target, cfg=cfg, student=student)
             logits.extend(logit.tolist())
             errors.extend(error.tolist())
     if not logits or not np.isfinite(logits).all() or not np.isfinite(errors).all():
@@ -586,8 +627,10 @@ def _supervised_loss(
     jepa: JepaObjective | None = None,
     privileged_head: nn.Linear | None = None,
     privileged_target: torch.Tensor | None = None,
+    impact: ImpactObjective | None = None,
+    privileged_truth: torch.Tensor | None = None,
 ) -> dict[str, Any]:
-    """Command + confidence + optional JEPA/entropy/privileged auxiliary terms."""
+    """Command + confidence + optional JEPA/entropy/impact/privileged terms."""
     window, cond, target, _ = batch
     latent, info = model.refine(window, cond)
     raw = model.head_logits(latent)
@@ -606,11 +649,18 @@ def _supervised_loss(
         if privileged_target is None or privileged_target.shape[0] != window.shape[0]:
             raise ValueError("privileged target must be one row per window")
         total = total + F.mse_loss(privileged_head(latent[:, -1]), privileged_target)
+    impact_terms = None
+    if impact is not None:
+        if privileged_truth is None or privileged_truth.shape[0] != window.shape[0]:
+            raise ValueError("impact objective needs one privileged truth row per window")
+        impact_terms = impact.loss(command, window, privileged_truth)
+        total = total + impact_terms.loss
     return {
         "loss": total,
         "main": float(main.detach()),
         "conf": float(conf.detach()),
         "entropy": float(entropy.detach()),
+        "impact": float(impact_terms.loss.detach()) if impact_terms is not None else 0.0,
     }
 
 
@@ -739,7 +789,7 @@ def _stage_sft(
     device: torch.device,
 ) -> StageReport:
     optimizer = _build_optimizer(list(model.named_parameters()), cfg, cfg.lr)
-    batches = _window_batches(fit, cfg)
+    batches = _window_batches(fit, cfg, train=True)
     steps = 0
     entropy = 0.0
     model.train()
@@ -827,6 +877,27 @@ def _privileged_snapshot(builder: Any, episode_index: int, tick: int, *, where: 
     return snapshot
 
 
+def _privileged_rows(
+    builder: Any, ids: list[int | None], cfg: TeacherV2Config, *, where: str
+) -> torch.Tensor:
+    """One 22-slot truth row per window, keyed by episode and window offset.
+
+    ``_window_batches`` emits each episode's windows in order starting at tick
+    0, so the n-th window of an episode ends at tick ``window - 1 + n``.
+    """
+    counters: dict[int, int] = {}
+    rows: list[np.ndarray] = []
+    for episode_index in ids:
+        if episode_index is None:
+            raise ValueError(f"{where}: the impact objective needs a numeric episode index")
+        index = int(episode_index)
+        offset = counters.get(index, 0)
+        counters[index] = offset + 1
+        tick = cfg.window - 1 + offset
+        rows.append(_privileged_snapshot(builder, index, tick, where=where)[:TRUTH_PRIV_END])
+    return torch.as_tensor(np.stack(rows), dtype=torch.float32)
+
+
 def _stage_privileged(
     model: LoopWM,
     cfg: TeacherV2Config,
@@ -847,8 +918,12 @@ def _stage_privileged(
     ]
     if head is not None:
         parameters += [(f"privileged_head.{name}", p) for name, p in head.named_parameters()]
+    impact = None if cfg.legacy_objective else ImpactObjective()
+    if impact is not None and not getattr(builder, "records", None):
+        impact = None  # no truth sidecar records: the privilege cannot be read
+    objective_source = "impact" if impact is not None else "legacy"
     optimizer = _build_optimizer(parameters, cfg, cfg.lr)
-    batches = _window_batches(fit, cfg)
+    batches = _window_batches(fit, cfg, train=True)
     steps, entropy, privileged_terms = 0, 0.0, 0
     model.train()
     jepa.train()  # type: ignore[attr-defined]
@@ -867,6 +942,11 @@ def _stage_privileged(
                         "privileged latent is non-finite or all zero: the teacher never saw truth"
                     )
                 privileged_terms += 1
+            privileged_truth = (
+                _privileged_rows(builder, batch[3], cfg, where="impact objective").to(device)
+                if impact is not None
+                else None
+            )
             result = _supervised_loss(
                 model,
                 (window, cond, target, batch[3]),
@@ -874,6 +954,8 @@ def _stage_privileged(
                 jepa=jepa,
                 privileged_head=head,
                 privileged_target=z_priv,
+                impact=impact,
+                privileged_truth=privileged_truth,
             )
             optimizer.zero_grad(set_to_none=False)
             result["loss"].backward()
@@ -892,6 +974,16 @@ def _stage_privileged(
         "privileged_source": "privileged_teacher" if builder is not None else "disabled",
         "truth_sidecar": str(cfg.truth_sidecar) if cfg.truth_sidecar is not None else None,
         "privileged_batches": privileged_terms,
+        "objective": {
+            "source": objective_source,
+            "legacy": cfg.legacy_objective,
+            "formula": IMPACT_FORMULA if impact is not None else None,
+            "reason": (
+                None
+                if impact is not None
+                else ("legacy_objective" if cfg.legacy_objective else "no_truth_sidecar_records")
+            ),
+        },
         "eval_label_blind": True,
     }
     return StageReport(
@@ -1326,7 +1418,7 @@ def _stage_distill(
         cfg,
         cfg.student_lr,  # type: ignore[attr-defined]
     )
-    batches = _window_batches(fit, cfg)
+    batches = _window_batches(fit, cfg, train=True)
     if not cfg.legacy_student_bound:
         assert_command_bound_covers(
             bound,
@@ -1386,6 +1478,12 @@ def run(cfg: TeacherV2Config) -> TeacherV2Metrics:
     fit, inner, held_ids = partition_episodes(
         load_episodes(cfg.data), seed=cfg.seed, n_held_out=cfg.n_inner_held_out
     )
+    adv = AdversarialCurriculum(seed=cfg.seed) if cfg.adversarial else None
+    if adv is not None:
+        # partition_episodes already refuses eval cells; refuse again at the
+        # adversarial seam so the two rules cannot drift apart.
+        refuse_eval_episodes([*fit, *inner])
+    adv_stats: dict[str, int] = {"offered": 0, "won": 0}
     if cfg.stage == "all":
         stages = list(STAGE_ORDER)
     elif cfg.stage == RLVR_STAGE:
@@ -1402,16 +1500,31 @@ def run(cfg: TeacherV2Config) -> TeacherV2Metrics:
     reward: dict[str, Any] = {}
     snapshots: list[tuple[str, dict[str, torch.Tensor]]] = []
     for stage in stages:
-        if stage == "privileged":
-            report = _stage_privileged(model, cfg, fit, inner, device)
-        elif stage == "dagger":
-            report = _stage_dagger(model, cfg, fit, inner, held_ids, device)
-        elif stage == RLVR_STAGE:
-            report = _stage_rlvr(model, cfg, fit, inner, device, digest, snapshots)
-        elif stage == "distill":
-            report = _stage_distill(model, cfg, fit, inner, device)
-        else:
-            report = _stage_sft(model, cfg, fit, inner, device)
+        token = _ADV_CONTEXT.set((adv, stage, adv_stats)) if adv is not None else None
+        try:
+            if stage == "privileged":
+                report = _stage_privileged(model, cfg, fit, inner, device)
+            elif stage == "dagger":
+                report = _stage_dagger(model, cfg, fit, inner, held_ids, device)
+            elif stage == RLVR_STAGE:
+                report = _stage_rlvr(model, cfg, fit, inner, device, digest, snapshots)
+            elif stage == "distill":
+                report = _stage_distill(model, cfg, fit, inner, device)
+            else:
+                report = _stage_sft(model, cfg, fit, inner, device)
+        finally:
+            if token is not None:
+                _ADV_CONTEXT.reset(token)
+        if adv is not None:
+            report.details["adversarial"] = {
+                "enabled": True,
+                "stage": stage,
+                "seed": adv.seed,
+                "win_rate_cap": adv.config.win_rate_cap,
+                "intensity": adversarial_budget(stage, adv),
+                "offered": adv_stats["offered"],
+                "won": adv_stats["won"],
+            }
         reports[stage] = report
         if RLVR_STAGE in stages and stage in STAGE_ORDER[:-1]:
             state = {name: value.detach().clone() for name, value in model.state_dict().items()}
@@ -1445,9 +1558,7 @@ def run(cfg: TeacherV2Config) -> TeacherV2Metrics:
     else:
         confidence_model = model
         confidence_student = False
-    confidence = _confidence_hook(
-        confidence_model, inner, cfg, device, student=confidence_student
-    )
+    confidence = _confidence_hook(confidence_model, inner, cfg, device, student=confidence_student)
 
     metrics = TeacherV2Metrics(
         stage=last.stage,
@@ -1498,6 +1609,11 @@ def build_parser() -> argparse.ArgumentParser:
             "--rlvr or --stage rlvr)"
         ),
     )
+    parser.add_argument(
+        "--adversarial",
+        action="store_true",
+        help="opt into the bounded adversarial curriculum on training windows (default off)",
+    )
     parser.add_argument("--seed", type=int, choices=SEEDS, default=1)
     parser.add_argument("--device", choices=("cpu",), default="cpu")
     parser.add_argument("--epochs", type=int, default=1)
@@ -1514,6 +1630,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--exit-entropy-alpha", type=float, default=0.01)
     parser.add_argument("--spectral-residual", action="store_true")
     parser.add_argument("--spectral-bound", type=float, default=1.0)
+    parser.add_argument(
+        "--legacy-objective",
+        action="store_true",
+        help=(
+            "keep the supervised-only privileged objective; the default adds the "
+            "privileged impact term when a v3 truth sidecar is available"
+        ),
+    )
     parser.add_argument(
         "--no-residual-policy",
         dest="residual_policy",
