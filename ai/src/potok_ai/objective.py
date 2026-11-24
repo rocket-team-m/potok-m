@@ -4,9 +4,10 @@
 The teacher's command is a two-channel fin acceleration demand in m/s^2,
 ``[roll, pitch]``. The classical baseline is unchanged; this module only adds a
 measurement term to the privileged stage's loss. It reads privileged velocity
-from the v3 truth sidecar (slots 11..13, m/s) and two *measured* sensor features
-(``a_lat_resid`` and ``drag_est``, both m/s^2, SPEC_SMART.md). Nothing here
-changes physics, the command envelope, a gate, or any flight claim.
+from the v3 truth sidecar (slots 3..5, m/s; ``sim/core/src/trajectory.rs:94-121``)
+and two *measured* sensor features (``a_lat_resid`` and ``drag_est``, both m/s^2,
+SPEC_SMART.md). Nothing here changes physics, the command envelope, a gate, or
+any flight claim.
 
 The loss is the mean over the batch of two dimensionless squared terms::
 
@@ -45,9 +46,11 @@ A_LAT_RESID_COL = 11  # m/s^2
 DRAG_EST_COL = 12  # m/s^2
 SMART_FEATURES = 14
 
-# v3 privileged truth slots (privileged_teacher.py module doc, IDEAL_DATA_RESEARCH §3).
-TRUTH_VEL_START = 11
-TRUTH_VEL_END = 14  # exclusive: vx, vy, vz in m/s
+# v3 privileged truth slots, pinned to sim/core/src/trajectory.rs:94-121 and
+# as_truth_array: vel_x/vel_y/vel_z are slots 3, 4, 5; slots 10..13 are omega/mass.
+# The old 11..14 offset read body rate/mass as velocity (off-by-slot defect).
+TRUTH_VEL_START = 3
+TRUTH_VEL_END = 6  # exclusive: vx, vy, vz in m/s
 TRUTH_DIM = 22
 
 COMMAND_CHANNELS = 2

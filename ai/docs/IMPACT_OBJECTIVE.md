@@ -37,10 +37,16 @@ dynamics.
 | `a_lat_resid` | window column 11, last frame | m/s² | lateral residual to be nulled (SPEC_SMART.md) |
 | `drag_est` | window column 12, last frame | m/s² | `cd0·q_dyn·area/mass`, measured drag per mass |
 | `u_lat`, `u_pitch` | teacher command | m/s² | fin acceleration demand |
-| `v_x, v_y, v_z` | v3 truth slots 11, 12, 13 | m/s | privileged flight state |
+| `v_x, v_y, v_z` | v3 truth slots 3, 4, 5 | m/s | privileged flight state |
 | `g0` | `G0_MPS2 = 9.80665` | m/s² | standard gravity, physical constant |
 | `dt` | `FRAME_DT_S = 0.02` | s | 50 Hz validation frame period |
 | `gamma` | `atan2(v_z, v_h)` | rad | flight-path angle; dimensionless in SI |
+
+The velocity slot is pinned to the v3 wire layout (`sim/core/src/trajectory.rs:94-121`,
+`as_truth_array`): slots 0..2 are position, 3..5 velocity, 6..9 quaternion and
+10..13 body rate/mass. The objective reads 3..5; the earlier 11..14 offset read
+omega/mass as velocity and was corrected (BRK01B). Slots 22..25 are reference
+labels and never enter the term.
 
 Both squared terms are dimensionless. They are added with coefficient **1**
 each. `g0` and `dt` are physical/measurement constants, not loss weights; there

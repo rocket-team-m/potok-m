@@ -91,6 +91,42 @@ def test_command_changes_gamma_and_loss_is_differentiable() -> None:
     assert float(command.grad.abs().sum()) > 0.0
 
 
+def test_objective_reads_velocity_slot_not_body_rate_slot() -> None:
+    """Privileged velocity is at v3 slots 3..5, not the old 11..14 offset.
+
+    Permuting the velocity slot must move the objective; disturbing the slot the
+    old code wrongly read (omega_y/omega_z/mass) must leave it untouched. This
+    falsifies the off-by-slot defect that made AIOBJ read body rate as velocity.
+    """
+    body_rate_slice = slice(11, 14)  # omega_y, omega_z, mass_kg - the old wrong read
+
+    def truth_with(velocity: list[float], body_rate: list[float]) -> torch.Tensor:
+        row = torch.zeros(1, TRUTH_DIM)
+        row[0, TRUTH_VEL_START : TRUTH_VEL_START + 3] = torch.tensor(velocity)
+        row[0, body_rate_slice] = torch.tensor(body_rate)
+        return row
+
+    # command=0 and a_lat_resid=0 isolate gamma; drag>0 keeps the flight term live.
+    window = torch.zeros(1, 2, 14)
+    window[0, -1, DRAG_EST_COL] = 5.0
+    command = torch.zeros(1, 2)
+    objective = ImpactObjective()
+
+    base_truth = truth_with([3.0, 4.0, 5.0], [10.0, 0.0, 1.0])
+    base = float(objective.loss(command, window, base_truth).loss)
+    assert base > 0.0
+
+    # Permuting two velocity components changes hypot(vx,vy) and vz, so gamma moves.
+    permuted = truth_with([3.0, 5.0, 4.0], [10.0, 0.0, 1.0])
+    after_velocity_perm = float(objective.loss(command, window, permuted).loss)
+    assert abs(after_velocity_perm - base) > 1e-3
+
+    # Disturbing the body-rate/mass slot the old code read must NOT move the loss.
+    perturbed = truth_with([3.0, 4.0, 5.0], [999.0, -999.0, 123.0])
+    after_body_rate_perm = float(objective.loss(command, window, perturbed).loss)
+    assert after_body_rate_perm == pytest.approx(base, abs=1e-12)
+
+
 def test_impact_refuses_unphysical_or_misshaped_inputs() -> None:
     command, window, truth = _batch()
     objective = ImpactObjective()
