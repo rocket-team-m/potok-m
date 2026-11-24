@@ -10,6 +10,7 @@ use crate::{
     config::Config,
     control::MAX_COMMAND_MPS2,
     error::{Result, SimError},
+    flight_replay::{self, FlightLog, FlightLogError},
     manifest::{
         verify_code_hash, verify_golden_episode, verify_measurement_inputs, verify_protocol_schema,
         verify_provenance_binding, Bounds, FileRecord, NamedRange, ProvenanceManifest,
@@ -26,6 +27,14 @@ use crate::{
 pub const QUALITY_SCHEMA_VERSION: u32 = 1;
 pub const MIN_EPISODES_PER_SPLIT: usize = 4;
 
+/// Nominal central coverage of the NEES corridor verdict. Fixed by the
+/// chi-square construction, not fitted to an outcome.
+pub const NEES_VERDICT_COVERAGE: f64 = 0.95;
+/// Allowed deviation of empirical coverage from nominal. Ten thousand draws
+/// give a ~0.002 standard error, so this is a fixed ~9-sigma band, not a
+/// threshold tuned to make an arm win.
+pub const NEES_VERDICT_COVERAGE_BAND: f64 = 0.02;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GateCheck {
     pub name: String,
@@ -40,6 +49,72 @@ pub struct QualityReport {
     pub seed: u64,
     pub checks: Vec<GateCheck>,
     pub all_passed: bool,
+}
+
+/// Typed NEES / chi-square corridor verdict. The two variants are different
+/// evidence classes, never two labels on one measurement:
+///
+/// * [`NeesCorridorVerdict::MeasuredSynthetic`] — a deterministic synthetic
+///   instrument run (`flight_replay::synthetic_nees_corridor_gate`). It proves
+///   the corridor discriminates a calibrated estimator from a biased one, and
+///   nothing about a vehicle, a sensor or a real recording.
+/// * [`NeesCorridorVerdict::NotMeasuredForRealLog`] — no real flight log and
+///   no implemented real-log path, i.e. the LOUD refusal from
+///   `flight_replay::validate_real_log_nees`.
+///
+/// Only these two statuses exist: a synthetic number can never be reported as
+/// a real measurement, and an unmeasured real log can never be reported as a
+/// pass. The `ok` field of the synthetic variant is the verdict on the
+/// estimator, not a claim of flight validation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum NeesCorridorVerdict {
+    #[serde(rename = "MEASURED_SYNTHETIC")]
+    MeasuredSynthetic {
+        ok: bool,
+        dof: usize,
+        coverage: f64,
+        empirical_coverage: f64,
+        detail: String,
+    },
+    #[serde(rename = "NOT MEASURED_FOR_REAL_LOG")]
+    NotMeasuredForRealLog { detail: String },
+}
+
+impl NeesCorridorVerdict {
+    /// Gate name used when the synthetic verdict is placed in a quality report.
+    pub const GATE_NAME: &'static str = "nees_corridor_synthetic";
+
+    pub fn status_str(&self) -> &'static str {
+        match self {
+            Self::MeasuredSynthetic { .. } => "MEASURED_SYNTHETIC",
+            Self::NotMeasuredForRealLog { .. } => "NOT MEASURED_FOR_REAL_LOG",
+        }
+    }
+
+    pub fn detail(&self) -> &str {
+        match self {
+            Self::MeasuredSynthetic { detail, .. } | Self::NotMeasuredForRealLog { detail } => {
+                detail
+            }
+        }
+    }
+
+    /// A real-log `NOT MEASURED` verdict is never a passing quality gate.
+    pub fn is_ok(&self) -> bool {
+        matches!(self, Self::MeasuredSynthetic { ok: true, .. })
+    }
+
+    pub fn as_gate_check(&self) -> GateCheck {
+        let (name, ok) = match self {
+            Self::MeasuredSynthetic { .. } => (Self::GATE_NAME, self.is_ok()),
+            Self::NotMeasuredForRealLog { .. } => ("nees_corridor_real_log", false),
+        };
+        GateCheck {
+            name: name.to_string(),
+            ok,
+            detail: self.detail().to_string(),
+        }
+    }
 }
 
 /// Conservative physical sanity limits, not tuned to any model or result.
@@ -146,6 +221,91 @@ pub fn observed_bounds(cfg: &Config, v: &ValidationSet, t: &TrajectorySet) -> Bo
 
 fn fail(dataset: &str, gate: &str, detail: impl std::fmt::Display) -> SimError {
     SimError::Quality(format!("{dataset}: {gate}: {detail}"))
+}
+
+/// Score one arm of the paired synthetic corridor gate. `biased` selects the
+/// deliberately miscalibrated arm; the paired draws are otherwise identical.
+/// Both arms are `MEASURED_SYNTHETIC` — the bias changes the estimator's
+/// verdict, never the evidence class.
+fn synthetic_nees_verdict(
+    dataset: &str,
+    seed: u64,
+    coverage: f64,
+    biased: bool,
+) -> Result<NeesCorridorVerdict> {
+    let gate = flight_replay::synthetic_nees_corridor_gate(seed, coverage)
+        .map_err(|e| fail(dataset, NeesCorridorVerdict::GATE_NAME, e))?;
+    let (inside, empirical) = if biased {
+        (gate.biased_inside, gate.biased_coverage())
+    } else {
+        (gate.good_inside, gate.good_coverage())
+    };
+    let lo = coverage - NEES_VERDICT_COVERAGE_BAND;
+    let hi = coverage + NEES_VERDICT_COVERAGE_BAND;
+    let ok = (lo..=hi).contains(&empirical);
+    let arm = if biased {
+        "biased (+2 sigma)"
+    } else {
+        "calibrated"
+    };
+    let detail = format!(
+        "{dataset}: MEASURED_SYNTHETIC NEES corridor (instrument only; no real log, no vehicle claim): \
+         {arm} estimator {inside}/{} inside chi2_{} [{:.3}, {:.3}], empirical coverage {empirical:.4} \
+         in [{lo:.2}, {hi:.2}] -> {}",
+        gate.runs,
+        gate.dof,
+        gate.corridor.lo,
+        gate.corridor.hi,
+        if ok { "PASS" } else { "FAIL" },
+    );
+    Ok(NeesCorridorVerdict::MeasuredSynthetic {
+        ok,
+        dof: gate.dof,
+        coverage,
+        empirical_coverage: empirical,
+        detail,
+    })
+}
+
+/// Verdict for the calibrated arm of the synthetic instrument gate.
+pub fn synthetic_calibrated_nees_verdict(
+    dataset: &str,
+    seed: u64,
+    coverage: f64,
+) -> Result<NeesCorridorVerdict> {
+    synthetic_nees_verdict(dataset, seed, coverage, false)
+}
+
+/// Verdict for the deliberately biased arm of the synthetic instrument gate.
+/// This fails the corridor; it is still synthetic evidence, never a real-log
+/// measurement.
+pub fn synthetic_biased_nees_verdict(
+    dataset: &str,
+    seed: u64,
+    coverage: f64,
+) -> Result<NeesCorridorVerdict> {
+    synthetic_nees_verdict(dataset, seed, coverage, true)
+}
+
+/// Real-flight-log verdict. The status comes from the LOUD guard in
+/// `flight_replay`, never from the caller: today the only honest outcome is
+/// `NOT MEASURED_FOR_REAL_LOG`. If that guard ever returns a measurement, this
+/// fails loudly rather than inventing a third, conflated status.
+pub fn real_log_nees_verdict(dataset: &str, log: &FlightLog) -> Result<NeesCorridorVerdict> {
+    match flight_replay::validate_real_log_nees(log) {
+        Err(FlightLogError::NotMeasured(msg)) => Ok(NeesCorridorVerdict::NotMeasuredForRealLog {
+            detail: format!("{dataset}: {msg}"),
+        }),
+        Err(e) => Err(fail(dataset, "nees_corridor_real_log", e)),
+        Ok(report) => Err(fail(
+            dataset,
+            "nees_corridor_real_log",
+            format!(
+                "real-log guard returned {report:?}; a real measurement has no typed status here \
+                 and must not be conflated with MEASURED_SYNTHETIC"
+            ),
+        )),
+    }
 }
 
 /// Runs every gate on one split (both `validation.bin` and its v2 sidecar, as
@@ -409,6 +569,16 @@ pub fn check_dataset(
     );
     if !bad_truth.is_empty() {
         errors.push(format!("truth_bounds: {}", bad_truth.join(", ")));
+    }
+
+    // 7. NEES / chi-square corridor verdict. SIMNEES instrument evidence only:
+    // the typed status in the detail is MEASURED_SYNTHETIC, never a real-log
+    // measurement. `real_log_nees_verdict` is the separate LOUD path.
+    let nees = synthetic_nees_verdict(dataset, v.header.seed, NEES_VERDICT_COVERAGE, false)?;
+    let nees_check = nees.as_gate_check();
+    record(&nees_check.name, nees_check.detail.clone(), nees_check.ok);
+    if !nees_check.ok {
+        errors.push(format!("{}: {}", nees_check.name, nees_check.detail));
     }
 
     if !errors.is_empty() {
