@@ -1,0 +1,273 @@
+{
+  "braking_arm": true,
+  "braking_provenance": {
+    "dagger": {
+      "boost_end_s": 9.95,
+      "cap_mps2": 10.0,
+      "enabled": true,
+      "horizon_s": 2.0,
+      "reason": null,
+      "reason_counts": {
+        "boost_gate": 42589,
+        "cap_clamped": 72727,
+        "non_finite": 0,
+        "ok": 3724,
+        "out_of_range": 0,
+        "radius_zero": 0,
+        "settled": 0
+      },
+      "source": "radial_braking_reference",
+      "stop_distance_m": 20.0
+    },
+    "privileged": {
+      "boost_end_s": 9.95,
+      "cap_mps2": 10.0,
+      "enabled": true,
+      "horizon_s": 2.0,
+      "reason": null,
+      "reason_counts": {
+        "boost_gate": 1451,
+        "cap_clamped": 0,
+        "non_finite": 0,
+        "ok": 0,
+        "out_of_range": 0,
+        "radius_zero": 0,
+        "settled": 0
+      },
+      "source": "radial_braking_reference",
+      "stop_distance_m": 20.0
+    }
+  },
+  "confidence_source": "trainer AICAL hook (disjoint inner-held-out split)",
+  "config_hash": "d29ee59a827b8485",
+  "conformal_coverage": 0.9476584022038568,
+  "data_provenance": {
+    "braking_teacher_source_sha256": "68433038e6627ad444ba19225037a04fda752628b0e9a4d03244b1fe2ebe884a",
+    "config_sha256": "9c34e71f9d10bcf081c31f15f5332f7bb2fac04dddb28009a27cd30987ab5e91",
+    "heldout_sha256": "fdc1d1400b1c5f111e21f79dead37afa1dd9f058fe457edb78037dc6ebe89807",
+    "objective_head": "f825a50912123989d2bc29103fbb649d76cd9e98",
+    "objective_source_sha256": "64400853113e70b60868add49d63b0f313a6c84b6d0a4801ebddee47be628411",
+    "objective_version": "TRUTH_VEL_START=3,TRUTH_VEL_END=6",
+    "teacher_gates_source_sha256": "8ffeb062bea860295848959a063d72060be889ca7d1f641b6a7514fdcf0bc2d3",
+    "train_sha256": "34b35e0ff67f7eeecbd895b2efde8bebcfa159c1a3e78379da6750338b6930b6",
+    "trainer_source_sha256": "244010ff7b81ab5ed1a8a86739866e29e1353d4ad1db2897820eb9695267577f",
+    "truth_sidecar_sha256": "7f25bb69124638ea7542be99f43330fda1c5248513f1971f6bfd125f5f759cb8"
+  },
+  "ece": 0.013012642904739113,
+  "ece_held_out": 0.013012642904739113,
+  "ece_source": "held-out",
+  "entropy": 0.0,
+  "entropy_enabled": false,
+  "eval_label_blind": true,
+  "fixes": {
+    "adversarial": "not opted in",
+    "braking_teacher": "explicit --braking-teacher",
+    "command_bound_mps2": 10.0,
+    "objective": "AIOBJ impact (default, truth records present)",
+    "online_shield": "not invoked by the trainer",
+    "residual_policy": "enabled by trainer default (SHIELD02)",
+    "rollout": "on_policy_student",
+    "truth_sidecar": "/home/sehaxe/potok-m/ai/out/final_v3_postpump/data/train/validation.trajectory"
+  },
+  "label_source": "reference_optimizer_v3:truth_sidecar_slots22..25",
+  "legacy_student_bound": false,
+  "module_sources": {
+    "dagger": "dagger",
+    "jepa": "jepa_v2",
+    "privileged": "privileged_teacher",
+    "residual_policy": "residual_policy",
+    "student": "gdn2_student"
+  },
+  "privileged_batches": 2300,
+  "privileged_fields_present": true,
+  "privileged_source": "privileged_teacher",
+  "ratio": 1.072482929757599,
+  "recipe": {
+    "adversarial": false,
+    "batch": 64,
+    "braking_teacher": true,
+    "calib_tol": 0.15,
+    "dagger_rounds": 1,
+    "data": "/home/sehaxe/potok-m/ai/out/final_v3_postpump/train_only/train_validation.bin",
+    "device": "cpu",
+    "entropy_weight": 1.0,
+    "epochs": 100,
+    "exit_entropy_alpha": 0.01,
+    "exit_gate_threshold": 0.5,
+    "heads": 2,
+    "jepa_weight": 0.05,
+    "k3_per_head": 0,
+    "k3_qk_clip": false,
+    "k3_qk_clip_tau": 100.0,
+    "learned_exit": false,
+    "legacy_objective": false,
+    "legacy_student_bound": false,
+    "limit": 1451,
+    "lr": 0.002,
+    "max_iters": 2,
+    "n_inner_held_out": 2,
+    "opt": "adamw",
+    "out": "/home/sehaxe/potok-m/ai/out/braking/runs/s2",
+    "residual_policy": true,
+    "rlvr_samples": 4,
+    "rlvr_temperature": 0.05,
+    "spectral_bound": 1.0,
+    "spectral_residual": false,
+    "stage": "all",
+    "student_lr": 0.001,
+    "truth_sidecar": "/home/sehaxe/potok-m/ai/out/final_v3_postpump/data/train/validation.trajectory",
+    "width": 16,
+    "window": 12
+  },
+  "residual_policy": {
+    "enabled": true,
+    "gain": -6.0647077560424805,
+    "gate_reasons": {
+      "clamped": 0,
+      "disabled": 0,
+      "non_finite": 0,
+      "ok": 10920884,
+      "zero_gain": 64
+    },
+    "source": "residual_policy"
+  },
+  "reward_provenance": {},
+  "rmse_held_out": 9.17922556197233,
+  "rmse_train": 8.558854698085502,
+  "rollout_sha256": "dfd4ff739c402e9f8a33223811ecc796eba2b15a985c1c617a9007bbc3579fbf",
+  "rollout_source": "on_policy_student:gdn2_student",
+  "seed": 2,
+  "shield": "module verified in RETRAIN-NIGHT; not invoked by the staged trainer",
+  "stage": "distill",
+  "stages": {
+    "dagger": {
+      "details": {
+        "braking": {
+          "boost_end_s": 9.95,
+          "cap_mps2": 10.0,
+          "enabled": true,
+          "horizon_s": 2.0,
+          "reason": null,
+          "reason_counts": {
+            "boost_gate": 42589,
+            "cap_clamped": 72727,
+            "non_finite": 0,
+            "ok": 3724,
+            "out_of_range": 0,
+            "radius_zero": 0,
+            "settled": 0
+          },
+          "source": "radial_braking_reference",
+          "stop_distance_m": 20.0
+        },
+        "dagger_source": "dagger",
+        "dataset_fingerprint": "95af5b9456bcdc4101c0c0b8326b7d859c3daee94f2fa3ad680402196f32450e",
+        "eval_label_blind": true,
+        "fit_samples": 104160,
+        "held_out_samples": 14880,
+        "label_source": "reference_optimizer_v3:truth_sidecar_slots22..25",
+        "privileged_fields_present": true,
+        "privileged_fields_zeroed": false,
+        "privileged_source": "v3_truth_sidecar",
+        "rollout_sha256": "dfd4ff739c402e9f8a33223811ecc796eba2b15a985c1c617a9007bbc3579fbf",
+        "rollout_source": "on_policy_student:gdn2_student",
+        "student_induced_rows": 118960,
+        "total_rows": 119040,
+        "training_target": "radial_braking_reference",
+        "truth_sidecar": "/home/sehaxe/potok-m/ai/out/final_v3_postpump/data/train/validation.trajectory"
+      },
+      "ece": 0.3688384431779737,
+      "ece_source": "in-sample",
+      "entropy": 0.0,
+      "entropy_enabled": false,
+      "ratio": 1.0708243336045904,
+      "rmse_held_out": 9.17102960337536,
+      "rmse_train": 8.564457601093167,
+      "stage": "dagger",
+      "steps": 162800
+    },
+    "distill": {
+      "details": {
+        "legacy_student_bound": false,
+        "residual_policy_target": true,
+        "student_command_bound": 10.0,
+        "student_file": "student.pt",
+        "student_source": "gdn2_student"
+      },
+      "ece": 0.3672711873659122,
+      "ece_source": "in-sample",
+      "entropy": 0.0,
+      "entropy_enabled": false,
+      "ratio": 1.072482929757599,
+      "rmse_held_out": 9.17922556197233,
+      "rmse_train": 8.558854698085502,
+      "stage": "distill",
+      "steps": 2300
+    },
+    "privileged": {
+      "details": {
+        "braking": {
+          "boost_end_s": 9.95,
+          "cap_mps2": 10.0,
+          "enabled": true,
+          "horizon_s": 2.0,
+          "reason": null,
+          "reason_counts": {
+            "boost_gate": 1451,
+            "cap_clamped": 0,
+            "non_finite": 0,
+            "ok": 0,
+            "out_of_range": 0,
+            "radius_zero": 0,
+            "settled": 0
+          },
+          "source": "radial_braking_reference",
+          "stop_distance_m": 20.0
+        },
+        "eval_label_blind": true,
+        "jepa_source": "jepa_v2",
+        "objective": {
+          "formula": "L = mean[((a_lat_resid - u_lat)/g0)^2 + (drag_est/g0)*gamma(u)^2]; gamma = atan2(vz_next, hypot(vx_next, vy_next)), vx_next = vx - u_pitch*dt, vy_next = vy + u_lat*dt, vz_next = vz",
+          "legacy": false,
+          "reason": null,
+          "source": "impact"
+        },
+        "privileged_batches": 2300,
+        "privileged_source": "privileged_teacher",
+        "truth_sidecar": "/home/sehaxe/potok-m/ai/out/final_v3_postpump/data/train/validation.trajectory"
+      },
+      "ece": 0.4811020962649225,
+      "ece_source": "in-sample",
+      "entropy": 0.0,
+      "entropy_enabled": false,
+      "ratio": 1.084712614780125,
+      "rmse_held_out": 8.604196688758332,
+      "rmse_train": 7.932236217703095,
+      "stage": "privileged",
+      "steps": 2300
+    },
+    "sft": {
+      "details": {},
+      "ece": 0.3544200994785144,
+      "ece_source": "in-sample",
+      "entropy": 0.0,
+      "entropy_enabled": false,
+      "ratio": 1.0817189374050051,
+      "rmse_held_out": 8.338065955859296,
+      "rmse_train": 7.708163061157031,
+      "stage": "sft",
+      "steps": 2300
+    }
+  },
+  "stages_completed": [
+    "sft",
+    "privileged",
+    "dagger",
+    "distill"
+  ],
+  "steps": 2300,
+  "student_command_bound": 10.0,
+  "student_induced_rows": 118960,
+  "total_rows": 119040,
+  "truth_sidecar": "/home/sehaxe/potok-m/ai/out/final_v3_postpump/data/train/validation.trajectory"
+}

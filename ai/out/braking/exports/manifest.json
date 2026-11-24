@@ -1,0 +1,59 @@
+{
+  "arm": "braking",
+  "claim": "artifacts only; no win is claimed from these exports alone",
+  "export_format": "student.pt (torch state_dict of the distill-stage student)",
+  "fixes": {
+    "adversarial": "not opted in",
+    "command_bound": 10.0,
+    "confidence": "AICAL split-conformal, disjoint inner-held-out split",
+    "objective": "AIOBJ impact default (no --legacy-objective)",
+    "online_shield": "not invoked by the trainer",
+    "residual_policy": "enabled by trainer default (SHIELD02)",
+    "rollout": "on_policy_student",
+    "truth_sidecar": "/home/sehaxe/potok-m/ai/out/final_v3_postpump/data/train/validation.trajectory"
+  },
+  "measurement": "distilled students from the BRK02 --braking-teacher four-stage retrain",
+  "rlvr": "not run (opt-in checkpoint selection only)",
+  "stage_order": [
+    "sft",
+    "privileged",
+    "dagger",
+    "distill"
+  ],
+  "students": {
+    "1": {
+      "config_hash": "1a56b56fae01bd0e",
+      "conformal_coverage": 0.9628099173553719,
+      "ece_source": "held-out",
+      "file": "teacher_braking_s1.pt",
+      "privileged_batches": 2300,
+      "rmse_held_out": 6.142736102874318,
+      "rollout_source": "on_policy_student:gdn2_student",
+      "sha256": "a4f09fc2f43ef86bdfb6d9d3695dd6bbd17e37a68c0178bd2457955a533b2bc2",
+      "student_command_bound": 10.0
+    },
+    "2": {
+      "config_hash": "d29ee59a827b8485",
+      "conformal_coverage": 0.9476584022038568,
+      "ece_source": "held-out",
+      "file": "teacher_braking_s2.pt",
+      "privileged_batches": 2300,
+      "rmse_held_out": 9.17922556197233,
+      "rollout_source": "on_policy_student:gdn2_student",
+      "sha256": "02cc9364f0fb8d20288eef99b0753c41364ea2b679a597a3afd9374a837ebe61",
+      "student_command_bound": 10.0
+    },
+    "3": {
+      "config_hash": "eb2ff3270e575b4c",
+      "conformal_coverage": 0.9628099173553719,
+      "ece_source": "held-out",
+      "file": "teacher_braking_s3.pt",
+      "privileged_batches": 2300,
+      "rmse_held_out": 9.406488908832031,
+      "rollout_source": "on_policy_student:gdn2_student",
+      "sha256": "9747bbe3a6167c23e17db09a78f7d3133a4c54380b1bd61faf129a7e6dd1db4d",
+      "student_command_bound": 10.0
+    }
+  },
+  "teacher": "BRK01 radial braking reference (privileged and DAgger targets)"
+}

@@ -1,3 +1,75 @@
+<!-- braking-ab:begin -->
+# BRK02 closed-loop A/B — exact verdict
+
+**FAIL** — 6 gates failed, `win_claimed=False`. Full evidence: `scripts/ab_report_braking.json` and `ab_report_braking.md`.
+
+| gate | result |
+|---|---|
+| eval01 rmse_ratio | PASS |
+| eval01 ece_source | PASS |
+| eval01 ece | PASS |
+| eval01 provenance | PASS |
+| eval01 seed_spread | PASS |
+| eval01 closed_loop_improvement | FAIL |
+| eval01 oracle_positive_control | FAIL |
+| seed 1 absolute gates | FAIL |
+| seed 2 absolute gates | FAIL |
+| seed 3 absolute gates | FAIL |
+| oracle_deployment_and_apogee_positive_control | FAIL |
+
+Blockers:
+- EVAL01 closed_loop_improvement failed: seed 1 lateral -14.32% is above -35%; seed 2 lateral -11.27% is above -35%; seed 3 lateral -10.88% is above -35%; seed 3 apogee 14.93% is below 15%
+- EVAL01 oracle_positive_control failed: seed 2 oracle did not raise apogee; seed 3 oracle did not raise apogee
+- braking: oracle positive control did not improve both metrics on all seeds
+
+No gate, threshold, physics value or command envelope was changed. Two counted limitations accompany this verdict: the BRK01 privileged braking target was 100% boost-gated (DAgger was active), and the helper rebuilt from current HEAD shifted input frames by 0.120691 while the flown sidecar stayed bit-identical. Neither is a gate edit.
+<!-- braking-ab:end -->
+
+---
+
+<!-- braking:begin -->
+# Braking-teacher results — BRK02 (explicit --braking-teacher)
+
+The shipped four-stage default (`sft -> privileged -> dagger -> distill`) was rerun on the frozen post-FIXPUMP split with the train-split v3 truth sidecar, **3 seeds x 100 epochs, CPU**, with the explicit `--braking-teacher` flag. The BRK01 radial reference replaces the recorded optimizer labels in the privileged and DAgger stages; every other recipe value is identical to RETRAIN-NIGHT. No physics constant, gate threshold, command envelope, confidence threshold or loss weight was tuned. `--limit 1451` caps WINDOWS per batch builder, not episodes. RLVR stayed opt-in and was not run.
+
+Held-out RMSE: **8.242817 +/- 1.822270 m/s^2** (sample std).
+
+| seed | train RMSE | held-out RMSE | ratio | disjoint ECE |
+|---:|---:|---:|---:|---:|
+| 1 | 6.221122 | 6.142736 | 0.9874 | 0.0199 |
+| 2 | 8.558855 | 9.179226 | 1.0725 | 0.0130 |
+| 3 | 8.814338 | 9.406489 | 1.0672 | 0.0148 |
+
+## Gate verdict (teacher gates only)
+
+| check | verdict | detail |
+|---|---|---|
+| rmse_ratio | PASS | three seeds, held-out/train ratio <= 1.25 |
+| ece_source | PASS | three seeds labelled with a disjoint source ['disjoint', 'held-out', 'held_out'] |
+| ece | PASS | three disjoint ECE scores <= 0.05 with coverage in [0, 1] |
+
+Closed-loop gates are reported separately in `scripts/ab_report_braking.json/.md` with the **unweakened v6 gates**; no win is claimed here. The ECE is a disjoint inner-held-out score; stage-local ECE values remain in-sample diagnostics.
+
+## Known BRK01 limitation
+
+**BRK01 defect, counted and not tuned away:** the privileged braking target is 100% boost-gated (zero demand) on seeds 1, 2, 3. DAgger emits active braking commands; the distilled student is trained from that active target. This is not a clean end-to-end braking-teacher run and no win is claimed on the strength of it.
+
+## Binding limitation — stated loudly
+
+The BRK01 target is a privileged simulator reference. The on-policy `world_step` still advances surrogate sensor features, and the v3 truth sidecar is emitted by the same simulator, so generator and verifier share a source. This is not an independent flight-truth anchor and not a flight claim.
+
+## Provenance
+
+- train sha256: `34b35e0ff67f7eeecbd895b2efde8bebcfa159c1a3e78379da6750338b6930b6`; held-out sha256: `fdc1d1400b1c5f111e21f79dead37afa1dd9f058fe457edb78037dc6ebe89807`
+- config sha256: `9c34e71f9d10bcf081c31f15f5332f7bb2fac04dddb28009a27cd30987ab5e91`; truth sidecar sha256: `7f25bb69124638ea7542be99f43330fda1c5248513f1971f6bfd125f5f759cb8`
+- trainer sha256: `244010ff7b81ab5ed1a8a86739866e29e1353d4ad1db2897820eb9695267577f`; BRK01 reference sha256: `68433038e6627ad444ba19225037a04fda752628b0e9a4d03244b1fe2ebe884a`
+- BRK01B objective sha256: `64400853113e70b60868add49d63b0f313a6c84b6d0a4801ebddee47be628411`; version `TRUTH_VEL_START=3,TRUTH_VEL_END=6` at `f825a50912123989d2bc29103fbb649d76cd9e98`
+- per-seed evidence: `ai/out/braking/runs/s*/metrics.json` and `conformal.json`; exports: `ai/out/braking/exports/manifest.json`; full summary: `ai/out/braking/summary.json`.
+<!-- braking:end -->
+
+
+---
+
 <!-- night-final:begin -->
 # Teacher-v2 results — RETRAIN-NIGHT (current)
 
