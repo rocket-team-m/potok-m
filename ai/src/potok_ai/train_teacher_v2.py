@@ -46,6 +46,7 @@ from torch import nn
 from torch.nn import functional as F
 from torch.optim import AdamW, Optimizer
 
+from .braking_teacher import BrakingConfig, BrakingTeacher, TrueState
 from .calibration import confidence_target, correctness, expected_calibration_error, sigmoid
 from .conf_integration import DISJOINT_ECE_SOURCE, IN_SAMPLE_ECE_SOURCE, split_confidence_score
 from .curriculum import STAGES as CURRICULUM_STAGES
@@ -222,6 +223,9 @@ class TeacherV2Config:
     # AIOBJ: the privileged impact objective is the default when truth is available.
     # --legacy-objective restores the supervised-only privileged stage.
     legacy_objective: bool = False
+    # BRK01: privileged radial-braking reference is the default teacher target.
+    # --no-braking-teacher restores the recorded reference-optimizer labels.
+    braking_teacher: bool = True
     # Explicit opt-in to the pre-v3 +/-1 m/s^2 student head (AITRAINIDEAL B1).
     # Default off: the student must be able to represent the v3 target.
     legacy_student_bound: bool = False
@@ -898,6 +902,67 @@ def _privileged_rows(
     return torch.as_tensor(np.stack(rows), dtype=torch.float32)
 
 
+def _window_ticks(
+    ids: list[int | None], cfg: TeacherV2Config, *, where: str
+) -> np.ndarray:
+    """Flight ticks of the same window rows :func:`_privileged_rows` returns."""
+    counters: dict[int, int] = {}
+    ticks: list[int] = []
+    for episode_index in ids:
+        if episode_index is None:
+            raise ValueError(f"{where}: a braking target needs a numeric episode index")
+        index = int(episode_index)
+        offset = counters.get(index, 0)
+        counters[index] = offset + 1
+        ticks.append(cfg.window - 1 + offset)
+    return np.asarray(ticks, dtype=np.float64)
+
+
+def _braking_target_rows(
+    builder: Any,
+    ids: list[int | None],
+    cfg: TeacherV2Config,
+    teacher: BrakingTeacher,
+    *,
+    where: str,
+) -> torch.Tensor:
+    """True-state radial-braking command for one batch of window rows.
+
+    The authority gate comes from the flight tick (boost is forbidden), never
+    from the reference label slots.
+    """
+    privileged = _privileged_rows(builder, ids, cfg, where=where)
+    ticks = _window_ticks(ids, cfg, where=where)
+    state = TrueState(
+        position=privileged[:, :3].numpy(),
+        velocity=privileged[:, 3:6].numpy(),
+        time_s=ticks * BrakingConfig().frame_dt_s,
+    )
+    decision = teacher.demand(state)
+    if not np.isfinite(decision.command).all():
+        raise ValueError(f"{where}: braking reference produced a non-finite command")
+    return torch.as_tensor(decision.command, dtype=torch.float32)
+
+
+def _braking_details(cfg: TeacherV2Config, brake: BrakingTeacher | None) -> dict[str, Any]:
+    """Counted provenance of the braking reference for metrics.json."""
+    config = BrakingConfig()
+    return {
+        "enabled": brake is not None,
+        "source": "radial_braking_reference" if brake is not None else "legacy_or_no_truth",
+        "reason": (
+            None
+            if brake is not None
+            else ("legacy_braking_teacher" if not cfg.braking_teacher else "no_truth_sidecar")
+        ),
+        "reason_counts": brake.reason_counts() if brake is not None else {},
+        "cap_mps2": config.cap_mps2,
+        "horizon_s": config.horizon_s,
+        "stop_distance_m": config.stop_distance_m,
+        "boost_end_s": config.boost_end_s,
+    }
+
+
 def _stage_privileged(
     model: LoopWM,
     cfg: TeacherV2Config,
@@ -924,6 +989,16 @@ def _stage_privileged(
     objective_source = "impact" if impact is not None else "legacy"
     optimizer = _build_optimizer(parameters, cfg, cfg.lr)
     batches = _window_batches(fit, cfg, train=True)
+    brake = (
+        BrakingTeacher()
+        if cfg.braking_teacher and getattr(builder, "records", None)
+        else None
+    )
+    if brake is not None:
+        batches = [
+            (window, cond, _braking_target_rows(builder, ids, cfg, brake, where="privileged"), ids)
+            for window, cond, _recorded, ids in batches
+        ]
     steps, entropy, privileged_terms = 0, 0.0, 0
     model.train()
     jepa.train()  # type: ignore[attr-defined]
@@ -974,6 +1049,7 @@ def _stage_privileged(
         "privileged_source": "privileged_teacher" if builder is not None else "disabled",
         "truth_sidecar": str(cfg.truth_sidecar) if cfg.truth_sidecar is not None else None,
         "privileged_batches": privileged_terms,
+        "braking": _braking_details(cfg, brake),
         "objective": {
             "source": objective_source,
             "legacy": cfg.legacy_objective,
@@ -995,6 +1071,21 @@ def _expert_label(privileged: np.ndarray) -> np.ndarray:
     """The v3 reference optimizer's answer lives in label slots 22..25 only."""
     labels = _v3_truth_parts(privileged, where="expert label")[1]
     return np.asarray([labels[2], -labels[3]], dtype=np.float32)
+
+
+def _braking_command(teacher: BrakingTeacher, snapshot: np.ndarray) -> np.ndarray:
+    """Radial demand for one visited snapshot; interlock from recorded health.
+
+    The label slots are read only as a boolean health bit (the reference emits
+    exactly zero during boost); their numeric values never enter the demand.
+    """
+    privileged, labels = _v3_truth_parts(snapshot, where="braking label")
+    state = TrueState.from_privileged(privileged)
+    recorded = np.asarray(labels, dtype=np.float64)
+    healthy = np.any(recorded != 0.0, axis=-1 if recorded.ndim > 1 else 0)
+    allowed = np.atleast_1d(np.asarray(healthy, dtype=bool))
+    command = teacher.demand(state, ai_allowed=allowed).command.astype(np.float32)
+    return command[0] if np.asarray(snapshot).ndim == 1 else command
 
 
 def _student_rollout_action(student: nn.Module, device: torch.device):
@@ -1110,12 +1201,27 @@ def _build_dagger_dataset(
     builder = _build_privileged(cfg)
     student = _build_student(cfg, torch.device(cfg.device))
     rollout = _dagger_rollout(cfg, builder, student=student)
+    brake = (
+        BrakingTeacher()
+        if cfg.braking_teacher and getattr(builder, "records", None)
+        else None
+    )
+    braking_targets: list[np.ndarray] = []
+
+    def recorded_label(snapshot: np.ndarray) -> np.ndarray:
+        # The historical ``correction`` field stays the recorded optimizer label
+        # (its provenance contract is unchanged). The braking reference is a
+        # parallel target stream used by the training stage below.
+        if brake is not None:
+            braking_targets.append(_braking_command(brake, snapshot))
+        return _expert_label(snapshot)
+
     if _upstream_build_dagger is not None:
         dataset = _upstream_build_dagger(
             seed=cfg.seed,
             episodes=episodes,
             rollout=rollout,
-            teacher=_expert_label,
+            teacher=recorded_label,
             rounds=cfg.dagger_rounds,
             rollouts_per_round=1,
         )
@@ -1126,7 +1232,7 @@ def _build_dagger_dataset(
             sid = int(episode.scenario_id)
             rng = random.Random(f"{cfg.seed}:dagger:{episode.index}")
             for step, state in enumerate(rollout(episode, rng)):
-                correction = _expert_label(state.privileged)
+                correction = recorded_label(state.privileged)
                 if not np.isfinite(correction).all():
                     raise ValueError(f"non-finite expert label at episode {sid} step {step}")
                 sample_id = f"{cfg.seed}:dagger:{sid}:{step}"
@@ -1166,7 +1272,15 @@ def _build_dagger_dataset(
             digest.update(np.asarray(sample.observation, dtype=np.float32).tobytes())
             digest.update(sample.correction.tobytes())
         dataset = _LocalDaggerDataset(samples, digest.hexdigest())
+    if brake is not None:
+        if len(braking_targets) != len(dataset.samples):
+            raise AssertionError("every DAgger sample needs one braking target")
+        dataset.braking_targets = {
+            str(sample.provenance.sample_id): target
+            for sample, target in zip(dataset.samples, braking_targets)
+        }
     dataset.dagger_info = _dagger_info(cfg, dataset, builder)
+    dataset.dagger_info["braking"] = _braking_details(cfg, brake)
     return dataset
 
 
@@ -1185,6 +1299,7 @@ def _stage_dagger(
         raise ValueError("DAgger needs both fit and inner-held-out corrective samples")
     observations = torch.stack([torch.as_tensor(s.observation, dtype=torch.float32) for s in rows])
     corrections = torch.stack([torch.as_tensor(s.correction, dtype=torch.float32) for s in rows])
+    braking = getattr(dataset, "braking_targets", None)
     optimizer = _build_optimizer(list(model.named_parameters()), cfg, cfg.lr)
     steps, entropy = 0, 0.0
     model.train()
@@ -1194,6 +1309,11 @@ def _stage_dagger(
             window = chunk[:, :, :14].to(device)
             cond = chunk[:, 0, 14:].to(device)
             target = corrections[start : start + cfg.batch].to(device)
+            if braking is not None:
+                target = torch.as_tensor(
+                    np.stack([braking[str(s.provenance.sample_id)] for s in rows[start : start + cfg.batch]]),
+                    dtype=torch.float32,
+                ).to(device)
             result = _supervised_loss(model, (window, cond, target, [None] * len(target)), cfg)
             optimizer.zero_grad(set_to_none=False)
             result["loss"].backward()
@@ -1201,6 +1321,7 @@ def _stage_dagger(
             entropy = result["entropy"]
             steps += 1
     train, held, ratio, ece = _evaluate(model, fit, inner, cfg, device)
+    details_braking = dataset.dagger_info.get("braking", _braking_details(cfg, None))
     details = {
         "dagger_source": DAGGER_SOURCE,
         **getattr(dataset, "dagger_info", {}),
@@ -1214,6 +1335,8 @@ def _stage_dagger(
         ),
         "truth_sidecar": str(cfg.truth_sidecar) if cfg.truth_sidecar is not None else None,
         "privileged_fields_zeroed": cfg.truth_sidecar is None,
+        "braking": details_braking,
+        "training_target": "radial_braking_reference" if braking is not None else "recorded_label",
         "eval_label_blind": True,
     }
     return StageReport("dagger", steps, train, held, ratio, ece, entropy, cfg.learned_exit, details)
@@ -1636,6 +1759,15 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "keep the supervised-only privileged objective; the default adds the "
             "privileged impact term when a v3 truth sidecar is available"
+        ),
+    )
+    parser.add_argument(
+        "--braking-teacher",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "use the privileged radial-braking reference as the privileged/DAgger "
+            "target (default); --no-braking-teacher restores recorded v3 labels"
         ),
     )
     parser.add_argument(
