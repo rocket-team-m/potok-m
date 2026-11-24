@@ -1,12 +1,12 @@
 ---
 title: Текущий статус
-description: Честный статус на 24.11.2026 — v5 A/B FAIL, границы достоверности симулятора и прошивки, состояние приложения и RocketCraft, лицензия, публичные репозитории.
+description: Честный статус на 24.11.2026 — v6 A/B FAIL (night_final, обе руки), границы достоверности симулятора и прошивки, состояние приложения и RocketCraft, лицензия, публичные репозитории.
 ---
 
 # Текущий статус (24.11.2026)
 
 Эта страница — авторитетная точка отсчёта для текущего состояния проекта.
-Цифры ниже взяты из артефактов (`scripts/ab_report_v5.json`, отчётов гейтов,
+Цифры ниже взяты из артефактов (`scripts/ab_report_v6.json`, отчётов гейтов,
 `LICENSE`, документационных файлов канонических репозиториев), а не из описаний
 намерений. Исторические проходы помечены как история; там, где гейты не
 пройдены, победа не заявляется. Лётной квалификации нет ни у одной подсистемы.
@@ -15,14 +15,56 @@ description: Честный статус на 24.11.2026 — v5 A/B FAIL, гра
 
 | Подсистема | Статус | Граница, которую нельзя переступать в формулировках |
 | --- | --- | --- |
-| ИИ, closed-loop A/B | **v5 FAIL**, 5 PASS / 6 FAIL | симуляционный прогон, не лётная квалификация; ИИ остаётся наблюдателем |
+| ИИ, closed-loop A/B | **v6 FAIL**, default 4 PASS / 7 FAIL, adversarial 5 PASS / 6 FAIL | симуляционный прогон, не лётная квалификация; ИИ остаётся наблюдателем |
 | Симулятор | OR-parity PASS как регрессионный пин | не цифровой двойник: внешних измерений нет |
 | Прошивка | host/SIL/Renode green | HIL не пройден; `do not arm`, `do not flash` |
 | Приложение (GPUI) | механика и вёрстка работают | clippy `-D warnings` красный, CI его не запускает |
 | RocketCraft | приватный воркбенч, 3/24 shipped | не готовый продукт; приборная аэрокарточка остаётся границей стыка |
 | Лицензия | GPL-3.0-or-later + коммерческая отдельно | сторонние лицензии не перелицензируются |
 
-## ИИ: v5 closed-loop A/B — FAIL (текущий вердикт)
+## ИИ: v6 closed-loop A/B — FAIL (текущий вердикт)
+
+Авторитетный источник — `scripts/ab_v6.py`, `scripts/ab_report_v6.json` и
+`scripts/ab_report_v6.md` (`.bulba/night/ABV6.md`). Две руки на `night_final`:
+`night_default` — четырёхстадийный дефолт `sft → privileged → dagger → distill`
+(`ai/out/night_final/exports/teacher_v2_s{1,2,3}.pt`), `night_adversarial` —
+опциональный `--adversarial`-переобученный студент
+(`adversarial/runs/s{1,2,3}/student.pt`). Обе сравниваются только со спаренной
+нулевой командой на замороженном post-FIXPUMP held-out, 20 эпизодов на seed,
+**неослабленными** гейтами AIPOST1/EVAL01. Deployment-proxy — первый тик
+`DESCENT` (`vz<0 ∧ z≥5`), pooled радиальное расстояние от площадки; апогей —
+максимум высоты за 30 с.
+
+| Seed | zero command: dep / апогей / lat, м | night_default: dep / апогей / lat, м | night_adversarial: dep / апогей / lat, м |
+| ---: | ---: | ---: | ---: |
+| 1 | 1690,76 / 1973,74 / 1309,41 | 1462,98 / 2366,25 / 1118,55 | 1458,08 / 2347,99 / 1132,33 |
+| 2 | 1688,42 / 1972,86 / 1306,40 | 1560,57 / 2213,94 / 1182,50 | 1553,58 / 2252,12 / 1179,59 |
+| 3 | 1689,19 / 1983,00 / 1306,38 | 1454,26 / 2327,48 / 1129,39 | 1456,54 / 2308,26 / 1142,84 |
+
+Приросты латерали: default −14,58 / −9,48 / −13,55 %, adversarial
+−13,52 / −9,71 / −12,52 %; апогея — +19,89 / +12,22 / +17,37 % и
++18,96 / +14,16 / +16,40 %. Обе руки ≥2000 м апогея на всех сидах, но deployment-латераль 1454–1561 м > 1000 м.
+
+Вердикт `FAIL`, `exit_code = 1`, `win_claimed = false`:
+
+- **`night_default` — FAIL, 4 PASS / 7 FAIL.** PASS: `rmse_ratio`,
+  `ece_source`, `ece`, `provenance`. FAIL: `seed_spread` (латераль 12,54 %
+  против 3× разброс 5,09 %, апогей 16,49 % против 7,67 %),
+  `closed_loop_improvement` (seed 2 апогея +12,22 % < +15 %),
+  `oracle_positive_control` (апогей oracle +11,69 / −2,15 / −7,60 м),
+  три `absolute gates` (деплой-латераль 1462,98 / 1560,57 / 1454,26 м > 1000 м)
+  и `oracle_deployment_and_apogee_positive_control` (латераль oracle −40,48 /
+  −37,79 / −35,99 м, cap fraction 1,0, но апогей падает на seed 2/3).
+- **`night_adversarial` — FAIL, 5 PASS / 6 FAIL.** PASS: те же четыре плюс
+  `seed_spread`. FAIL: `closed_loop_improvement` (seed 2 апогея +14,16 %),
+  `oracle_positive_control`, три `absolute gates` (деплой-латераль 1458,08 /
+  1553,58 / 1456,54 м > 1000 м) и oracle positive control.
+
+Победы не заявлено: обе руки промахиваются мимо −35 % / +15 % и 1000 м, а
+положительный контроль инструмента недостоверен по апогею на seed 2/3. v5
+(FINAL all-fix), v4 (AIPOST1) и F1 — история.
+
+## ИИ: v5 closed-loop A/B — FAIL (история)
 
 Авторитетный источник — `scripts/ab_v5.py`, `scripts/ab_report_v5.json` и
 `scripts/ab_report_v5.md`. Прогон на FINAL all-fix distill-экспортах
@@ -63,8 +105,8 @@ RMSE RETRAIN-ALLFIX = **7,855551 ± 2,604600 м/с²** (5,148904 / 10,344432 /
 8,073319) не является выигрышем у RETRAIN-DAGGER (7,902916 ± 0,498808):
 разность средних внутри одного baseline-σ, разброс seed в 5,2 раза хуже.
 
-v4 (AIPOST1, FAIL, 4 PASS / 7 FAIL) и F1 (PASS в узком детекторе, апогей —
-диагностика) — **история**, вытесненная v5. Любая формулировка «A/B пройден»
+v5, v4 (AIPOST1, FAIL, 4 PASS / 7 FAIL) и F1 (PASS в узком детекторе, апогей —
+диагностика) — **история**, вытесненная v6. Любая формулировка «A/B пройден»
 без номера детектора и даты не соответствует текущему статусу. Подробности — в
 [гейтах A/B](/potok-m/docs/ai/gates/).
 
@@ -174,7 +216,7 @@ Workspace-тесты зелёные (446/452 в разных снимках). Г
 | Репозиторий | Роль | Состояние на снимке |
 | --- | --- | --- |
 | [potok-m](https://github.com/rocket-team-m/potok-m) | сайт, ADR, общие артефакты | docs build green, local links green, guard green |
-| [potok-m-ai](https://github.com/rocket-team-m/potok-m-ai) | обучение, LoopWM/LRS-RNN, экспорт | 88 pytest зелёных; v5 A/B FAIL — текущий вердикт |
+| [potok-m-ai](https://github.com/rocket-team-m/potok-m-ai) | обучение, LoopWM/LRS-RNN, экспорт | 88 pytest зелёных; v6 A/B FAIL — текущий вердикт |
 | [potok-m-sim](https://github.com/rocket-team-m/potok-m-sim) | 6-DoF, рандомизация, данные | 67 тестов в split-репо, 321 в интегрированном дереве; не цифровой двойник |
 | [potok-m-protocol](https://github.com/rocket-team-m/potok-m-protocol) | UART, генератор биндингов, C-эталон | 37 тестов, generator drift и 6 golden-шагов зелёные |
 | [potok-m-firmware](https://github.com/rocket-team-m/potok-m-firmware) | STM32H743, Embassy, SIL | 303 теста, Renode smoke PASS; HIL не пройден |
@@ -184,7 +226,7 @@ Workspace-тесты зелёные (446/452 в разных снимках). Г
 | `potok-m-workbench` (приватный) | RocketCraft: CAD → CFD/FEA → аэрокарточка | 3/24 shipped, лицензионный гейт зелёный |
 
 Ни один репозиторий не даёт лётной квалификации. Источники снимков —
-отчёты проверки в `.bulba/night/` (`VERIFY-FINAL3.md`, `ABV5.md`,
+отчёты проверки в `.bulba/night/` (`VERIFY-FINAL3.md`, `ABV6.md`, `ABV5.md`,
 `SIMIDEAL.md`, `FWCRIT.md`, `RCSTATUS.md` и др.) и генерируемые артефакты
 гейтов; при расхождении с формулировкой в другом документе авторитетны
 эта страница и прямо названный ею артефакт.

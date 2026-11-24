@@ -34,12 +34,14 @@ uv run pytest -q
 ночными hard-gate файлами число тестов больше и зависит от состава дерева.
 Ночные gating-тесты фиксируют контракты экспорта, watchguard, дистилляции,
 аугментации, conformal-калибровки и движка; они не заменяют A/B.
-Неослабленный closed-loop A/B v5 (FINAL all-fix):
-`ai/.venv/bin/python scripts/ab_v5.py` — exit 1 по замыслу, verdict **FAIL**,
-5 PASS / 6 FAIL; отчёты `scripts/ab_report_v5.json` / `scripts/ab_report_v5.md`.
-Исторический v4 (`scripts/ab_v4.py`, AIPOST1, exit 1, FAIL, 4 PASS / 7 FAIL)
-и F1 (`scripts/ab_v3.py`, exit 0, PASS в узком детекторе: латераль + знак
-привода, апогей — диагностика) остаются историей.
+Неослабленный closed-loop A/B v6 (night_final, обе руки):
+`ai/.venv/bin/python scripts/ab_v6.py` — exit 1 по замыслу, verdict **FAIL**:
+`night_default` 4 PASS / 7 FAIL, `night_adversarial` 5 PASS / 6 FAIL,
+`win_claimed = false`; отчёты `scripts/ab_report_v6.json` /
+`scripts/ab_report_v6.md`. История: v5 (`scripts/ab_v5.py`, FINAL all-fix,
+exit 1, FAIL, 5 PASS / 6 FAIL), v4 (`scripts/ab_v4.py`, AIPOST1, exit 1, FAIL,
+4 PASS / 7 FAIL) и F1 (`scripts/ab_v3.py`, exit 0, PASS в узком детекторе:
+латераль + знак привода, апогей — диагностика).
 
 ## Симулятор
 
@@ -138,14 +140,20 @@ bash scripts/check_visual.sh --self-test
 
 - Симулятор пригоден для отладки архитектуры и регрессионных тестов; сверка
   с OpenRocket — регрессионные пины с порогами, выбранными после измерения.
-- Closed-loop A/B: **текущий v5 (FINAL all-fix) — FAIL** (`scripts/ab_report_v5.json`,
-  exit 1, **5 PASS / 6 FAIL**). Неослабленные гейты AIPOST1: deployment-латераль
-  1473,06 / 1558,44 / 1496,79 м > 1000 м на всех сидах; апогей 2334,55 /
-  2251,14 / 2305,87 м ≥ 2000 м на всех сидах; приросты латерали −13,06 % /
-  −9,72 % / −12,31 % и апогея +18,28 % / +14,11 % / +16,28 % не дают
-  −35 % / +15 % (seed 2 апогея ниже +15 %); `seed_spread` проходит,
-  oracle-контроль не проходит (апогей +11,69 / −2,15 / −7,60 м при cap fraction
-  1,0). Победы не заявлено. **История:** v4 (AIPOST1, FAIL, exit 1,
+- Closed-loop A/B: **текущий v6 (night_final, обе руки) — FAIL**
+  (`scripts/ab_report_v6.json`, exit 1, `win_claimed = false`): `night_default`
+  4 PASS / 7 FAIL, `night_adversarial` 5 PASS / 6 FAIL. Неослабленные гейты
+  AIPOST1: deployment-латераль 1462,98 / 1560,57 / 1454,26 м (default) и
+  1458,08 / 1553,58 / 1456,54 м (adversarial) > 1000 м на всех сидах; апогей
+  2366,25 / 2213,94 / 2327,48 м и 2347,99 / 2252,12 / 2308,26 м ≥ 2000 м на
+  всех сидах; приросты латерали −14,58 / −9,48 / −13,55 % и −13,52 / −9,71 /
+  −12,52 %, апогея +19,89 / +12,22 / +17,37 % и +18,96 / +14,16 / +16,40 % не
+  дают −35 % / +15 % (seed 2 апогея ниже +15 % у обеих рук); `seed_spread`
+  проходит только у adversarial, oracle-контроль не проходит по апогею на
+  seed 2/3 (+11,69 / −2,15 / −7,60 м при cap fraction 1,0). Победы не
+  заявлено. **История:** v5 (FINAL all-fix, FAIL, exit 1, 5 PASS / 6 FAIL;
+  деплой-латераль 1473,06 / 1558,44 / 1496,79 м > 1000 м, апогей ≥2000 м на
+  всех сидах), v4 (AIPOST1, FAIL, exit 1,
   4 PASS / 7 FAIL; латераль 1611,99 / 1632,11 / 1642,11 м, апогей <2000 м на
   seed 2/3) и F1 (ABFIX/ORCLR, exit 0) — PASS только по латерали+знаку (oracle
   −17,312 / −10,503 / −8,382 м, 12/12 знаков, привод на пределе, апогей —

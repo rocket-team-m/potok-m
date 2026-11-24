@@ -209,7 +209,7 @@
     </section>
 
     <div class="strip wrap">
-      <div class="stat"><div class="v mono" style="color:var(--fail)">FAIL</div><div class="l">v5 A/B · allfix · 5 PASS / 6 FAIL</div></div>
+      <div class="stat"><div class="v mono" style="color:var(--fail)">FAIL</div><div class="l">v6 A/B · night_final · default 4/7 · adv 5/6</div></div>
       <div class="stat"><div class="v mono">1.86 %</div><div class="l">OpenRocket parity</div></div>
       <div class="stat"><div class="v mono">500 Гц</div><div class="l">контур управления</div></div>
       <div class="stat"><div class="v mono">GPL-3.0</div><div class="l">собственный код</div></div>
@@ -230,16 +230,16 @@
     </section>
 
     <section class="section wrap" id="telemetry">
-      <div class="sec-head"><span class="idx mono">03</span><h2>Замкнутый контур в числах</h2><span class="note mono">ab_report_v5.json · FINAL all-fix · post-FIXPUMP · 3 seed · 20 эпизодов · 5 PASS / 6 FAIL</span></div>
+      <div class="sec-head"><span class="idx mono">03</span><h2>Замкнутый контур в числах</h2><span class="note mono">ab_report_v6.json · night_final · post-FIXPUMP · 3 seed · 20 эпизодов · default 4 PASS / 7 FAIL · adv 5 PASS / 6 FAIL</span></div>
       <div class="telemetry">
         <div class="telem-head mono"><span>Боковое СКО · v3 flown-truth · 30 с</span><span>POTOKTRJ v3 / 6-DoF</span></div>
         <div class="rail">
           <div class="rail-val mono">1690.76<small>м · zero command · dep</small></div>
           <div class="rail-line" aria-hidden="true"><span class="rail-dot"></span></div>
-          <div class="rail-val mono accent">1473.06<small>м · teacher_v2 allfix · dep · seed 1</small></div>
+          <div class="rail-val mono accent">1462.98<small>м · night_default · dep · seed 1</small></div>
         </div>
         <div class="rail-meta mono">
-          <span>Δ −217.70 м</span><span>апогей 1973.74 → 2334.55 м</span><span style="color:var(--fail)">FAIL · v5 · allfix · 5 PASS / 6 FAIL</span><span>lateral &gt; 1000 м все seed · apogee ≥ 2000 м все seed</span><span>латераль −13.06/−9.72/−12.31 % · апогей +18.28/+14.11/+16.28 %</span><span>oracle apogee FAIL s2/s3 · F1 PASS (ист.)</span><span>OR-parity 1.86 % / лимит 2 %</span>
+          <span>Δ −227.78 м</span><span>апогей 1973.74 → 2366.25 м</span><span style="color:var(--fail)">FAIL · v6 · default 4/7 · adv 5/6</span><span>lateral &gt; 1000 м все seed · apogee ≥ 2000 м все seed</span><span>латераль −14.58/−9.48/−13.55 % · апогей +19.89/+12.22/+17.37 %</span><span>adv: −13.52/−9.71/−12.52 % · +18.96/+14.16/+16.40 %</span><span>oracle apogee FAIL s2/s3 · v5/v4/F1 (ист.)</span><span>OR-parity 1.86 % / лимит 2 %</span>
         </div>
       </div>
       <div class="graphs">
@@ -274,7 +274,7 @@
           <div class="legend mono"><span><i></i>zero command</span><span class="a"><i></i>AI assist</span></div>
         </figure>
       </div>
-      <p class="src mono">Источник: <a href="docs/ai/gates/">гейты ИИ</a> · <a href="docs/sim/validation/">валидация симулятора</a> · <code>scripts/ab_report_v5.md/json</code> (FINAL all-fix, FAIL, exit 1, 5 PASS / 6 FAIL); <code>ab_report_v4.md/json</code> (v4, FAIL) и <code>ab_report.md/json</code> (F1, PASS) — история. <strong>v5</strong>: 20 held-out эпизодов на seed, deployment-латераль 1473.06 / 1558.44 / 1496.79 м &gt; 1000 м, апогей 2334.55 / 2251.14 / 2305.87 м ≥ 2000 м на всех сидах, приросты −13.06 / −9.72 / −12.31 % и +18.28 / +14.11 / +16.28 % не дают −35 % / +15 %, oracle-апогей падает на seed 2/3; победы не заявлено. <strong>F1</strong> (графики ниже, исторический) проверял только латераль+знак с апогеем-диагностикой: oracle −17.312 / −10.503 / −8.382 м, 12/12 знаков, loopwm/lite 3/3, lrs 2/3. Пре-FIXPUMP +2 км и старый PASS отозваны.</p>
+      <p class="src mono">Источник: <a href="docs/ai/gates/">гейты ИИ</a> · <a href="docs/sim/validation/">валидация симулятора</a> · <code>scripts/ab_report_v6.md/json</code> (night_final, FAIL, exit 1, default 4 PASS / 7 FAIL, adversarial 5 PASS / 6 FAIL); <code>ab_report_v5.md/json</code> (v5, FAIL), <code>ab_report_v4.md/json</code> (v4, FAIL) и <code>ab_report.md/json</code> (F1, PASS) — история. <strong>v6</strong>: 20 held-out эпизодов на seed, деплой-латераль 1462.98 / 1560.57 / 1454.26 м (default) и 1458.08 / 1553.58 / 1456.54 м (adversarial) &gt; 1000 м, апогей 2366.25 / 2213.94 / 2327.48 м и 2347.99 / 2252.12 / 2308.26 м ≥ 2000 м на всех сидах, приросты латерали −14.58 / −9.48 / −13.55 % и −13.52 / −9.71 / −12.52 %, апогея +19.89 / +12.22 / +17.37 % и +18.96 / +14.16 / +16.40 % не дают −35 % / +15 %, oracle-апогей +11.69 / −2.15 / −7.60 м падает на seed 2/3; <code>win_claimed = false</code>, победы не заявлено. <strong>F1</strong> (графики ниже, исторический) проверял только латераль+знак с апогеем-диагностикой: oracle −17.312 / −10.503 / −8.382 м, 12/12 знаков, loopwm/lite 3/3, lrs 2/3. Пре-FIXPUMP +2 км и старый PASS отозваны.</p>
     </section>
 
     <section class="section wrap" id="system">
@@ -324,13 +324,13 @@
           <span class="shot-frame"><svg viewBox="0 0 320 180" role="img" aria-label="Схематичный журнал обучения и A/B">
             <line class="hair" x1="0" y1="18" x2="320" y2="18"/>
             <text class="hl" x="10" y="13">AI / CLOSED LOOP</text>
-            <text x="12" y="42">seed 1  teacher_v2 allfix  ep 20  post-FIXPUMP</text>
-            <text x="12" y="60">dep lateral  1690.76 → 1473.06</text>
-            <text class="hl" x="12" y="78">apogee  1973.74 → 2334.55 m</text>
-            <text x="12" y="96">lat −13.06%  apogee +18.28% (s1)</text>
-            <text x="12" y="114">v5 gates  5 PASS / 6 FAIL</text>
+            <text x="12" y="42">seed 1  night_default  ep 20  post-FIXPUMP</text>
+            <text x="12" y="60">dep lateral  1690.76 → 1462.98</text>
+            <text class="hl" x="12" y="78">apogee  1973.74 → 2366.25 m</text>
+            <text x="12" y="96">lat −14.58%  apogee +19.89% (s1)</text>
+            <text x="12" y="114">v6 default  4 PASS / 7 FAIL</text>
             <line class="hair" x1="12" y1="132" x2="308" y2="132"/>
-            <text x="12" y="152" style="fill:var(--fail)">V5 A/B FAIL (allfix)</text><text x="228" y="152">v4/F1: hist</text>
+            <text x="12" y="152" style="fill:var(--fail)">V6 A/B FAIL (night)</text><text x="228" y="152">v5/v4/F1: hist</text>
           </svg></span>
           <span class="shot-cap mono"><span>03 / Бортовой ИИ</span><span>гейты и A/B →</span></span>
         </a>
