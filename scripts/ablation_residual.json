@@ -1,0 +1,2241 @@
+{
+  "arms": {
+    "classical_only": "clip(physics_baseline); learned correction removed = ResidualPolicy(enabled=False)",
+    "oracle_gtheta": "run_episode_with_oracle / fin_accel_command; positive control",
+    "residual_off": "clip(export_delta); classical superposition removed",
+    "residual_on": "clip(physics_baseline + export_delta); shipped all-fix v5 arm",
+    "zero_command": "no TSV; Simulator::run_episode ControlMode::None; paired gate control"
+  },
+  "blockers": [
+    "EVAL01 improvement (residual_on) failed: seed 1 lateral -13.06% is above -35%; seed 2 lateral -9.72% is above -35%; seed 2 apogee 14.11% is below 15%; seed 3 lateral -12.31% is above -35%",
+    "EVAL01 seed_spread (residual_off) failed: lateral gain 8.24% does not beat 3x seed spread 3.21%; apogee gain 9.21% does not beat 3x seed spread 3.93%",
+    "EVAL01 improvement (residual_off) failed: seed 1 lateral -9.07% is above -35%; seed 1 apogee 10.66% is below 15%; seed 2 lateral -6.22% is above -35%; seed 2 apogee 6.73% is below 15%; seed 3 lateral -9.43% is above -35%; seed 3 apogee 10.23% is below 15%",
+    "EVAL01 seed_spread (classical_only) failed: lateral gain -0.78% does not beat 3x seed spread 0.05%; apogee gain -2.61% does not beat 3x seed spread 0.06%",
+    "EVAL01 improvement (classical_only) failed: seed 1 lateral 0.77% is above -35%; seed 1 apogee -2.59% is below 15%; seed 2 lateral 0.82% is above -35%; seed 2 apogee -2.64% is below 15%; seed 3 lateral 0.76% is above -35%; seed 3 apogee -2.59% is below 15%",
+    "EVAL01 oracle_positive_control failed: seed 2 oracle did not raise apogee; seed 3 oracle did not raise apogee",
+    "oracle positive control did not improve both metrics on all seeds",
+    "absolute gate failed: residual_on seed 1",
+    "absolute gate failed: residual_on seed 2",
+    "absolute gate failed: residual_on seed 3",
+    "absolute gate failed: residual_off seed 1",
+    "absolute gate failed: residual_off seed 2",
+    "absolute gate failed: residual_off seed 3",
+    "absolute gate failed: classical_only seed 1",
+    "absolute gate failed: classical_only seed 2",
+    "absolute gate failed: classical_only seed 3"
+  ],
+  "exit_code": 1,
+  "fidelity": {
+    "checked": true,
+    "detail": "residual_on reproduces scripts/ab_report_v5.json assisted aggregates",
+    "passed": true
+  },
+  "gates": [
+    {
+      "detail": "verbatim EVAL01 gate",
+      "name": "eval01 rmse_ratio",
+      "passed": true
+    },
+    {
+      "detail": "verbatim EVAL01 gate",
+      "name": "eval01 ece_source",
+      "passed": true
+    },
+    {
+      "detail": "verbatim EVAL01 gate",
+      "name": "eval01 ece",
+      "passed": true
+    },
+    {
+      "detail": "verbatim EVAL01 gate",
+      "name": "eval01 provenance",
+      "passed": true
+    },
+    {
+      "detail": "both gains beat 3x the spread of seeds [1, 2, 3]",
+      "name": "eval01 seed_spread [residual_on]",
+      "passed": true
+    },
+    {
+      "detail": "seed 1 lateral -13.06% is above -35%; seed 2 lateral -9.72% is above -35%; seed 2 apogee 14.11% is below 15%; seed 3 lateral -12.31% is above -35%",
+      "name": "eval01 improvement [residual_on]",
+      "passed": false
+    },
+    {
+      "detail": "lateral gain 8.24% does not beat 3x seed spread 3.21%; apogee gain 9.21% does not beat 3x seed spread 3.93%",
+      "name": "eval01 seed_spread [residual_off]",
+      "passed": false
+    },
+    {
+      "detail": "seed 1 lateral -9.07% is above -35%; seed 1 apogee 10.66% is below 15%; seed 2 lateral -6.22% is above -35%; seed 2 apogee 6.73% is below 15%; seed 3 lateral -9.43% is above -35%; seed 3 apogee 10.23% is below 15%",
+      "name": "eval01 improvement [residual_off]",
+      "passed": false
+    },
+    {
+      "detail": "lateral gain -0.78% does not beat 3x seed spread 0.05%; apogee gain -2.61% does not beat 3x seed spread 0.06%",
+      "name": "eval01 seed_spread [classical_only]",
+      "passed": false
+    },
+    {
+      "detail": "seed 1 lateral 0.77% is above -35%; seed 1 apogee -2.59% is below 15%; seed 2 lateral 0.82% is above -35%; seed 2 apogee -2.64% is below 15%; seed 3 lateral 0.76% is above -35%; seed 3 apogee -2.59% is below 15%",
+      "name": "eval01 improvement [classical_only]",
+      "passed": false
+    },
+    {
+      "detail": "seed 2 oracle did not raise apogee; seed 3 oracle did not raise apogee",
+      "name": "eval01 oracle_positive_control",
+      "passed": false
+    },
+    {
+      "detail": "both metrics improve against paired zero command on every seed",
+      "name": "oracle_deployment_and_apogee_positive_control",
+      "passed": false
+    },
+    {
+      "detail": "deployment lateral 1473.061037 m <= 1000 m: False; apogee 2334.545404 m >= 2000 m: True",
+      "name": "absolute [residual_on] seed 1",
+      "passed": false
+    },
+    {
+      "detail": "deployment lateral 1558.442532 m <= 1000 m: False; apogee 2251.142731 m >= 2000 m: True",
+      "name": "absolute [residual_on] seed 2",
+      "passed": false
+    },
+    {
+      "detail": "deployment lateral 1496.789353 m <= 1000 m: False; apogee 2305.874841 m >= 2000 m: True",
+      "name": "absolute [residual_on] seed 3",
+      "passed": false
+    },
+    {
+      "detail": "deployment lateral 1564.528569 m <= 1000 m: False; apogee 2184.161621 m >= 2000 m: True",
+      "name": "absolute [residual_off] seed 1",
+      "passed": false
+    },
+    {
+      "detail": "deployment lateral 1611.285207 m <= 1000 m: False; apogee 2105.717175 m >= 2000 m: True",
+      "name": "absolute [residual_off] seed 2",
+      "passed": false
+    },
+    {
+      "detail": "deployment lateral 1555.356834 m <= 1000 m: False; apogee 2185.899200 m >= 2000 m: True",
+      "name": "absolute [residual_off] seed 3",
+      "passed": false
+    },
+    {
+      "detail": "deployment lateral 1658.801783 m <= 1000 m: False; apogee 1922.569977 m >= 2000 m: False",
+      "name": "absolute [classical_only] seed 1",
+      "passed": false
+    },
+    {
+      "detail": "deployment lateral 1656.372738 m <= 1000 m: False; apogee 1920.682275 m >= 2000 m: False",
+      "name": "absolute [classical_only] seed 2",
+      "passed": false
+    },
+    {
+      "detail": "deployment lateral 1657.321562 m <= 1000 m: False; apogee 1931.668890 m >= 2000 m: False",
+      "name": "absolute [classical_only] seed 3",
+      "passed": false
+    }
+  ],
+  "held_out_indices": [
+    16,
+    17,
+    18,
+    19,
+    36,
+    37,
+    38,
+    39,
+    56,
+    57,
+    58,
+    59,
+    76,
+    77,
+    78,
+    79,
+    96,
+    97,
+    98,
+    99
+  ],
+  "honesty_notes": [
+    "Simulator-only: the POTOKTRJ sidecar is emitted by the same simulator that flies the episodes; it is not an independent flight-truth anchor.",
+    "No canopy/deployment event is scored; the proxy is the first DESCENT tick and is not a landing-dispersion measurement.",
+    "Commands are generated from the zero-command flight's recorded frames and replayed by frame index; after a command moves the vehicle, later frames differ from that flight while the phase/gate schedule stays paired. Commands are emitted only where the paired baseline ai_healthy target is true, so boost-phase flight stays identical to control.",
+    "No export was retrained. residual_off removes the classical baseline at deployment and applies the residual-trained delta as an absolute command; classical_only removes the learned delta and applies physics_baseline; both are diagnostic interpretations of 'residual OFF' and neither is presented as a shipped policy.",
+    "Seeds 2/3 use seed-matched exports on regenerated held-out flights; a missing export is a loud blocker, never a stand-in.",
+    "Primary arm = ai/out/final_v3_allfix/exports/teacher_v2_s{1,2,3}.pt; the harness refuses to run unless manifest, summary, shield and per-seed metrics still carry the all-fix evidence. No gate, weight, physics constant or threshold was changed.",
+    "The helper binary was not rebuilt in this shared checkout; its seed-1 zero-command flight is checked bit-for-bit against the frozen post-FIXPUMP held-out sidecar.",
+    "Exit 1 is the unweakened gate verdict, not a crash; the JSON and Markdown reports are written before exit. No win is claimed unless every gate passes."
+  ],
+  "measurement": "POTOKTRJ v3 flown-truth trajectory sidecar (stride 26), not surrogate",
+  "model_quality": {
+    "1": {
+      "conformal_coverage": 0.9352617079889807,
+      "ece_held_out": 0.01166445300894342,
+      "ratio": 0.9100096132950048,
+      "residual_gain": -4.862932205200195,
+      "rmse_held_out": 5.148904169724766,
+      "rmse_train": 5.658076677982967
+    },
+    "2": {
+      "conformal_coverage": 0.9545454545454546,
+      "ece_held_out": 0.007868364254322439,
+      "ratio": 1.0781041760296652,
+      "residual_gain": -6.228996276855469,
+      "rmse_held_out": 10.344431805348933,
+      "rmse_train": 9.595020625413378
+    },
+    "3": {
+      "conformal_coverage": 0.9641873278236914,
+      "ece_held_out": 0.010767036888121233,
+      "ratio": 0.9557892565073202,
+      "residual_gain": -5.851548671722412,
+      "rmse_held_out": 8.07331851231966,
+      "rmse_train": 8.446755869407314
+    }
+  },
+  "positive_control": {
+    "passed": false,
+    "per_seed": {
+      "1": {
+        "apogee_delta_m": 11.692065429687318,
+        "authority": {
+          "active_ticks": 16661,
+          "cap_fraction": 1.0,
+          "cap_hit_ticks": 16661,
+          "max_command_mps2": 10.0
+        },
+        "deployment_delta_m": -40.476380364944134,
+        "improved_both": true
+      },
+      "2": {
+        "apogee_delta_m": -2.1510437011718295,
+        "authority": {
+          "active_ticks": 16584,
+          "cap_fraction": 1.0,
+          "cap_hit_ticks": 16584,
+          "max_command_mps2": 10.0
+        },
+        "deployment_delta_m": -37.785984953800835,
+        "improved_both": false
+      },
+      "3": {
+        "apogee_delta_m": -7.601098632812636,
+        "authority": {
+          "active_ticks": 16531,
+          "cap_fraction": 1.0,
+          "cap_hit_ticks": 16531,
+          "max_command_mps2": 10.0
+        },
+        "deployment_delta_m": -35.98845845906385,
+        "improved_both": false
+      }
+    }
+  },
+  "provenance": {
+    "allfix_data_provenance": {
+      "config_sha256": "9c34e71f9d10bcf081c31f15f5332f7bb2fac04dddb28009a27cd30987ab5e91",
+      "heldout_sha256": "fdc1d1400b1c5f111e21f79dead37afa1dd9f058fe457edb78037dc6ebe89807",
+      "train_sha256": "34b35e0ff67f7eeecbd895b2efde8bebcfa159c1a3e78379da6750338b6930b6",
+      "truth_sidecar_sha256": "7f25bb69124638ea7542be99f43330fda1c5248513f1971f6bfd125f5f759cb8"
+    },
+    "allfix_provenance": {
+      "1": true,
+      "2": true,
+      "3": true
+    },
+    "allfix_root": "ai/out/final_v3_allfix",
+    "apogee_limit_m": 2000.0,
+    "arm_definitions": {
+      "classical_only": "clip(physics_baseline); learned correction removed = ResidualPolicy(enabled=False)",
+      "oracle_gtheta": "run_episode_with_oracle / fin_accel_command; positive control",
+      "residual_off": "clip(export_delta); classical superposition removed",
+      "residual_on": "clip(physics_baseline + export_delta); shipped all-fix v5 arm",
+      "zero_command": "no TSV; Simulator::run_episode ControlMode::None; paired gate control"
+    },
+    "assisted_trajectory_sha256": {
+      "1/classical_only": "873752c26fb53e57f81b333d00341d44397a2fece5357ea0a7ed917a243bf813",
+      "1/oracle_gtheta": "1d9a28ec83dfac5f9d16e84562450b1fd3317dbd2587885568561d2dca8fca15",
+      "1/residual_off": "ac87d70a05a312066a287a8a500d2af41843172d882f9f4854ca77d75d5c993b",
+      "1/residual_on": "32e4d882333d468f7e946bb09f31183adeff70d52a134b1d9116b10df181e357",
+      "1/zero_command": "9b1d680d55f635a3a2cf84864498cb533a84132bbe15ba791154a3cd58bb5953",
+      "2/classical_only": "ea1e1b84097523701b8b5cc0e11398bf4f12d8b43597cedeab0c195467a8dba5",
+      "2/oracle_gtheta": "92cfa601580d151f83c89d9a8c9ee5790b06118f4b80fe17cc6b188c81c02336",
+      "2/residual_off": "168b470149793c8a6723cd34698471ed5e2f54948093483dd504e70c46d76f4d",
+      "2/residual_on": "d70b48c6c79a3a6d831219aa7b07b9111e98e70df7c29666102e02e470c15c8e",
+      "2/zero_command": "f0443872b644520d9f413e11b608241b0d8ea9bea65d5605b5e026ce08597aa2",
+      "3/classical_only": "6b8ef1fcf049b9d28f32672e1697fccee2b0ec2f6a4b6d1f8ff0388551b1954f",
+      "3/oracle_gtheta": "68973c0f50d554065525c0093aa4deddc72ec69828d2e29d7dbc88e02f9e607d",
+      "3/residual_off": "44342c35c79dabfda0bd5c0b0f15d9920df3413dd960d0fe881ca1ccab931c44",
+      "3/residual_on": "0374ec38eace9089f1f9d0db83ff0f7227c045eba2eb3107b278ca3126d645b8",
+      "3/zero_command": "b1123a635768bdd5d71b1591326477be3fde9f80a22b4f24288f067234ecbc4d"
+    },
+    "baseline_trajectory_sha256": {
+      "1": "9b1d680d55f635a3a2cf84864498cb533a84132bbe15ba791154a3cd58bb5953",
+      "2": "f0443872b644520d9f413e11b608241b0d8ea9bea65d5605b5e026ce08597aa2",
+      "3": "b1123a635768bdd5d71b1591326477be3fde9f80a22b4f24288f067234ecbc4d"
+    },
+    "command_limit_mps2": 10.0,
+    "config": "ai/out/v3_final/sim.toml",
+    "config_hash": "9c34e71f9d10bcf081c31f15f5332f7bb2fac04dddb28009a27cd30987ab5e91",
+    "config_sha256": "9c34e71f9d10bcf081c31f15f5332f7bb2fac04dddb28009a27cd30987ab5e91",
+    "conformal_coverage": {
+      "1": 0.9352617079889807,
+      "2": 0.9545454545454546,
+      "3": 0.9641873278236914
+    },
+    "deployment_proxy": "first DESCENT tick (vz<0 and z>=5), radial distance from pad",
+    "dynamics_sha256": "6159cf4bd24862a8ac89f97529e1133d49ef6bd8f6ba2289f2b4d70987063cc2",
+    "ece_held_out": {
+      "1": 0.01166445300894342,
+      "2": 0.007868364254322439,
+      "3": 0.010767036888121233
+    },
+    "ece_source": {
+      "1": "held-out",
+      "2": "held-out",
+      "3": "held-out"
+    },
+    "export_manifest_sha256": "4c5040f42185d516b9777d58ee8ec0407f291d0c1566b3d32b3781d8d9a2c0b7",
+    "exports_sha256": {
+      "teacher_v2_s1.pt": "2514b4e46148f70945601ebacc1b3eb2ea207ea819cc0f65f2a543375a8775f4",
+      "teacher_v2_s2.pt": "b2a0a521c7e70070c1f704d776200d643e82ec3c58732738b0756e3f9a9bb3b2",
+      "teacher_v2_s3.pt": "6d4d89d2bd896808edbbe40c176354f51c2186681da7fb7d2a91066812f4a968"
+    },
+    "generated_at_utc": "2026-11-24T00:25:43+00:00",
+    "git_head": "07a5e43ebcd123065227665a5d6b71c46f0acd7d",
+    "harness": "scripts/ablation_residual.py",
+    "harness_sha256": "2fa2269374d458fb8e78a4bc50c55c6cf5981da4779781efa10b79a5130d91d6",
+    "heldout": "ai/out/final_v3_postpump/data/held-out/validation.bin",
+    "heldout_manifest_sha256": "a9ff19947618f17790f1257ef6f7e85ba537915f5a2aca782befefa874db675e",
+    "heldout_sha256": "fdc1d1400b1c5f111e21f79dead37afa1dd9f058fe457edb78037dc6ebe89807",
+    "helper": "scripts/ab_control_v3/src/main.rs",
+    "helper_binary": "scripts/ab_control_v3/target/release/ab-control-v3",
+    "helper_binary_sha256": "c8fea0bbee7c8e8604a8ad8575aee5b0ba12073ae7570766941e935e12935e36",
+    "helper_sha256": "1f5564e30d66d82e081e5e435bcac3932a862638163cb0fac9a7261920559fed",
+    "lateral_limit_m": 1000.0,
+    "legacy_student_bound": false,
+    "metrics_config_hash": {
+      "1": "f5b5106b378aac4b",
+      "2": "7b5ad1b86cfcb3f3",
+      "3": "717d2a5ae810d807"
+    },
+    "metrics_sha256": {
+      "s1/metrics.json": "330423e584057d50779f215bcabad85bb4af07866d1eda9eeb3b2317e1174a36",
+      "s2/metrics.json": "ec54defcd00bde30a46d6dcb2c7855274a54bbca1b592fd8b8b63c866d5a9bd4",
+      "s3/metrics.json": "2f7b963e0c5f0c689e7e250d708f9bae6786ee182055a87dc2c82dedca92e5eb"
+    },
+    "numpy": "2.5.5",
+    "python": "3.13.15",
+    "quality_report_sha256": "8ba904125055787c26e95da39102ecd9dcaa0102c3b66a456c5f265316b5b7d8",
+    "residual_gain": {
+      "1": -4.862932205200195,
+      "2": -6.228996276855469,
+      "3": -5.851548671722412
+    },
+    "residual_policy_enabled": {
+      "1": true,
+      "2": true,
+      "3": true
+    },
+    "sample_dt_s": 0.02,
+    "shield_sha256": "ab277e7825ce7b746d09eb57ee57b01eb3866b489411427b995803cd740b0af2",
+    "source_of_off_semantics": "residual_policy.py:139-149 (gain*correction, enabled=False -> baseline.clone()); physics.py:53-56 final_command(residual=True) = baseline + prediction",
+    "stage_order": [
+      "sft",
+      "privileged",
+      "dagger",
+      "distill"
+    ],
+    "student_command_bound": 10.0,
+    "summary_ab_win_claimed": false,
+    "summary_rlvr_used": false,
+    "summary_sha256": "6dab65d91ab4cbf182a81f57ba6838e24093edd50a3886ab968b52a601853ab2",
+    "torch": "2.15.0+cpu",
+    "v5_harness_sha256": "98cc203a7452a5bc58a043fae64cfc7665da100ce3959a5b558827ddfb079e90",
+    "v5_report_sha256": "ae61b430b957c7d86d65de9ca83658dbfb7cb5448bc587e8dc2452ff6328ae9a"
+  },
+  "seed_order": [
+    1,
+    2,
+    3
+  ],
+  "seeds": {
+    "1": {
+      "classical_only": {
+        "aggregate": {
+          "apogee_m_delta": -51.17313232421884,
+          "assisted": {
+            "apogee_m": 1922.5699768066406,
+            "deployment_lateral_m": 1658.8017828815075,
+            "lateral_rms_m": 1319.5330693062517
+          },
+          "authority_gate_closed_ticks": 11280,
+          "authority_gate_open_ticks": 18720,
+          "baseline": {
+            "apogee_m": 1973.7431091308595,
+            "deployment_lateral_m": 1690.7564255008851,
+            "lateral_rms_m": 1309.4087332027586
+          },
+          "clipped_ticks": 0,
+          "confidence_gate": "none (residual decision target is ungated; seam clips only)",
+          "deployment_lateral_m_delta": -31.954642619377637,
+          "episodes": 20,
+          "interventions": 18720,
+          "lateral_rms_m_delta": 10.124336103493079,
+          "max_command_mps2": 1.0,
+          "mean_abs_correction_mps2": 0.9951574517535764,
+          "mean_confidence": 0.3549672499785821,
+          "rows": 30000
+        },
+        "arm": "clip(physics_baseline); learned correction removed = ResidualPolicy(enabled=False)",
+        "export_sha256": "2514b4e46148f70945601ebacc1b3eb2ea207ea819cc0f65f2a543375a8775f4",
+        "per_scenario": [
+          {
+            "apogee_m_delta": -51.932788085937545,
+            "assisted": {
+              "apogee_m": 1888.86494140625,
+              "deployment_lateral_m": 1631.9656792544235,
+              "lateral_rms_m": 1297.593686254317
+            },
+            "baseline": {
+              "apogee_m": 1940.7977294921875,
+              "deployment_lateral_m": 1661.6456948965558,
+              "lateral_rms_m": 1286.4818597264305
+            },
+            "deployment_lateral_m_delta": -29.680015642132275,
+            "episodes": 5,
+            "lateral_rms_m_delta": 11.111826527886478,
+            "scenario": "scenario_16"
+          },
+          {
+            "apogee_m_delta": -51.58356933593768,
+            "assisted": {
+              "apogee_m": 2083.6715087890625,
+              "deployment_lateral_m": 1674.4539200247161,
+              "lateral_rms_m": 1313.283154393595
+            },
+            "baseline": {
+              "apogee_m": 2135.255078125,
+              "deployment_lateral_m": 1708.2391166455657,
+              "lateral_rms_m": 1303.5431332505752
+            },
+            "deployment_lateral_m_delta": -33.78519662084955,
+            "episodes": 5,
+            "lateral_rms_m_delta": 9.740021143019703,
+            "scenario": "scenario_17"
+          },
+          {
+            "apogee_m_delta": -41.189526367187455,
+            "assisted": {
+              "apogee_m": 1715.0306884765625,
+              "deployment_lateral_m": 1697.6231136081028,
+              "lateral_rms_m": 1382.2915831763119
+            },
+            "baseline": {
+              "apogee_m": 1756.22021484375,
+              "deployment_lateral_m": 1731.881429270815,
+              "lateral_rms_m": 1376.9384193612009
+            },
+            "deployment_lateral_m_delta": -34.25831566271222,
+            "episodes": 5,
+            "lateral_rms_m_delta": 5.353163815110975,
+            "scenario": "scenario_18"
+          },
+          {
+            "apogee_m_delta": -59.98664550781268,
+            "assisted": {
+              "apogee_m": 2002.7127685546875,
+              "deployment_lateral_m": 1630.1721612015435,
+              "lateral_rms_m": 1282.7618815781732
+            },
+            "baseline": {
+              "apogee_m": 2062.6994140625,
+              "deployment_lateral_m": 1660.1411329856035,
+              "lateral_rms_m": 1268.063577265662
+            },
+            "deployment_lateral_m_delta": -29.96897178405993,
+            "episodes": 5,
+            "lateral_rms_m_delta": 14.698304312511254,
+            "scenario": "scenario_19"
+          }
+        ],
+        "sha256": {
+          "assisted": "873752c26fb53e57f81b333d00341d44397a2fece5357ea0a7ed917a243bf813",
+          "baseline": "9b1d680d55f635a3a2cf84864498cb533a84132bbe15ba791154a3cd58bb5953"
+        }
+      },
+      "oracle_gtheta": {
+        "aggregate": {
+          "apogee_m_delta": 11.692065429687318,
+          "assisted": {
+            "apogee_m": 1985.4351745605468,
+            "deployment_lateral_m": 1650.280045135941,
+            "lateral_rms_m": 1292.096519590752
+          },
+          "baseline": {
+            "apogee_m": 1973.7431091308595,
+            "deployment_lateral_m": 1690.7564255008851,
+            "lateral_rms_m": 1309.4087332027586
+          },
+          "deployment_lateral_m_delta": -40.476380364944134,
+          "episodes": 20,
+          "lateral_rms_m_delta": -17.312213612006644
+        },
+        "arm": "run_episode_with_oracle / fin_accel_command; positive control",
+        "authority": {
+          "active_ticks": 16661,
+          "cap_fraction": 1.0,
+          "cap_hit_ticks": 16661,
+          "max_command_mps2": 10.0
+        },
+        "per_scenario": [
+          {
+            "apogee_m_delta": -12.8856201171875,
+            "assisted": {
+              "apogee_m": 1927.912109375,
+              "deployment_lateral_m": 1628.3068043395942,
+              "lateral_rms_m": 1280.8132467129633
+            },
+            "baseline": {
+              "apogee_m": 1940.7977294921875,
+              "deployment_lateral_m": 1661.6456948965558,
+              "lateral_rms_m": 1286.4818597264305
+            },
+            "deployment_lateral_m_delta": -33.33889055696159,
+            "episodes": 5,
+            "lateral_rms_m_delta": -5.668613013467166,
+            "scenario": "scenario_16"
+          },
+          {
+            "apogee_m_delta": 40.249755859375,
+            "assisted": {
+              "apogee_m": 2175.504833984375,
+              "deployment_lateral_m": 1652.7489407312655,
+              "lateral_rms_m": 1271.4083796683926
+            },
+            "baseline": {
+              "apogee_m": 2135.255078125,
+              "deployment_lateral_m": 1708.2391166455657,
+              "lateral_rms_m": 1303.5431332505752
+            },
+            "deployment_lateral_m_delta": -55.49017591430015,
+            "episodes": 5,
+            "lateral_rms_m_delta": -32.13475358218261,
+            "scenario": "scenario_17"
+          },
+          {
+            "apogee_m_delta": 32.404858398437455,
+            "assisted": {
+              "apogee_m": 1788.6250732421875,
+              "deployment_lateral_m": 1695.8755284264846,
+              "lateral_rms_m": 1352.2963755201263
+            },
+            "baseline": {
+              "apogee_m": 1756.22021484375,
+              "deployment_lateral_m": 1731.881429270815,
+              "lateral_rms_m": 1376.9384193612009
+            },
+            "deployment_lateral_m_delta": -36.00590084433043,
+            "episodes": 5,
+            "lateral_rms_m_delta": -24.64204384107461,
+            "scenario": "scenario_18"
+          },
+          {
+            "apogee_m_delta": -13.000732421875,
+            "assisted": {
+              "apogee_m": 2049.698681640625,
+              "deployment_lateral_m": 1623.1885261523953,
+              "lateral_rms_m": 1261.8979101586856
+            },
+            "baseline": {
+              "apogee_m": 2062.6994140625,
+              "deployment_lateral_m": 1660.1411329856035,
+              "lateral_rms_m": 1268.063577265662
+            },
+            "deployment_lateral_m_delta": -36.952606833208165,
+            "episodes": 5,
+            "lateral_rms_m_delta": -6.165667106976343,
+            "scenario": "scenario_19"
+          }
+        ],
+        "sha256": {
+          "assisted": "1d9a28ec83dfac5f9d16e84562450b1fd3317dbd2587885568561d2dca8fca15",
+          "baseline": "9b1d680d55f635a3a2cf84864498cb533a84132bbe15ba791154a3cd58bb5953"
+        }
+      },
+      "residual_off": {
+        "aggregate": {
+          "apogee_m_delta": 210.41851196289053,
+          "assisted": {
+            "apogee_m": 2184.16162109375,
+            "deployment_lateral_m": 1564.5285687975065,
+            "lateral_rms_m": 1190.7083142209483
+          },
+          "authority_gate_closed_ticks": 11280,
+          "authority_gate_open_ticks": 18720,
+          "baseline": {
+            "apogee_m": 1973.7431091308595,
+            "deployment_lateral_m": 1690.7564255008851,
+            "lateral_rms_m": 1309.4087332027586
+          },
+          "clipped_ticks": 0,
+          "confidence_gate": "none (residual decision target is ungated; seam clips only)",
+          "deployment_lateral_m_delta": -126.22785670337862,
+          "episodes": 20,
+          "interventions": 18720,
+          "lateral_rms_m_delta": -118.70041898181034,
+          "max_command_mps2": 5.771467208862305,
+          "mean_abs_correction_mps2": 5.00050919988018,
+          "mean_confidence": 0.3549672499785821,
+          "rows": 30000
+        },
+        "arm": "clip(export_delta); classical superposition removed",
+        "export_sha256": "2514b4e46148f70945601ebacc1b3eb2ea207ea819cc0f65f2a543375a8775f4",
+        "per_scenario": [
+          {
+            "apogee_m_delta": 213.5885009765625,
+            "assisted": {
+              "apogee_m": 2154.38623046875,
+              "deployment_lateral_m": 1571.4996702188964,
+              "lateral_rms_m": 1179.4788998154252
+            },
+            "baseline": {
+              "apogee_m": 1940.7977294921875,
+              "deployment_lateral_m": 1661.6456948965558,
+              "lateral_rms_m": 1286.4818597264305
+            },
+            "deployment_lateral_m_delta": -90.1460246776594,
+            "episodes": 5,
+            "lateral_rms_m_delta": -107.00295991100529,
+            "scenario": "scenario_16"
+          },
+          {
+            "apogee_m_delta": 197.27294921875,
+            "assisted": {
+              "apogee_m": 2332.52802734375,
+              "deployment_lateral_m": 1567.940427805206,
+              "lateral_rms_m": 1174.435506583773
+            },
+            "baseline": {
+              "apogee_m": 2135.255078125,
+              "deployment_lateral_m": 1708.2391166455657,
+              "lateral_rms_m": 1303.5431332505752
+            },
+            "deployment_lateral_m_delta": -140.29868884035977,
+            "episodes": 5,
+            "lateral_rms_m_delta": -129.10762666680216,
+            "scenario": "scenario_17"
+          },
+          {
+            "apogee_m_delta": 187.09428710937505,
+            "assisted": {
+              "apogee_m": 1943.314501953125,
+              "deployment_lateral_m": 1605.9282414450524,
+              "lateral_rms_m": 1278.271204779998
+            },
+            "baseline": {
+              "apogee_m": 1756.22021484375,
+              "deployment_lateral_m": 1731.881429270815,
+              "lateral_rms_m": 1376.9384193612009
+            },
+            "deployment_lateral_m_delta": -125.9531878257626,
+            "episodes": 5,
+            "lateral_rms_m_delta": -98.66721458120287,
+            "scenario": "scenario_18"
+          },
+          {
+            "apogee_m_delta": 243.71831054687482,
+            "assisted": {
+              "apogee_m": 2306.417724609375,
+              "deployment_lateral_m": 1511.2725283744903,
+              "lateral_rms_m": 1125.4770770723733
+            },
+            "baseline": {
+              "apogee_m": 2062.6994140625,
+              "deployment_lateral_m": 1660.1411329856035,
+              "lateral_rms_m": 1268.063577265662
+            },
+            "deployment_lateral_m_delta": -148.86860461111314,
+            "episodes": 5,
+            "lateral_rms_m_delta": -142.58650019328866,
+            "scenario": "scenario_19"
+          }
+        ],
+        "sha256": {
+          "assisted": "ac87d70a05a312066a287a8a500d2af41843172d882f9f4854ca77d75d5c993b",
+          "baseline": "9b1d680d55f635a3a2cf84864498cb533a84132bbe15ba791154a3cd58bb5953"
+        }
+      },
+      "residual_on": {
+        "aggregate": {
+          "apogee_m_delta": 360.8022949218748,
+          "assisted": {
+            "apogee_m": 2334.5454040527343,
+            "deployment_lateral_m": 1473.0610371444475,
+            "lateral_rms_m": 1138.4477089548313
+          },
+          "authority_gate_closed_ticks": 11280,
+          "authority_gate_open_ticks": 18720,
+          "baseline": {
+            "apogee_m": 1973.7431091308595,
+            "deployment_lateral_m": 1690.7564255008851,
+            "lateral_rms_m": 1309.4087332027586
+          },
+          "clipped_ticks": 0,
+          "confidence_gate": "none (residual decision target is ungated; seam clips only)",
+          "deployment_lateral_m_delta": -217.69538835643766,
+          "episodes": 20,
+          "interventions": 18720,
+          "lateral_rms_m_delta": -170.9610242479273,
+          "max_command_mps2": 6.771467208862305,
+          "mean_abs_correction_mps2": 4.796710047904792,
+          "mean_confidence": 0.3549672499785821,
+          "rows": 30000
+        },
+        "arm": "clip(physics_baseline + export_delta); shipped all-fix v5 arm",
+        "export_sha256": "2514b4e46148f70945601ebacc1b3eb2ea207ea819cc0f65f2a543375a8775f4",
+        "per_scenario": [
+          {
+            "apogee_m_delta": 395.0136474609376,
+            "assisted": {
+              "apogee_m": 2335.811376953125,
+              "deployment_lateral_m": 1446.8688687021981,
+              "lateral_rms_m": 1114.9804228286803
+            },
+            "baseline": {
+              "apogee_m": 1940.7977294921875,
+              "deployment_lateral_m": 1661.6456948965558,
+              "lateral_rms_m": 1286.4818597264305
+            },
+            "deployment_lateral_m_delta": -214.77682619435768,
+            "episodes": 5,
+            "lateral_rms_m_delta": -171.50143689775018,
+            "scenario": "scenario_16"
+          },
+          {
+            "apogee_m_delta": 389.896240234375,
+            "assisted": {
+              "apogee_m": 2525.151318359375,
+              "deployment_lateral_m": 1434.295040650423,
+              "lateral_rms_m": 1106.6266903257426
+            },
+            "baseline": {
+              "apogee_m": 2135.255078125,
+              "deployment_lateral_m": 1708.2391166455657,
+              "lateral_rms_m": 1303.5431332505752
+            },
+            "deployment_lateral_m_delta": -273.9440759951426,
+            "episodes": 5,
+            "lateral_rms_m_delta": -196.9164429248326,
+            "scenario": "scenario_17"
+          },
+          {
+            "apogee_m_delta": 299.0615966796877,
+            "assisted": {
+              "apogee_m": 2055.2818115234377,
+              "deployment_lateral_m": 1594.6177258755322,
+              "lateral_rms_m": 1245.7513040302388
+            },
+            "baseline": {
+              "apogee_m": 1756.22021484375,
+              "deployment_lateral_m": 1731.881429270815,
+              "lateral_rms_m": 1376.9384193612009
+            },
+            "deployment_lateral_m_delta": -137.26370339528285,
+            "episodes": 5,
+            "lateral_rms_m_delta": -131.18711533096211,
+            "scenario": "scenario_18"
+          },
+          {
+            "apogee_m_delta": 359.2376953124999,
+            "assisted": {
+              "apogee_m": 2421.937109375,
+              "deployment_lateral_m": 1409.3252988866238,
+              "lateral_rms_m": 1079.144317305359
+            },
+            "baseline": {
+              "apogee_m": 2062.6994140625,
+              "deployment_lateral_m": 1660.1411329856035,
+              "lateral_rms_m": 1268.063577265662
+            },
+            "deployment_lateral_m_delta": -250.81583409897962,
+            "episodes": 5,
+            "lateral_rms_m_delta": -188.91925996030295,
+            "scenario": "scenario_19"
+          }
+        ],
+        "sha256": {
+          "assisted": "32e4d882333d468f7e946bb09f31183adeff70d52a134b1d9116b10df181e357",
+          "baseline": "9b1d680d55f635a3a2cf84864498cb533a84132bbe15ba791154a3cd58bb5953"
+        }
+      },
+      "zero_command": {
+        "aggregate": {
+          "apogee_m_delta": 0.0,
+          "assisted": {
+            "apogee_m": 1973.7431091308595,
+            "deployment_lateral_m": 1690.7564255008851,
+            "lateral_rms_m": 1309.4087332027586
+          },
+          "baseline": {
+            "apogee_m": 1973.7431091308595,
+            "deployment_lateral_m": 1690.7564255008851,
+            "lateral_rms_m": 1309.4087332027586
+          },
+          "deployment_lateral_m_delta": 0.0,
+          "episodes": 20,
+          "lateral_rms_m_delta": 0.0
+        },
+        "arm": "no TSV; Simulator::run_episode ControlMode::None; paired gate control",
+        "sha256": {
+          "assisted": "9b1d680d55f635a3a2cf84864498cb533a84132bbe15ba791154a3cd58bb5953"
+        },
+        "track": {
+          "16": {
+            "apogee_m": 1877.869873046875,
+            "deployment_altitude_m": 1877.869873046875,
+            "deployment_lateral_m": 1727.1070926424495,
+            "deployment_tick": 1040,
+            "deployment_time_s": 20.8,
+            "lateral_rms_m": 1346.766707454931,
+            "ticks": 1500
+          },
+          "17": {
+            "apogee_m": 2221.597900390625,
+            "deployment_altitude_m": 2221.597900390625,
+            "deployment_lateral_m": 1672.3621350048832,
+            "deployment_tick": 1092,
+            "deployment_time_s": 21.84,
+            "lateral_rms_m": 1274.8636949706695,
+            "ticks": 1500
+          },
+          "18": {
+            "apogee_m": 1756.0264892578125,
+            "deployment_altitude_m": 1756.0264892578125,
+            "deployment_lateral_m": 1692.0322118854704,
+            "deployment_tick": 1008,
+            "deployment_time_s": 20.16,
+            "lateral_rms_m": 1341.833408530769,
+            "ticks": 1500
+          },
+          "19": {
+            "apogee_m": 2168.11767578125,
+            "deployment_altitude_m": 2168.11767578125,
+            "deployment_lateral_m": 1669.0094303301828,
+            "deployment_tick": 1090,
+            "deployment_time_s": 21.8,
+            "lateral_rms_m": 1268.1079617488474,
+            "ticks": 1500
+          },
+          "36": {
+            "apogee_m": 1987.8505859375,
+            "deployment_altitude_m": 1987.8505859375,
+            "deployment_lateral_m": 1628.2396262558714,
+            "deployment_tick": 1047,
+            "deployment_time_s": 20.94,
+            "lateral_rms_m": 1260.793255626861,
+            "ticks": 1500
+          },
+          "37": {
+            "apogee_m": 2124.60595703125,
+            "deployment_altitude_m": 2124.60595703125,
+            "deployment_lateral_m": 1659.7564295318743,
+            "deployment_tick": 1085,
+            "deployment_time_s": 21.7,
+            "lateral_rms_m": 1263.480776568489,
+            "ticks": 1500
+          },
+          "38": {
+            "apogee_m": 1651.465087890625,
+            "deployment_altitude_m": 1651.4642333984375,
+            "deployment_lateral_m": 1740.4901634437088,
+            "deployment_tick": 998,
+            "deployment_time_s": 19.96,
+            "lateral_rms_m": 1395.1803103804946,
+            "ticks": 1500
+          },
+          "39": {
+            "apogee_m": 2217.6396484375,
+            "deployment_altitude_m": 2217.6396484375,
+            "deployment_lateral_m": 1667.3221901733466,
+            "deployment_tick": 1107,
+            "deployment_time_s": 22.14,
+            "lateral_rms_m": 1253.9180681429784,
+            "ticks": 1500
+          },
+          "56": {
+            "apogee_m": 1991.337646484375,
+            "deployment_altitude_m": 1991.337646484375,
+            "deployment_lateral_m": 1600.2408009550852,
+            "deployment_tick": 1060,
+            "deployment_time_s": 21.2,
+            "lateral_rms_m": 1227.431198406748,
+            "ticks": 1500
+          },
+          "57": {
+            "apogee_m": 2072.58056640625,
+            "deployment_altitude_m": 2072.580078125,
+            "deployment_lateral_m": 1772.2230490380862,
+            "deployment_tick": 1083,
+            "deployment_time_s": 21.66,
+            "lateral_rms_m": 1351.5635479970658,
+            "ticks": 1500
+          },
+          "58": {
+            "apogee_m": 1616.8660888671875,
+            "deployment_altitude_m": 1616.8653564453125,
+            "deployment_lateral_m": 1746.3049955364356,
+            "deployment_tick": 978,
+            "deployment_time_s": 19.56,
+            "lateral_rms_m": 1410.5658713484272,
+            "ticks": 1500
+          },
+          "59": {
+            "apogee_m": 1905.587646484375,
+            "deployment_altitude_m": 1905.5872802734375,
+            "deployment_lateral_m": 1653.0597122187114,
+            "deployment_tick": 1061,
+            "deployment_time_s": 21.22,
+            "lateral_rms_m": 1271.760000451193,
+            "ticks": 1500
+          },
+          "76": {
+            "apogee_m": 1827.7530517578125,
+            "deployment_altitude_m": 1827.7528076171875,
+            "deployment_lateral_m": 1733.116767938441,
+            "deployment_tick": 1036,
+            "deployment_time_s": 20.72,
+            "lateral_rms_m": 1351.974255344942,
+            "ticks": 1500
+          },
+          "77": {
+            "apogee_m": 2069.9609375,
+            "deployment_altitude_m": 2069.958984375,
+            "deployment_lateral_m": 1731.0929107587683,
+            "deployment_tick": 1082,
+            "deployment_time_s": 21.64,
+            "lateral_rms_m": 1320.24367167879,
+            "ticks": 1500
+          },
+          "78": {
+            "apogee_m": 1955.4095458984375,
+            "deployment_altitude_m": 1955.407958984375,
+            "deployment_lateral_m": 1638.3679191300819,
+            "deployment_tick": 1038,
+            "deployment_time_s": 20.76,
+            "lateral_rms_m": 1276.3651524944835,
+            "ticks": 1500
+          },
+          "79": {
+            "apogee_m": 2019.696044921875,
+            "deployment_altitude_m": 2019.6944580078125,
+            "deployment_lateral_m": 1634.8587353470289,
+            "deployment_tick": 1058,
+            "deployment_time_s": 21.16,
+            "lateral_rms_m": 1261.856022148703,
+            "ticks": 1500
+          },
+          "96": {
+            "apogee_m": 2019.177490234375,
+            "deployment_altitude_m": 2019.177490234375,
+            "deployment_lateral_m": 1614.5601675146124,
+            "deployment_tick": 1062,
+            "deployment_time_s": 21.240000000000002,
+            "lateral_rms_m": 1239.9096520896037,
+            "ticks": 1500
+          },
+          "97": {
+            "apogee_m": 2187.530029296875,
+            "deployment_altitude_m": 2187.5283203125,
+            "deployment_lateral_m": 1703.3380994384256,
+            "deployment_tick": 1082,
+            "deployment_time_s": 21.64,
+            "lateral_rms_m": 1305.6396941074308,
+            "ticks": 1500
+          },
+          "98": {
+            "apogee_m": 1801.3338623046875,
+            "deployment_altitude_m": 1801.3319091796875,
+            "deployment_lateral_m": 1836.016566998543,
+            "deployment_tick": 1009,
+            "deployment_time_s": 20.18,
+            "lateral_rms_m": 1453.9422199409037,
+            "ticks": 1500
+          },
+          "99": {
+            "apogee_m": 2002.4560546875,
+            "deployment_altitude_m": 2002.45556640625,
+            "deployment_lateral_m": 1676.1317508110728,
+            "deployment_tick": 1071,
+            "deployment_time_s": 21.42,
+            "lateral_rms_m": 1284.4702161950408,
+            "ticks": 1500
+          }
+        }
+      }
+    },
+    "2": {
+      "classical_only": {
+        "aggregate": {
+          "apogee_m_delta": -52.176293945312636,
+          "assisted": {
+            "apogee_m": 1920.682275390625,
+            "deployment_lateral_m": 1656.3727378032988,
+            "lateral_rms_m": 1317.0475223620767
+          },
+          "authority_gate_closed_ticks": 11258,
+          "authority_gate_open_ticks": 18742,
+          "baseline": {
+            "apogee_m": 1972.8585693359375,
+            "deployment_lateral_m": 1688.4185782917739,
+            "lateral_rms_m": 1306.3969471896512
+          },
+          "clipped_ticks": 0,
+          "confidence_gate": "none (residual decision target is ungated; seam clips only)",
+          "deployment_lateral_m_delta": -32.04584048847505,
+          "episodes": 20,
+          "interventions": 18742,
+          "lateral_rms_m_delta": 10.650575172425533,
+          "max_command_mps2": 1.0,
+          "mean_abs_correction_mps2": 0.9961303282923841,
+          "mean_confidence": 0.35384097194969655,
+          "rows": 30000
+        },
+        "arm": "clip(physics_baseline); learned correction removed = ResidualPolicy(enabled=False)",
+        "export_sha256": "b2a0a521c7e70070c1f704d776200d643e82ec3c58732738b0756e3f9a9bb3b2",
+        "per_scenario": [
+          {
+            "apogee_m_delta": -51.35263671875009,
+            "assisted": {
+              "apogee_m": 1903.8428955078125,
+              "deployment_lateral_m": 1625.3774039091616,
+              "lateral_rms_m": 1288.7208492003806
+            },
+            "baseline": {
+              "apogee_m": 1955.1955322265626,
+              "deployment_lateral_m": 1653.1631828938928,
+              "lateral_rms_m": 1278.8022057770668
+            },
+            "deployment_lateral_m_delta": -27.785778984731223,
+            "episodes": 5,
+            "lateral_rms_m_delta": 9.918643423313824,
+            "scenario": "scenario_16"
+          },
+          {
+            "apogee_m_delta": -56.472705078125045,
+            "assisted": {
+              "apogee_m": 1988.0101318359375,
+              "deployment_lateral_m": 1641.1569075565185,
+              "lateral_rms_m": 1293.2885203478475
+            },
+            "baseline": {
+              "apogee_m": 2044.4828369140625,
+              "deployment_lateral_m": 1673.1248291005438,
+              "lateral_rms_m": 1279.600057233055
+            },
+            "deployment_lateral_m_delta": -31.96792154402533,
+            "episodes": 5,
+            "lateral_rms_m_delta": 13.688463114792512,
+            "scenario": "scenario_17"
+          },
+          {
+            "apogee_m_delta": -45.84384765625009,
+            "assisted": {
+              "apogee_m": 1779.8233642578125,
+              "deployment_lateral_m": 1734.4169516438667,
+              "lateral_rms_m": 1406.486335979856
+            },
+            "baseline": {
+              "apogee_m": 1825.6672119140626,
+              "deployment_lateral_m": 1774.1889928267817,
+              "lateral_rms_m": 1399.6535372529443
+            },
+            "deployment_lateral_m_delta": -39.77204118291502,
+            "episodes": 5,
+            "lateral_rms_m_delta": 6.832798726911733,
+            "scenario": "scenario_18"
+          },
+          {
+            "apogee_m_delta": -55.03598632812509,
+            "assisted": {
+              "apogee_m": 2011.0527099609376,
+              "deployment_lateral_m": 1621.984193401224,
+              "lateral_rms_m": 1275.482758533029
+            },
+            "baseline": {
+              "apogee_m": 2066.0886962890627,
+              "deployment_lateral_m": 1650.1476893863044,
+              "lateral_rms_m": 1262.9135054270164
+            },
+            "deployment_lateral_m_delta": -28.163495985080317,
+            "episodes": 5,
+            "lateral_rms_m_delta": 12.569253106012638,
+            "scenario": "scenario_19"
+          }
+        ],
+        "sha256": {
+          "assisted": "ea1e1b84097523701b8b5cc0e11398bf4f12d8b43597cedeab0c195467a8dba5",
+          "baseline": "f0443872b644520d9f413e11b608241b0d8ea9bea65d5605b5e026ce08597aa2"
+        }
+      },
+      "oracle_gtheta": {
+        "aggregate": {
+          "apogee_m_delta": -2.1510437011718295,
+          "assisted": {
+            "apogee_m": 1970.7075256347657,
+            "deployment_lateral_m": 1650.632593337973,
+            "lateral_rms_m": 1295.8939994859302
+          },
+          "baseline": {
+            "apogee_m": 1972.8585693359375,
+            "deployment_lateral_m": 1688.4185782917739,
+            "lateral_rms_m": 1306.3969471896512
+          },
+          "deployment_lateral_m_delta": -37.785984953800835,
+          "episodes": 20,
+          "lateral_rms_m_delta": -10.50294770372102
+        },
+        "arm": "run_episode_with_oracle / fin_accel_command; positive control",
+        "authority": {
+          "active_ticks": 16584,
+          "cap_fraction": 1.0,
+          "cap_hit_ticks": 16584,
+          "max_command_mps2": 10.0
+        },
+        "per_scenario": [
+          {
+            "apogee_m_delta": 5.547045898437318,
+            "assisted": {
+              "apogee_m": 1960.742578125,
+              "deployment_lateral_m": 1616.689893113301,
+              "lateral_rms_m": 1263.7955677230457
+            },
+            "baseline": {
+              "apogee_m": 1955.1955322265626,
+              "deployment_lateral_m": 1653.1631828938928,
+              "lateral_rms_m": 1278.8022057770668
+            },
+            "deployment_lateral_m_delta": -36.47328978059181,
+            "episodes": 5,
+            "lateral_rms_m_delta": -15.006638054021096,
+            "scenario": "scenario_16"
+          },
+          {
+            "apogee_m_delta": -16.26730957031259,
+            "assisted": {
+              "apogee_m": 2028.21552734375,
+              "deployment_lateral_m": 1634.6599555111102,
+              "lateral_rms_m": 1275.2538429156039
+            },
+            "baseline": {
+              "apogee_m": 2044.4828369140625,
+              "deployment_lateral_m": 1673.1248291005438,
+              "lateral_rms_m": 1279.600057233055
+            },
+            "deployment_lateral_m_delta": -38.46487358943364,
+            "episodes": 5,
+            "lateral_rms_m_delta": -4.346214317451086,
+            "scenario": "scenario_17"
+          },
+          {
+            "apogee_m_delta": -11.705859375000045,
+            "assisted": {
+              "apogee_m": 1813.9613525390625,
+              "deployment_lateral_m": 1736.8235172205611,
+              "lateral_rms_m": 1394.6150542280798
+            },
+            "baseline": {
+              "apogee_m": 1825.6672119140626,
+              "deployment_lateral_m": 1774.1889928267817,
+              "lateral_rms_m": 1399.6535372529443
+            },
+            "deployment_lateral_m_delta": -37.36547560622057,
+            "episodes": 5,
+            "lateral_rms_m_delta": -5.03848302486449,
+            "scenario": "scenario_18"
+          },
+          {
+            "apogee_m_delta": 13.821948242187318,
+            "assisted": {
+              "apogee_m": 2079.91064453125,
+              "deployment_lateral_m": 1611.20964562092,
+              "lateral_rms_m": 1244.5731321491478
+            },
+            "baseline": {
+              "apogee_m": 2066.0886962890627,
+              "deployment_lateral_m": 1650.1476893863044,
+              "lateral_rms_m": 1262.9135054270164
+            },
+            "deployment_lateral_m_delta": -38.938043765384464,
+            "episodes": 5,
+            "lateral_rms_m_delta": -18.340373277868594,
+            "scenario": "scenario_19"
+          }
+        ],
+        "sha256": {
+          "assisted": "92cfa601580d151f83c89d9a8c9ee5790b06118f4b80fe17cc6b188c81c02336",
+          "baseline": "f0443872b644520d9f413e11b608241b0d8ea9bea65d5605b5e026ce08597aa2"
+        }
+      },
+      "residual_off": {
+        "aggregate": {
+          "apogee_m_delta": 132.8586059570314,
+          "assisted": {
+            "apogee_m": 2105.717175292969,
+            "deployment_lateral_m": 1611.285206631465,
+            "lateral_rms_m": 1225.1907022177563
+          },
+          "authority_gate_closed_ticks": 11258,
+          "authority_gate_open_ticks": 18742,
+          "baseline": {
+            "apogee_m": 1972.8585693359375,
+            "deployment_lateral_m": 1688.4185782917739,
+            "lateral_rms_m": 1306.3969471896512
+          },
+          "clipped_ticks": 0,
+          "confidence_gate": "none (residual decision target is ungated; seam clips only)",
+          "deployment_lateral_m_delta": -77.13337166030897,
+          "episodes": 20,
+          "interventions": 18742,
+          "lateral_rms_m_delta": -81.20624497189488,
+          "max_command_mps2": 6.017488479614258,
+          "mean_abs_correction_mps2": 5.724600605549167,
+          "mean_confidence": 0.35384097194969655,
+          "rows": 30000
+        },
+        "arm": "clip(export_delta); classical superposition removed",
+        "export_sha256": "b2a0a521c7e70070c1f704d776200d643e82ec3c58732738b0756e3f9a9bb3b2",
+        "per_scenario": [
+          {
+            "apogee_m_delta": 105.00373535156223,
+            "assisted": {
+              "apogee_m": 2060.199267578125,
+              "deployment_lateral_m": 1588.790792757033,
+              "lateral_rms_m": 1210.31993015161
+            },
+            "baseline": {
+              "apogee_m": 1955.1955322265626,
+              "deployment_lateral_m": 1653.1631828938928,
+              "lateral_rms_m": 1278.8022057770668
+            },
+            "deployment_lateral_m_delta": -64.37239013685985,
+            "episodes": 5,
+            "lateral_rms_m_delta": -68.48227562545685,
+            "scenario": "scenario_16"
+          },
+          {
+            "apogee_m_delta": 106.38261718750005,
+            "assisted": {
+              "apogee_m": 2150.8654541015626,
+              "deployment_lateral_m": 1632.2476272111282,
+              "lateral_rms_m": 1212.9743330235208
+            },
+            "baseline": {
+              "apogee_m": 2044.4828369140625,
+              "deployment_lateral_m": 1673.1248291005438,
+              "lateral_rms_m": 1279.600057233055
+            },
+            "deployment_lateral_m_delta": -40.87720188941557,
+            "episodes": 5,
+            "lateral_rms_m_delta": -66.62572420953416,
+            "scenario": "scenario_17"
+          },
+          {
+            "apogee_m_delta": 129.14353027343736,
+            "assisted": {
+              "apogee_m": 1954.8107421875,
+              "deployment_lateral_m": 1680.8689948002418,
+              "lateral_rms_m": 1321.7628096446392
+            },
+            "baseline": {
+              "apogee_m": 1825.6672119140626,
+              "deployment_lateral_m": 1774.1889928267817,
+              "lateral_rms_m": 1399.6535372529443
+            },
+            "deployment_lateral_m_delta": -93.3199980265399,
+            "episodes": 5,
+            "lateral_rms_m_delta": -77.89072760830504,
+            "scenario": "scenario_18"
+          },
+          {
+            "apogee_m_delta": 190.904541015625,
+            "assisted": {
+              "apogee_m": 2256.9932373046877,
+              "deployment_lateral_m": 1539.854210979389,
+              "lateral_rms_m": 1149.4046443040033
+            },
+            "baseline": {
+              "apogee_m": 2066.0886962890627,
+              "deployment_lateral_m": 1650.1476893863044,
+              "lateral_rms_m": 1262.9135054270164
+            },
+            "deployment_lateral_m_delta": -110.29347840691526,
+            "episodes": 5,
+            "lateral_rms_m_delta": -113.50886112301305,
+            "scenario": "scenario_19"
+          }
+        ],
+        "sha256": {
+          "assisted": "168b470149793c8a6723cd34698471ed5e2f54948093483dd504e70c46d76f4d",
+          "baseline": "f0443872b644520d9f413e11b608241b0d8ea9bea65d5605b5e026ce08597aa2"
+        }
+      },
+      "residual_on": {
+        "aggregate": {
+          "apogee_m_delta": 278.2841613769531,
+          "assisted": {
+            "apogee_m": 2251.1427307128906,
+            "deployment_lateral_m": 1558.4425317098849,
+            "lateral_rms_m": 1179.4412546098401
+          },
+          "authority_gate_closed_ticks": 11258,
+          "authority_gate_open_ticks": 18742,
+          "baseline": {
+            "apogee_m": 1972.8585693359375,
+            "deployment_lateral_m": 1688.4185782917739,
+            "lateral_rms_m": 1306.3969471896512
+          },
+          "clipped_ticks": 0,
+          "confidence_gate": "none (residual decision target is ungated; seam clips only)",
+          "deployment_lateral_m_delta": -129.97604658188902,
+          "episodes": 20,
+          "interventions": 18742,
+          "lateral_rms_m_delta": -126.95569257981106,
+          "max_command_mps2": 6.99844217300415,
+          "mean_abs_correction_mps2": 5.810636736650998,
+          "mean_confidence": 0.35384097194969655,
+          "rows": 30000
+        },
+        "arm": "clip(physics_baseline + export_delta); shipped all-fix v5 arm",
+        "export_sha256": "b2a0a521c7e70070c1f704d776200d643e82ec3c58732738b0756e3f9a9bb3b2",
+        "per_scenario": [
+          {
+            "apogee_m_delta": 281.0079345703125,
+            "assisted": {
+              "apogee_m": 2236.203466796875,
+              "deployment_lateral_m": 1558.377560593502,
+              "lateral_rms_m": 1158.255141293299
+            },
+            "baseline": {
+              "apogee_m": 1955.1955322265626,
+              "deployment_lateral_m": 1653.1631828938928,
+              "lateral_rms_m": 1278.8022057770668
+            },
+            "deployment_lateral_m_delta": -94.78562230039074,
+            "episodes": 5,
+            "lateral_rms_m_delta": -120.54706448376783,
+            "scenario": "scenario_16"
+          },
+          {
+            "apogee_m_delta": 211.31345214843736,
+            "assisted": {
+              "apogee_m": 2255.7962890625,
+              "deployment_lateral_m": 1573.19622486375,
+              "lateral_rms_m": 1175.8943289398667
+            },
+            "baseline": {
+              "apogee_m": 2044.4828369140625,
+              "deployment_lateral_m": 1673.1248291005438,
+              "lateral_rms_m": 1279.600057233055
+            },
+            "deployment_lateral_m_delta": -99.92860423679372,
+            "episodes": 5,
+            "lateral_rms_m_delta": -103.70572829318826,
+            "scenario": "scenario_17"
+          },
+          {
+            "apogee_m_delta": 269.9649169921872,
+            "assisted": {
+              "apogee_m": 2095.63212890625,
+              "deployment_lateral_m": 1709.4678954077685,
+              "lateral_rms_m": 1286.9957384602083
+            },
+            "baseline": {
+              "apogee_m": 1825.6672119140626,
+              "deployment_lateral_m": 1774.1889928267817,
+              "lateral_rms_m": 1399.6535372529443
+            },
+            "deployment_lateral_m_delta": -64.72109741901318,
+            "episodes": 5,
+            "lateral_rms_m_delta": -112.657798792736,
+            "scenario": "scenario_18"
+          },
+          {
+            "apogee_m_delta": 350.850341796875,
+            "assisted": {
+              "apogee_m": 2416.9390380859377,
+              "deployment_lateral_m": 1374.4835502298624,
+              "lateral_rms_m": 1087.973444677074
+            },
+            "baseline": {
+              "apogee_m": 2066.0886962890627,
+              "deployment_lateral_m": 1650.1476893863044,
+              "lateral_rms_m": 1262.9135054270164
+            },
+            "deployment_lateral_m_delta": -275.66413915644193,
+            "episodes": 5,
+            "lateral_rms_m_delta": -174.9400607499424,
+            "scenario": "scenario_19"
+          }
+        ],
+        "sha256": {
+          "assisted": "d70b48c6c79a3a6d831219aa7b07b9111e98e70df7c29666102e02e470c15c8e",
+          "baseline": "f0443872b644520d9f413e11b608241b0d8ea9bea65d5605b5e026ce08597aa2"
+        }
+      },
+      "zero_command": {
+        "aggregate": {
+          "apogee_m_delta": 0.0,
+          "assisted": {
+            "apogee_m": 1972.8585693359375,
+            "deployment_lateral_m": 1688.4185782917739,
+            "lateral_rms_m": 1306.3969471896512
+          },
+          "baseline": {
+            "apogee_m": 1972.8585693359375,
+            "deployment_lateral_m": 1688.4185782917739,
+            "lateral_rms_m": 1306.3969471896512
+          },
+          "deployment_lateral_m_delta": 0.0,
+          "episodes": 20,
+          "lateral_rms_m_delta": 0.0
+        },
+        "arm": "no TSV; Simulator::run_episode ControlMode::None; paired gate control",
+        "sha256": {
+          "assisted": "f0443872b644520d9f413e11b608241b0d8ea9bea65d5605b5e026ce08597aa2"
+        },
+        "track": {
+          "16": {
+            "apogee_m": 1797.371337890625,
+            "deployment_altitude_m": 1797.3704833984375,
+            "deployment_lateral_m": 1639.97067510834,
+            "deployment_tick": 1028,
+            "deployment_time_s": 20.56,
+            "lateral_rms_m": 1283.4099145097962,
+            "ticks": 1500
+          },
+          "17": {
+            "apogee_m": 1919.093994140625,
+            "deployment_altitude_m": 1919.093994140625,
+            "deployment_lateral_m": 1629.9958944840487,
+            "deployment_tick": 1068,
+            "deployment_time_s": 21.36,
+            "lateral_rms_m": 1250.1017934713816,
+            "ticks": 1500
+          },
+          "18": {
+            "apogee_m": 1676.89697265625,
+            "deployment_altitude_m": 1676.89697265625,
+            "deployment_lateral_m": 1766.9555736614816,
+            "deployment_tick": 993,
+            "deployment_time_s": 19.86,
+            "lateral_rms_m": 1416.1172287950822,
+            "ticks": 1500
+          },
+          "19": {
+            "apogee_m": 2101.091552734375,
+            "deployment_altitude_m": 2101.091552734375,
+            "deployment_lateral_m": 1590.9679311497966,
+            "deployment_tick": 1083,
+            "deployment_time_s": 21.66,
+            "lateral_rms_m": 1209.7214774131417,
+            "ticks": 1500
+          },
+          "36": {
+            "apogee_m": 1949.796142578125,
+            "deployment_altitude_m": 1949.7947998046875,
+            "deployment_lateral_m": 1759.365375174122,
+            "deployment_tick": 1043,
+            "deployment_time_s": 20.86,
+            "lateral_rms_m": 1368.2999598063946,
+            "ticks": 1500
+          },
+          "37": {
+            "apogee_m": 2109.104248046875,
+            "deployment_altitude_m": 2109.102294921875,
+            "deployment_lateral_m": 1666.058161331045,
+            "deployment_tick": 1092,
+            "deployment_time_s": 21.84,
+            "lateral_rms_m": 1265.7652053653103,
+            "ticks": 1500
+          },
+          "38": {
+            "apogee_m": 1935.8148193359375,
+            "deployment_altitude_m": 1935.81298828125,
+            "deployment_lateral_m": 1826.8086659099638,
+            "deployment_tick": 1042,
+            "deployment_time_s": 20.84,
+            "lateral_rms_m": 1422.9531213679322,
+            "ticks": 1500
+          },
+          "39": {
+            "apogee_m": 2200.485595703125,
+            "deployment_altitude_m": 2200.485595703125,
+            "deployment_lateral_m": 1701.9528962746426,
+            "deployment_tick": 1096,
+            "deployment_time_s": 21.92,
+            "lateral_rms_m": 1290.7360816288385,
+            "ticks": 1500
+          },
+          "56": {
+            "apogee_m": 2159.12939453125,
+            "deployment_altitude_m": 2159.1279296875,
+            "deployment_lateral_m": 1634.8694268007118,
+            "deployment_tick": 1088,
+            "deployment_time_s": 21.76,
+            "lateral_rms_m": 1244.2818572552765,
+            "ticks": 1500
+          },
+          "57": {
+            "apogee_m": 2221.966064453125,
+            "deployment_altitude_m": 2221.965576171875,
+            "deployment_lateral_m": 1624.0875206675962,
+            "deployment_tick": 1094,
+            "deployment_time_s": 21.88,
+            "lateral_rms_m": 1236.0818336420787,
+            "ticks": 1500
+          },
+          "58": {
+            "apogee_m": 1880.9588623046875,
+            "deployment_altitude_m": 1880.95751953125,
+            "deployment_lateral_m": 1819.5806636983937,
+            "deployment_tick": 1024,
+            "deployment_time_s": 20.48,
+            "lateral_rms_m": 1430.4601326055822,
+            "ticks": 1500
+          },
+          "59": {
+            "apogee_m": 1917.4178466796875,
+            "deployment_altitude_m": 1917.4171142578125,
+            "deployment_lateral_m": 1682.6440388602825,
+            "deployment_tick": 1056,
+            "deployment_time_s": 21.12,
+            "lateral_rms_m": 1301.3358285766512,
+            "ticks": 1500
+          },
+          "76": {
+            "apogee_m": 1902.802001953125,
+            "deployment_altitude_m": 1902.802001953125,
+            "deployment_lateral_m": 1652.2138463265903,
+            "deployment_tick": 1050,
+            "deployment_time_s": 21.0,
+            "lateral_rms_m": 1278.9978467287665,
+            "ticks": 1500
+          },
+          "77": {
+            "apogee_m": 2053.4482421875,
+            "deployment_altitude_m": 2053.4482421875,
+            "deployment_lateral_m": 1730.7866210850168,
+            "deployment_tick": 1083,
+            "deployment_time_s": 21.66,
+            "lateral_rms_m": 1320.4148172545617,
+            "ticks": 1500
+          },
+          "78": {
+            "apogee_m": 1940.8328857421875,
+            "deployment_altitude_m": 1940.8328857421875,
+            "deployment_lateral_m": 1737.9709249540865,
+            "deployment_tick": 1038,
+            "deployment_time_s": 20.76,
+            "lateral_rms_m": 1356.160196350653,
+            "ticks": 1500
+          },
+          "79": {
+            "apogee_m": 1955.95263671875,
+            "deployment_altitude_m": 1955.9512939453125,
+            "deployment_lateral_m": 1651.1907964349662,
+            "deployment_tick": 1064,
+            "deployment_time_s": 21.28,
+            "lateral_rms_m": 1270.3309510873437,
+            "ticks": 1500
+          },
+          "96": {
+            "apogee_m": 1966.8787841796875,
+            "deployment_altitude_m": 1966.8785400390625,
+            "deployment_lateral_m": 1573.932517969387,
+            "deployment_tick": 1053,
+            "deployment_time_s": 21.06,
+            "lateral_rms_m": 1213.7614207914878,
+            "ticks": 1500
+          },
+          "97": {
+            "apogee_m": 1918.8016357421875,
+            "deployment_altitude_m": 1918.8016357421875,
+            "deployment_lateral_m": 1711.9621646741712,
+            "deployment_tick": 1060,
+            "deployment_time_s": 21.2,
+            "lateral_rms_m": 1323.0917935332282,
+            "ticks": 1500
+          },
+          "98": {
+            "apogee_m": 1693.83251953125,
+            "deployment_altitude_m": 1693.83251953125,
+            "deployment_lateral_m": 1716.9607690656715,
+            "deployment_tick": 999,
+            "deployment_time_s": 19.98,
+            "lateral_rms_m": 1370.9777026934353,
+            "ticks": 1500
+          },
+          "99": {
+            "apogee_m": 2155.495849609375,
+            "deployment_altitude_m": 2155.495849609375,
+            "deployment_lateral_m": 1621.540118870485,
+            "deployment_tick": 1082,
+            "deployment_time_s": 21.64,
+            "lateral_rms_m": 1240.2061367324445,
+            "ticks": 1500
+          }
+        }
+      }
+    },
+    "3": {
+      "classical_only": {
+        "aggregate": {
+          "apogee_m_delta": -51.33447265625,
+          "assisted": {
+            "apogee_m": 1931.6688903808595,
+            "deployment_lateral_m": 1657.3215615679105,
+            "lateral_rms_m": 1316.3365064174902
+          },
+          "authority_gate_closed_ticks": 11250,
+          "authority_gate_open_ticks": 18750,
+          "baseline": {
+            "apogee_m": 1983.0033630371095,
+            "deployment_lateral_m": 1689.1858363442045,
+            "lateral_rms_m": 1306.38016408707
+          },
+          "clipped_ticks": 0,
+          "confidence_gate": "none (residual decision target is ungated; seam clips only)",
+          "deployment_lateral_m_delta": -31.864274776293996,
+          "episodes": 20,
+          "interventions": 18750,
+          "lateral_rms_m_delta": 9.956342330420284,
+          "max_command_mps2": 1.0,
+          "mean_abs_correction_mps2": 0.9965065821850051,
+          "mean_confidence": 0.3648979654878378,
+          "rows": 30000
+        },
+        "arm": "clip(physics_baseline); learned correction removed = ResidualPolicy(enabled=False)",
+        "export_sha256": "6d4d89d2bd896808edbbe40c176354f51c2186681da7fb7d2a91066812f4a968",
+        "per_scenario": [
+          {
+            "apogee_m_delta": -52.087573242187545,
+            "assisted": {
+              "apogee_m": 1931.7115966796875,
+              "deployment_lateral_m": 1611.0204445991515,
+              "lateral_rms_m": 1281.6032939047157
+            },
+            "baseline": {
+              "apogee_m": 1983.799169921875,
+              "deployment_lateral_m": 1645.7205894449971,
+              "lateral_rms_m": 1272.5695260112736
+            },
+            "deployment_lateral_m_delta": -34.70014484584567,
+            "episodes": 5,
+            "lateral_rms_m_delta": 9.033767893442018,
+            "scenario": "scenario_16"
+          },
+          {
+            "apogee_m_delta": -60.23525390624991,
+            "assisted": {
+              "apogee_m": 1952.011279296875,
+              "deployment_lateral_m": 1637.3870705471631,
+              "lateral_rms_m": 1293.648719285552
+            },
+            "baseline": {
+              "apogee_m": 2012.246533203125,
+              "deployment_lateral_m": 1669.9617141762494,
+              "lateral_rms_m": 1279.3677014245936
+            },
+            "deployment_lateral_m_delta": -32.57464362908627,
+            "episodes": 5,
+            "lateral_rms_m_delta": 14.2810178609584,
+            "scenario": "scenario_17"
+          },
+          {
+            "apogee_m_delta": -40.05617675781241,
+            "assisted": {
+              "apogee_m": 1844.6395751953125,
+              "deployment_lateral_m": 1751.9310325782048,
+              "lateral_rms_m": 1406.4522070885855
+            },
+            "baseline": {
+              "apogee_m": 1884.695751953125,
+              "deployment_lateral_m": 1784.65368433375,
+              "lateral_rms_m": 1400.9906764551058
+            },
+            "deployment_lateral_m_delta": -32.72265175554526,
+            "episodes": 5,
+            "lateral_rms_m_delta": 5.461530633479697,
+            "scenario": "scenario_18"
+          },
+          {
+            "apogee_m_delta": -52.95888671874991,
+            "assisted": {
+              "apogee_m": 1998.3131103515625,
+              "deployment_lateral_m": 1625.1687294338356,
+              "lateral_rms_m": 1279.38476223093
+            },
+            "baseline": {
+              "apogee_m": 2051.2719970703124,
+              "deployment_lateral_m": 1652.645757710885,
+              "lateral_rms_m": 1267.8827796706996
+            },
+            "deployment_lateral_m_delta": -27.477028277049385,
+            "episodes": 5,
+            "lateral_rms_m_delta": 11.501982560230317,
+            "scenario": "scenario_19"
+          }
+        ],
+        "sha256": {
+          "assisted": "6b8ef1fcf049b9d28f32672e1697fccee2b0ec2f6a4b6d1f8ff0388551b1954f",
+          "baseline": "b1123a635768bdd5d71b1591326477be3fde9f80a22b4f24288f067234ecbc4d"
+        }
+      },
+      "oracle_gtheta": {
+        "aggregate": {
+          "apogee_m_delta": -7.601098632812636,
+          "assisted": {
+            "apogee_m": 1975.4022644042968,
+            "deployment_lateral_m": 1653.1973778851407,
+            "lateral_rms_m": 1297.998632791782
+          },
+          "baseline": {
+            "apogee_m": 1983.0033630371095,
+            "deployment_lateral_m": 1689.1858363442045,
+            "lateral_rms_m": 1306.38016408707
+          },
+          "deployment_lateral_m_delta": -35.98845845906385,
+          "episodes": 20,
+          "lateral_rms_m_delta": -8.381531295287914
+        },
+        "arm": "run_episode_with_oracle / fin_accel_command; positive control",
+        "authority": {
+          "active_ticks": 16531,
+          "cap_fraction": 1.0,
+          "cap_hit_ticks": 16531,
+          "max_command_mps2": 10.0
+        },
+        "per_scenario": [
+          {
+            "apogee_m_delta": 21.373950195312318,
+            "assisted": {
+              "apogee_m": 2005.1731201171874,
+              "deployment_lateral_m": 1614.5444086141185,
+              "lateral_rms_m": 1251.8819746046227
+            },
+            "baseline": {
+              "apogee_m": 1983.799169921875,
+              "deployment_lateral_m": 1645.7205894449971,
+              "lateral_rms_m": 1272.5695260112736
+            },
+            "deployment_lateral_m_delta": -31.176180830878593,
+            "episodes": 5,
+            "lateral_rms_m_delta": -20.687551406650982,
+            "scenario": "scenario_16"
+          },
+          {
+            "apogee_m_delta": -16.3258056640625,
+            "assisted": {
+              "apogee_m": 1995.9207275390625,
+              "deployment_lateral_m": 1632.684213986414,
+              "lateral_rms_m": 1274.299448988068
+            },
+            "baseline": {
+              "apogee_m": 2012.246533203125,
+              "deployment_lateral_m": 1669.9617141762494,
+              "lateral_rms_m": 1279.3677014245936
+            },
+            "deployment_lateral_m_delta": -37.27750018983534,
+            "episodes": 5,
+            "lateral_rms_m_delta": -5.068252436525654,
+            "scenario": "scenario_17"
+          },
+          {
+            "apogee_m_delta": -8.533203125,
+            "assisted": {
+              "apogee_m": 1876.162548828125,
+              "deployment_lateral_m": 1745.9734904342383,
+              "lateral_rms_m": 1393.2275844640942
+            },
+            "baseline": {
+              "apogee_m": 1884.695751953125,
+              "deployment_lateral_m": 1784.65368433375,
+              "lateral_rms_m": 1400.9906764551058
+            },
+            "deployment_lateral_m_delta": -38.68019389951178,
+            "episodes": 5,
+            "lateral_rms_m_delta": -7.763091991011606,
+            "scenario": "scenario_18"
+          },
+          {
+            "apogee_m_delta": -26.91933593749991,
+            "assisted": {
+              "apogee_m": 2024.3526611328125,
+              "deployment_lateral_m": 1615.9862195261917,
+              "lateral_rms_m": 1267.703094882403
+            },
+            "baseline": {
+              "apogee_m": 2051.2719970703124,
+              "deployment_lateral_m": 1652.645757710885,
+              "lateral_rms_m": 1267.8827796706996
+            },
+            "deployment_lateral_m_delta": -36.65953818469325,
+            "episodes": 5,
+            "lateral_rms_m_delta": -0.17968478829652668,
+            "scenario": "scenario_19"
+          }
+        ],
+        "sha256": {
+          "assisted": "68973c0f50d554065525c0093aa4deddc72ec69828d2e29d7dbc88e02f9e607d",
+          "baseline": "b1123a635768bdd5d71b1591326477be3fde9f80a22b4f24288f067234ecbc4d"
+        }
+      },
+      "residual_off": {
+        "aggregate": {
+          "apogee_m_delta": 202.89583740234366,
+          "assisted": {
+            "apogee_m": 2185.899200439453,
+            "deployment_lateral_m": 1555.356834405631,
+            "lateral_rms_m": 1183.2397231996138
+          },
+          "authority_gate_closed_ticks": 11250,
+          "authority_gate_open_ticks": 18750,
+          "baseline": {
+            "apogee_m": 1983.0033630371095,
+            "deployment_lateral_m": 1689.1858363442045,
+            "lateral_rms_m": 1306.38016408707
+          },
+          "clipped_ticks": 0,
+          "confidence_gate": "none (residual decision target is ungated; seam clips only)",
+          "deployment_lateral_m_delta": -133.82900193857358,
+          "episodes": 20,
+          "interventions": 18750,
+          "lateral_rms_m_delta": -123.14044088745618,
+          "max_command_mps2": 6.256889343261719,
+          "mean_abs_correction_mps2": 5.070514851381444,
+          "mean_confidence": 0.3648979654878378,
+          "rows": 30000
+        },
+        "arm": "clip(export_delta); classical superposition removed",
+        "export_sha256": "6d4d89d2bd896808edbbe40c176354f51c2186681da7fb7d2a91066812f4a968",
+        "per_scenario": [
+          {
+            "apogee_m_delta": 128.1719970703125,
+            "assisted": {
+              "apogee_m": 2111.9711669921876,
+              "deployment_lateral_m": 1543.7230811927848,
+              "lateral_rms_m": 1187.0061184254082
+            },
+            "baseline": {
+              "apogee_m": 1983.799169921875,
+              "deployment_lateral_m": 1645.7205894449971,
+              "lateral_rms_m": 1272.5695260112736
+            },
+            "deployment_lateral_m_delta": -101.99750825221236,
+            "episodes": 5,
+            "lateral_rms_m_delta": -85.56340758586543,
+            "scenario": "scenario_16"
+          },
+          {
+            "apogee_m_delta": 176.66274414062514,
+            "assisted": {
+              "apogee_m": 2188.90927734375,
+              "deployment_lateral_m": 1521.9828799140537,
+              "lateral_rms_m": 1161.376297217614
+            },
+            "baseline": {
+              "apogee_m": 2012.246533203125,
+              "deployment_lateral_m": 1669.9617141762494,
+              "lateral_rms_m": 1279.3677014245936
+            },
+            "deployment_lateral_m_delta": -147.97883426219573,
+            "episodes": 5,
+            "lateral_rms_m_delta": -117.99140420697972,
+            "scenario": "scenario_17"
+          },
+          {
+            "apogee_m_delta": 242.18652343750023,
+            "assisted": {
+              "apogee_m": 2126.882275390625,
+              "deployment_lateral_m": 1675.138852131999,
+              "lateral_rms_m": 1270.3268391777283
+            },
+            "baseline": {
+              "apogee_m": 1884.695751953125,
+              "deployment_lateral_m": 1784.65368433375,
+              "lateral_rms_m": 1400.9906764551058
+            },
+            "deployment_lateral_m_delta": -109.514832201751,
+            "episodes": 5,
+            "lateral_rms_m_delta": -130.66383727737752,
+            "scenario": "scenario_18"
+          },
+          {
+            "apogee_m_delta": 264.5620849609377,
+            "assisted": {
+              "apogee_m": 2315.83408203125,
+              "deployment_lateral_m": 1473.4098266430453,
+              "lateral_rms_m": 1108.4747462060052
+            },
+            "baseline": {
+              "apogee_m": 2051.2719970703124,
+              "deployment_lateral_m": 1652.645757710885,
+              "lateral_rms_m": 1267.8827796706996
+            },
+            "deployment_lateral_m_delta": -179.2359310678396,
+            "episodes": 5,
+            "lateral_rms_m_delta": -159.40803346469443,
+            "scenario": "scenario_19"
+          }
+        ],
+        "sha256": {
+          "assisted": "44342c35c79dabfda0bd5c0b0f15d9920df3413dd960d0fe881ca1ccab931c44",
+          "baseline": "b1123a635768bdd5d71b1591326477be3fde9f80a22b4f24288f067234ecbc4d"
+        }
+      },
+      "residual_on": {
+        "aggregate": {
+          "apogee_m_delta": 322.8714782714842,
+          "assisted": {
+            "apogee_m": 2305.8748413085937,
+            "deployment_lateral_m": 1496.789352748519,
+            "lateral_rms_m": 1145.629080021917
+          },
+          "authority_gate_closed_ticks": 11250,
+          "authority_gate_open_ticks": 18750,
+          "baseline": {
+            "apogee_m": 1983.0033630371095,
+            "deployment_lateral_m": 1689.1858363442045,
+            "lateral_rms_m": 1306.38016408707
+          },
+          "clipped_ticks": 0,
+          "confidence_gate": "none (residual decision target is ungated; seam clips only)",
+          "deployment_lateral_m_delta": -192.3964835956856,
+          "episodes": 20,
+          "interventions": 18750,
+          "lateral_rms_m_delta": -160.751084065153,
+          "max_command_mps2": 7.256889343261719,
+          "mean_abs_correction_mps2": 5.038562374931272,
+          "mean_confidence": 0.3648979654878378,
+          "rows": 30000
+        },
+        "arm": "clip(physics_baseline + export_delta); shipped all-fix v5 arm",
+        "export_sha256": "6d4d89d2bd896808edbbe40c176354f51c2186681da7fb7d2a91066812f4a968",
+        "per_scenario": [
+          {
+            "apogee_m_delta": 236.6258544921875,
+            "assisted": {
+              "apogee_m": 2220.4250244140626,
+              "deployment_lateral_m": 1510.6445576957653,
+              "lateral_rms_m": 1151.285165759901
+            },
+            "baseline": {
+              "apogee_m": 1983.799169921875,
+              "deployment_lateral_m": 1645.7205894449971,
+              "lateral_rms_m": 1272.5695260112736
+            },
+            "deployment_lateral_m_delta": -135.0760317492318,
+            "episodes": 5,
+            "lateral_rms_m_delta": -121.28436025137262,
+            "scenario": "scenario_16"
+          },
+          {
+            "apogee_m_delta": 290.11362304687486,
+            "assisted": {
+              "apogee_m": 2302.36015625,
+              "deployment_lateral_m": 1483.869017519229,
+              "lateral_rms_m": 1119.4599488143872
+            },
+            "baseline": {
+              "apogee_m": 2012.246533203125,
+              "deployment_lateral_m": 1669.9617141762494,
+              "lateral_rms_m": 1279.3677014245936
+            },
+            "deployment_lateral_m_delta": -186.0926966570205,
+            "episodes": 5,
+            "lateral_rms_m_delta": -159.90775261020644,
+            "scenario": "scenario_17"
+          },
+          {
+            "apogee_m_delta": 345.38288574218745,
+            "assisted": {
+              "apogee_m": 2230.0786376953124,
+              "deployment_lateral_m": 1593.7116486457865,
+              "lateral_rms_m": 1246.4043610557417
+            },
+            "baseline": {
+              "apogee_m": 1884.695751953125,
+              "deployment_lateral_m": 1784.65368433375,
+              "lateral_rms_m": 1400.9906764551058
+            },
+            "deployment_lateral_m_delta": -190.94203568796365,
+            "episodes": 5,
+            "lateral_rms_m_delta": -154.58631539936414,
+            "scenario": "scenario_18"
+          },
+          {
+            "apogee_m_delta": 419.3635498046874,
+            "assisted": {
+              "apogee_m": 2470.635546875,
+              "deployment_lateral_m": 1392.0066113803973,
+              "lateral_rms_m": 1057.2095415812182
+            },
+            "baseline": {
+              "apogee_m": 2051.2719970703124,
+              "deployment_lateral_m": 1652.645757710885,
+              "lateral_rms_m": 1267.8827796706996
+            },
+            "deployment_lateral_m_delta": -260.6391463304876,
+            "episodes": 5,
+            "lateral_rms_m_delta": -210.6732380894814,
+            "scenario": "scenario_19"
+          }
+        ],
+        "sha256": {
+          "assisted": "0374ec38eace9089f1f9d0db83ff0f7227c045eba2eb3107b278ca3126d645b8",
+          "baseline": "b1123a635768bdd5d71b1591326477be3fde9f80a22b4f24288f067234ecbc4d"
+        }
+      },
+      "zero_command": {
+        "aggregate": {
+          "apogee_m_delta": 0.0,
+          "assisted": {
+            "apogee_m": 1983.0033630371095,
+            "deployment_lateral_m": 1689.1858363442045,
+            "lateral_rms_m": 1306.38016408707
+          },
+          "baseline": {
+            "apogee_m": 1983.0033630371095,
+            "deployment_lateral_m": 1689.1858363442045,
+            "lateral_rms_m": 1306.38016408707
+          },
+          "deployment_lateral_m_delta": 0.0,
+          "episodes": 20,
+          "lateral_rms_m_delta": 0.0
+        },
+        "arm": "no TSV; Simulator::run_episode ControlMode::None; paired gate control",
+        "sha256": {
+          "assisted": "b1123a635768bdd5d71b1591326477be3fde9f80a22b4f24288f067234ecbc4d"
+        },
+        "track": {
+          "16": {
+            "apogee_m": 2183.898193359375,
+            "deployment_altitude_m": 2183.896728515625,
+            "deployment_lateral_m": 1609.3882198155554,
+            "deployment_tick": 1085,
+            "deployment_time_s": 21.7,
+            "lateral_rms_m": 1227.6955690148056,
+            "ticks": 1500
+          },
+          "17": {
+            "apogee_m": 1875.2855224609375,
+            "deployment_altitude_m": 1875.2855224609375,
+            "deployment_lateral_m": 1649.0131920645192,
+            "deployment_tick": 1055,
+            "deployment_time_s": 21.1,
+            "lateral_rms_m": 1280.0961245302888,
+            "ticks": 1500
+          },
+          "18": {
+            "apogee_m": 1847.71044921875,
+            "deployment_altitude_m": 1847.7086181640625,
+            "deployment_lateral_m": 1781.6828616113403,
+            "deployment_tick": 1028,
+            "deployment_time_s": 20.56,
+            "lateral_rms_m": 1394.0369227104115,
+            "ticks": 1500
+          },
+          "19": {
+            "apogee_m": 2022.489013671875,
+            "deployment_altitude_m": 2022.489013671875,
+            "deployment_lateral_m": 1734.6527773705832,
+            "deployment_tick": 1070,
+            "deployment_time_s": 21.400000000000002,
+            "lateral_rms_m": 1331.1111234281893,
+            "ticks": 1500
+          },
+          "36": {
+            "apogee_m": 1824.3128662109375,
+            "deployment_altitude_m": 1824.311279296875,
+            "deployment_lateral_m": 1693.745173159334,
+            "deployment_tick": 1025,
+            "deployment_time_s": 20.5,
+            "lateral_rms_m": 1329.6943513140368,
+            "ticks": 1500
+          },
+          "37": {
+            "apogee_m": 1953.44140625,
+            "deployment_altitude_m": 1953.4404296875,
+            "deployment_lateral_m": 1648.553524622342,
+            "deployment_tick": 1068,
+            "deployment_time_s": 21.36,
+            "lateral_rms_m": 1266.7533319760119,
+            "ticks": 1500
+          },
+          "38": {
+            "apogee_m": 1773.72900390625,
+            "deployment_altitude_m": 1773.72900390625,
+            "deployment_lateral_m": 1778.1395980862735,
+            "deployment_tick": 1008,
+            "deployment_time_s": 20.16,
+            "lateral_rms_m": 1411.660056242445,
+            "ticks": 1500
+          },
+          "39": {
+            "apogee_m": 1946.8231201171875,
+            "deployment_altitude_m": 1946.8231201171875,
+            "deployment_lateral_m": 1617.346456153048,
+            "deployment_tick": 1056,
+            "deployment_time_s": 21.12,
+            "lateral_rms_m": 1247.347648816526,
+            "ticks": 1500
+          },
+          "56": {
+            "apogee_m": 1889.252685546875,
+            "deployment_altitude_m": 1889.252685546875,
+            "deployment_lateral_m": 1605.1077492855163,
+            "deployment_tick": 1056,
+            "deployment_time_s": 21.12,
+            "lateral_rms_m": 1240.2756448310115,
+            "ticks": 1500
+          },
+          "57": {
+            "apogee_m": 1984.2659912109375,
+            "deployment_altitude_m": 1984.2657470703125,
+            "deployment_lateral_m": 1645.0162863500243,
+            "deployment_tick": 1081,
+            "deployment_time_s": 21.62,
+            "lateral_rms_m": 1254.6673127961894,
+            "ticks": 1500
+          },
+          "58": {
+            "apogee_m": 1830.0953369140625,
+            "deployment_altitude_m": 1830.0938720703125,
+            "deployment_lateral_m": 1758.1514674012858,
+            "deployment_tick": 1019,
+            "deployment_time_s": 20.38,
+            "lateral_rms_m": 1386.4827674287824,
+            "ticks": 1500
+          },
+          "59": {
+            "apogee_m": 1989.278076171875,
+            "deployment_altitude_m": 1989.278076171875,
+            "deployment_lateral_m": 1606.693049884433,
+            "deployment_tick": 1064,
+            "deployment_time_s": 21.28,
+            "lateral_rms_m": 1238.0363756907545,
+            "ticks": 1500
+          },
+          "76": {
+            "apogee_m": 2066.310791015625,
+            "deployment_altitude_m": 2066.310302734375,
+            "deployment_lateral_m": 1675.081190124031,
+            "deployment_tick": 1060,
+            "deployment_time_s": 21.2,
+            "lateral_rms_m": 1289.898734529287,
+            "ticks": 1500
+          },
+          "77": {
+            "apogee_m": 2202.229248046875,
+            "deployment_altitude_m": 2202.229248046875,
+            "deployment_lateral_m": 1661.1241332761786,
+            "deployment_tick": 1091,
+            "deployment_time_s": 21.82,
+            "lateral_rms_m": 1265.054391534429,
+            "ticks": 1500
+          },
+          "78": {
+            "apogee_m": 1953.7276611328125,
+            "deployment_altitude_m": 1953.7266845703125,
+            "deployment_lateral_m": 1814.308090628765,
+            "deployment_tick": 1029,
+            "deployment_time_s": 20.580000000000002,
+            "lateral_rms_m": 1421.5754359257205,
+            "ticks": 1500
+          },
+          "79": {
+            "apogee_m": 2288.43115234375,
+            "deployment_altitude_m": 2288.43115234375,
+            "deployment_lateral_m": 1630.1951862835256,
+            "deployment_tick": 1100,
+            "deployment_time_s": 22.0,
+            "lateral_rms_m": 1236.5176529416747,
+            "ticks": 1500
+          },
+          "96": {
+            "apogee_m": 1955.2213134765625,
+            "deployment_altitude_m": 1955.22021484375,
+            "deployment_lateral_m": 1643.4142078643963,
+            "deployment_tick": 1048,
+            "deployment_time_s": 20.96,
+            "lateral_rms_m": 1272.6822439503526,
+            "ticks": 1500
+          },
+          "97": {
+            "apogee_m": 2046.010498046875,
+            "deployment_altitude_m": 2046.0089111328125,
+            "deployment_lateral_m": 1743.9826359271651,
+            "deployment_tick": 1086,
+            "deployment_time_s": 21.72,
+            "lateral_rms_m": 1328.9265614745957,
+            "ticks": 1500
+          },
+          "98": {
+            "apogee_m": 2018.21630859375,
+            "deployment_altitude_m": 2018.2152099609375,
+            "deployment_lateral_m": 1790.5192502014227,
+            "deployment_tick": 1045,
+            "deployment_time_s": 20.900000000000002,
+            "lateral_rms_m": 1390.8774701230732,
+            "ticks": 1500
+          },
+          "99": {
+            "apogee_m": 2009.338623046875,
+            "deployment_altitude_m": 2009.337890625,
+            "deployment_lateral_m": 1671.0359909947188,
+            "deployment_tick": 1066,
+            "deployment_time_s": 21.32,
+            "lateral_rms_m": 1283.8188195517466,
+            "ticks": 1500
+          }
+        }
+      }
+    }
+  },
+  "sim_source": "read-only scripts/ab_control_v3 on git 07a5e43ebcd123065227665a5d6b71c46f0acd7d; oracle uses run_episode_with_oracle / fin_accel_command",
+  "students": [
+    {
+      "definition": "no TSV; Simulator::run_episode ControlMode::None; paired gate control",
+      "name": "zero_command"
+    },
+    {
+      "definition": "run_episode_with_oracle / fin_accel_command; positive control",
+      "name": "oracle_gtheta"
+    },
+    {
+      "definition": "clip(physics_baseline + export_delta); shipped all-fix v5 arm",
+      "name": "residual_on"
+    },
+    {
+      "definition": "clip(export_delta); classical superposition removed",
+      "name": "residual_off"
+    },
+    {
+      "definition": "clip(physics_baseline); learned correction removed = ResidualPolicy(enabled=False)",
+      "name": "classical_only"
+    }
+  ],
+  "supersedes": "any win reading of the RETRAIN-ALLFIX surrogate RMSE comparison: it was never a closed-loop A/B and is void here; the unweakened pre-registered gates are restored verbatim",
+  "verdict": {
+    "fidelity": true,
+    "gates_failed": 16,
+    "pass": false,
+    "primary": "residual_on",
+    "status": "FAIL",
+    "win_claimed": false
+  }
+}
