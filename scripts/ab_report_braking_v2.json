@@ -1,0 +1,1393 @@
+{
+  "arms": {
+    "braking_v2": {
+      "blockers": [
+        "EVAL01 closed_loop_improvement failed: seed 1 lateral -13.17% is above -35%; seed 2 lateral -10.99% is above -35%; seed 3 lateral -11.18% is above -35%; seed 3 apogee 14.86% is below 15%",
+        "EVAL01 oracle_positive_control failed: seed 2 oracle did not raise apogee; seed 3 oracle did not raise apogee",
+        "braking_v2: oracle positive control did not improve both metrics on all seeds"
+      ],
+      "gates": [
+        {
+          "detail": "verbatim EVAL01 gate",
+          "name": "eval01 rmse_ratio",
+          "passed": true
+        },
+        {
+          "detail": "verbatim EVAL01 gate",
+          "name": "eval01 ece_source",
+          "passed": true
+        },
+        {
+          "detail": "verbatim EVAL01 gate",
+          "name": "eval01 ece",
+          "passed": true
+        },
+        {
+          "detail": "verbatim EVAL01 gate",
+          "name": "eval01 provenance",
+          "passed": true
+        },
+        {
+          "detail": "verbatim EVAL01 gate",
+          "name": "eval01 seed_spread",
+          "passed": true
+        },
+        {
+          "detail": "see blockers",
+          "name": "eval01 closed_loop_improvement",
+          "passed": false
+        },
+        {
+          "detail": "see blockers",
+          "name": "eval01 oracle_positive_control",
+          "passed": false
+        },
+        {
+          "detail": "deployment lateral 1503.98 m <= 1000 m: False; apogee 2294.88 m >= 2000 m: True",
+          "name": "seed 1 absolute gates",
+          "passed": false
+        },
+        {
+          "detail": "deployment lateral 1539.51 m <= 1000 m: False; apogee 2270.66 m >= 2000 m: True",
+          "name": "seed 2 absolute gates",
+          "passed": false
+        },
+        {
+          "detail": "deployment lateral 1521.34 m <= 1000 m: False; apogee 2277.60 m >= 2000 m: True",
+          "name": "seed 3 absolute gates",
+          "passed": false
+        },
+        {
+          "detail": "both metrics improve against paired zero command on every seed",
+          "name": "oracle_deployment_and_apogee_positive_control",
+          "passed": false
+        }
+      ],
+      "held_out_indices": [
+        16,
+        17,
+        18,
+        19,
+        36,
+        37,
+        38,
+        39,
+        56,
+        57,
+        58,
+        59,
+        76,
+        77,
+        78,
+        79,
+        96,
+        97,
+        98,
+        99
+      ],
+      "measurement": "POTOKTRJ v3 flown-truth trajectory sidecar (stride 26), not surrogate",
+      "positive_control": {
+        "passed": false,
+        "per_seed": {
+          "1": {
+            "apogee_delta_m": 11.692065429687318,
+            "authority": {
+              "active_ticks": 16661,
+              "cap_fraction": 1.0,
+              "cap_hit_ticks": 16661,
+              "max_command_mps2": 10.0
+            },
+            "deployment_delta_m": -40.476380364944134,
+            "improved_both": true
+          },
+          "2": {
+            "apogee_delta_m": -2.1510437011718295,
+            "authority": {
+              "active_ticks": 16584,
+              "cap_fraction": 1.0,
+              "cap_hit_ticks": 16584,
+              "max_command_mps2": 10.0
+            },
+            "deployment_delta_m": -37.785984953800835,
+            "improved_both": false
+          },
+          "3": {
+            "apogee_delta_m": -7.601098632812636,
+            "authority": {
+              "active_ticks": 16531,
+              "cap_fraction": 1.0,
+              "cap_hit_ticks": 16531,
+              "max_command_mps2": 10.0
+            },
+            "deployment_delta_m": -35.98845845906385,
+            "improved_both": false
+          }
+        }
+      },
+      "provenance": {
+        "apogee_limit_m": 2000.0,
+        "arm": "braking_v2",
+        "arms": [
+          "braking_v2"
+        ],
+        "baseline_frame_maxdiff_vs_frozen": 0.12069106101989746,
+        "baseline_input_note": "helper rebuilt from current HEAD; sensor frames differ slightly from the frozen dataset, while conditioning, labels and the flown sidecar are bit-identical",
+        "baseline_trajectory_sha256": {
+          "1": "9b1d680d55f635a3a2cf84864498cb533a84132bbe15ba791154a3cd58bb5953",
+          "2": "f0443872b644520d9f413e11b608241b0d8ea9bea65d5605b5e026ce08597aa2",
+          "3": "b1123a635768bdd5d71b1591326477be3fde9f80a22b4f24288f067234ecbc4d"
+        },
+        "baseline_validation_sha256": "779069d27e9292eb20c3c404beeb6d25807728b4419628c1ddc79af5f54fd8f7",
+        "braking_flags": {
+          "1": {
+            "dagger": {
+              "boost_end_s": 9.95,
+              "cap_mps2": 10.0,
+              "enabled": true,
+              "horizon_s": 2.0,
+              "reason": null,
+              "reason_counts": {
+                "boost_gate": 42589,
+                "cap_clamped": 72727,
+                "non_finite": 0,
+                "ok": 3724,
+                "out_of_range": 0,
+                "radius_zero": 0,
+                "settled": 0
+              },
+              "source": "radial_braking_reference",
+              "stop_distance_m": 20.0
+            },
+            "privileged": {
+              "boost_end_s": 9.95,
+              "cap_mps2": 10.0,
+              "enabled": true,
+              "horizon_s": 2.0,
+              "reason": null,
+              "reason_counts": {
+                "boost_gate": 487,
+                "cap_clamped": 0,
+                "non_finite": 0,
+                "ok": 964,
+                "out_of_range": 0,
+                "radius_zero": 0,
+                "settled": 0
+              },
+              "source": "radial_braking_reference",
+              "stop_distance_m": 20.0
+            }
+          },
+          "2": {
+            "dagger": {
+              "boost_end_s": 9.95,
+              "cap_mps2": 10.0,
+              "enabled": true,
+              "horizon_s": 2.0,
+              "reason": null,
+              "reason_counts": {
+                "boost_gate": 42589,
+                "cap_clamped": 72727,
+                "non_finite": 0,
+                "ok": 3724,
+                "out_of_range": 0,
+                "radius_zero": 0,
+                "settled": 0
+              },
+              "source": "radial_braking_reference",
+              "stop_distance_m": 20.0
+            },
+            "privileged": {
+              "boost_end_s": 9.95,
+              "cap_mps2": 10.0,
+              "enabled": true,
+              "horizon_s": 2.0,
+              "reason": null,
+              "reason_counts": {
+                "boost_gate": 487,
+                "cap_clamped": 0,
+                "non_finite": 0,
+                "ok": 964,
+                "out_of_range": 0,
+                "radius_zero": 0,
+                "settled": 0
+              },
+              "source": "radial_braking_reference",
+              "stop_distance_m": 20.0
+            }
+          },
+          "3": {
+            "dagger": {
+              "boost_end_s": 9.95,
+              "cap_mps2": 10.0,
+              "enabled": true,
+              "horizon_s": 2.0,
+              "reason": null,
+              "reason_counts": {
+                "boost_gate": 42589,
+                "cap_clamped": 72727,
+                "non_finite": 0,
+                "ok": 3724,
+                "out_of_range": 0,
+                "radius_zero": 0,
+                "settled": 0
+              },
+              "source": "radial_braking_reference",
+              "stop_distance_m": 20.0
+            },
+            "privileged": {
+              "boost_end_s": 9.95,
+              "cap_mps2": 10.0,
+              "enabled": true,
+              "horizon_s": 2.0,
+              "reason": null,
+              "reason_counts": {
+                "boost_gate": 487,
+                "cap_clamped": 0,
+                "non_finite": 0,
+                "ok": 964,
+                "out_of_range": 0,
+                "radius_zero": 0,
+                "settled": 0
+              },
+              "source": "radial_braking_reference",
+              "stop_distance_m": 20.0
+            }
+          }
+        },
+        "braking_histogram": {
+          "1": {
+            "dagger": {
+              "boost_gate": 42589,
+              "cap_clamped": 72727,
+              "non_finite": 0,
+              "ok": 3724,
+              "out_of_range": 0,
+              "radius_zero": 0,
+              "settled": 0
+            },
+            "dagger_cap_usage": true,
+            "privileged": {
+              "boost_gate": 487,
+              "cap_clamped": 0,
+              "non_finite": 0,
+              "ok": 964,
+              "out_of_range": 0,
+              "radius_zero": 0,
+              "settled": 0
+            },
+            "privileged_active": 964,
+            "privileged_cap_usage": false
+          },
+          "2": {
+            "dagger": {
+              "boost_gate": 42589,
+              "cap_clamped": 72727,
+              "non_finite": 0,
+              "ok": 3724,
+              "out_of_range": 0,
+              "radius_zero": 0,
+              "settled": 0
+            },
+            "dagger_cap_usage": true,
+            "privileged": {
+              "boost_gate": 487,
+              "cap_clamped": 0,
+              "non_finite": 0,
+              "ok": 964,
+              "out_of_range": 0,
+              "radius_zero": 0,
+              "settled": 0
+            },
+            "privileged_active": 964,
+            "privileged_cap_usage": false
+          },
+          "3": {
+            "dagger": {
+              "boost_gate": 42589,
+              "cap_clamped": 72727,
+              "non_finite": 0,
+              "ok": 3724,
+              "out_of_range": 0,
+              "radius_zero": 0,
+              "settled": 0
+            },
+            "dagger_cap_usage": true,
+            "privileged": {
+              "boost_gate": 487,
+              "cap_clamped": 0,
+              "non_finite": 0,
+              "ok": 964,
+              "out_of_range": 0,
+              "radius_zero": 0,
+              "settled": 0
+            },
+            "privileged_active": 964,
+            "privileged_cap_usage": false
+          }
+        },
+        "braking_root": "ai/out/braking_v2",
+        "braking_teacher_source_sha256": "a1bd96135bda602a410e3acc05ab8916896eca0318b069861da6b0c90200faf9",
+        "brk03_version": "BRK03 one-way ACTIVE_PHASES whitelist + persistent per-episode window tick cursor",
+        "command_bound": 10.0,
+        "command_limit_mps2": 10.0,
+        "config": "ai/out/v3_final/sim.toml",
+        "config_hash": "9c34e71f9d10bcf081c31f15f5332f7bb2fac04dddb28009a27cd30987ab5e91",
+        "config_sha256": "9c34e71f9d10bcf081c31f15f5332f7bb2fac04dddb28009a27cd30987ab5e91",
+        "conformal_coverage": {
+          "1": 0.9393939393939394,
+          "2": 0.9641873278236914,
+          "3": 0.9449035812672176
+        },
+        "data_provenance": {
+          "braking_teacher_source_sha256": "a1bd96135bda602a410e3acc05ab8916896eca0318b069861da6b0c90200faf9",
+          "brk03_version": "BRK03 one-way ACTIVE_PHASES whitelist + persistent per-episode window tick cursor",
+          "config_sha256": "9c34e71f9d10bcf081c31f15f5332f7bb2fac04dddb28009a27cd30987ab5e91",
+          "heldout_sha256": "fdc1d1400b1c5f111e21f79dead37afa1dd9f058fe457edb78037dc6ebe89807",
+          "objective_head": "6f44a25b6f24d668c5cf1cc9039b392f934bef35",
+          "objective_source_sha256": "64400853113e70b60868add49d63b0f313a6c84b6d0a4801ebddee47be628411",
+          "objective_version": "TRUTH_VEL_START=3,TRUTH_VEL_END=6",
+          "teacher_gates_source_sha256": "8ffeb062bea860295848959a063d72060be889ca7d1f641b6a7514fdcf0bc2d3",
+          "train_sha256": "34b35e0ff67f7eeecbd895b2efde8bebcfa159c1a3e78379da6750338b6930b6",
+          "trainer_source_sha256": "eda3100f04873ff018a05151f39c7d230c22234f058365e7c15dcdef475535ef",
+          "truth_sidecar_sha256": "7f25bb69124638ea7542be99f43330fda1c5248513f1971f6bfd125f5f759cb8"
+        },
+        "deployment_proxy": "first DESCENT tick (vz<0 and z>=5), radial distance from pad",
+        "dynamics_basis": "post-FIXPUMP; seed-1 zero-command sidecar checked bit-for-bit against the frozen held-out trajectory",
+        "dynamics_sha256": "6159cf4bd24862a8ac89f97529e1133d49ef6bd8f6ba2289f2b4d70987063cc2",
+        "ece_held_out": {
+          "1": 0.02014506093926816,
+          "2": 0.019269509812608585,
+          "3": 0.02462681187777665
+        },
+        "ece_source": {
+          "1": "held-out",
+          "2": "held-out",
+          "3": "held-out"
+        },
+        "export_manifest_sha256": "b4b41fe863b72a71c20467f460de5f24452327df66a1b0b5fad2ac475a54aabd",
+        "exports_sha256": {
+          "1": "4ec9decf073f0611aad338f2ad34e5f03cd21b39ed30bb7afd7f8cdc6425c85f",
+          "2": "90220137ea815c6975189c9fd68c04c8c028b7b0377b5b63c0bef5cee9e98873",
+          "3": "61083ee15f932b1548379c68c39943a6d167860b517624e75c3ebbbb3cf38596"
+        },
+        "gate_source": "scripts/ab_v6.py (imported verbatim)",
+        "gate_source_sha256": "2da97169fc0f355c2d655f56985e963b1a578eee64bcf715b9fc8a2c2acc2463",
+        "generated_at_utc": "2026-11-24T12:23:09+00:00",
+        "git_head": "6f44a25b6f24d668c5cf1cc9039b392f934bef35",
+        "harness": "scripts/ab_braking_v2.py",
+        "harness_sha256": "d51dedd5c55b5b295d8b53d9aa1b83f9a9b27a417f48ad3072c688f46b0fe3f1",
+        "heldout": "ai/out/final_v3_postpump/data/held-out/validation.bin",
+        "heldout_manifest_sha256": "a9ff19947618f17790f1257ef6f7e85ba537915f5a2aca782befefa874db675e",
+        "heldout_sha256": "fdc1d1400b1c5f111e21f79dead37afa1dd9f058fe457edb78037dc6ebe89807",
+        "helper": "scripts/ab_control_v3/src/main.rs",
+        "helper_binary": "scripts/ab_control_v3/target/release/ab-control-v3",
+        "helper_binary_sha256": "d46e38e587d1852e7d1a8e3d69c58820a2aa2721486d985401a01c7b354d996d",
+        "helper_sha256": "1f5564e30d66d82e081e5e435bcac3932a862638163cb0fac9a7261920559fed",
+        "lateral_limit_m": 1000.0,
+        "metrics_config_hash": {
+          "1": "1a56b56fae01bd0e",
+          "2": "d29ee59a827b8485",
+          "3": "eb2ff3270e575b4c"
+        },
+        "metrics_sha256": {
+          "1": "83faced4dcaf4f208144c006502003b8da4d037f0bd558a34a0f997ddb46acea",
+          "2": "d89208bb3dc83730c9485a0a0922bbbb9ba605086629597cf2b9a009c2dc5977",
+          "3": "9182f7e74c39996cebba03474e68fcb22b9b90de9873e54d90cd8ddb943856ff"
+        },
+        "numpy": "2.5.5",
+        "objective_head": "6f44a25b6f24d668c5cf1cc9039b392f934bef35",
+        "objective_source_sha256": "64400853113e70b60868add49d63b0f313a6c84b6d0a4801ebddee47be628411",
+        "objective_version": "TRUTH_VEL_START=3,TRUTH_VEL_END=6",
+        "python": "3.13.15",
+        "quality_report_sha256": "8ba904125055787c26e95da39102ecd9dcaa0102c3b66a456c5f265316b5b7d8",
+        "rmse_held_out": {
+          "1": 6.90320702729153,
+          "2": 9.234743343500435,
+          "3": 9.035453391844523
+        },
+        "sample_dt_s": 0.02,
+        "stage_order": [
+          "sft",
+          "privileged",
+          "dagger",
+          "distill"
+        ],
+        "summary_braking": {
+          "brk03_version": "BRK03 one-way ACTIVE_PHASES whitelist + persistent per-episode window tick cursor",
+          "cap_mps2": 10.0,
+          "enabled": true,
+          "flag": "--braking-teacher",
+          "limitation": "BRK03 fixed the target: the privileged stage now has boost-gated and active rows on every seed. The cap bucket is counted but empty on real v3 privileged windows (they stay inside +/-10); DAgger rows do saturate. No gate, physics or envelope value was changed by BRK04.",
+          "per_seed": {
+            "1": {
+              "dagger": {
+                "boost_end_s": 9.95,
+                "cap_mps2": 10.0,
+                "enabled": true,
+                "horizon_s": 2.0,
+                "reason": null,
+                "reason_counts": {
+                  "boost_gate": 42589,
+                  "cap_clamped": 72727,
+                  "non_finite": 0,
+                  "ok": 3724,
+                  "out_of_range": 0,
+                  "radius_zero": 0,
+                  "settled": 0
+                },
+                "source": "radial_braking_reference",
+                "stop_distance_m": 20.0
+              },
+              "privileged": {
+                "boost_end_s": 9.95,
+                "cap_mps2": 10.0,
+                "enabled": true,
+                "horizon_s": 2.0,
+                "reason": null,
+                "reason_counts": {
+                  "boost_gate": 487,
+                  "cap_clamped": 0,
+                  "non_finite": 0,
+                  "ok": 964,
+                  "out_of_range": 0,
+                  "radius_zero": 0,
+                  "settled": 0
+                },
+                "source": "radial_braking_reference",
+                "stop_distance_m": 20.0
+              }
+            },
+            "2": {
+              "dagger": {
+                "boost_end_s": 9.95,
+                "cap_mps2": 10.0,
+                "enabled": true,
+                "horizon_s": 2.0,
+                "reason": null,
+                "reason_counts": {
+                  "boost_gate": 42589,
+                  "cap_clamped": 72727,
+                  "non_finite": 0,
+                  "ok": 3724,
+                  "out_of_range": 0,
+                  "radius_zero": 0,
+                  "settled": 0
+                },
+                "source": "radial_braking_reference",
+                "stop_distance_m": 20.0
+              },
+              "privileged": {
+                "boost_end_s": 9.95,
+                "cap_mps2": 10.0,
+                "enabled": true,
+                "horizon_s": 2.0,
+                "reason": null,
+                "reason_counts": {
+                  "boost_gate": 487,
+                  "cap_clamped": 0,
+                  "non_finite": 0,
+                  "ok": 964,
+                  "out_of_range": 0,
+                  "radius_zero": 0,
+                  "settled": 0
+                },
+                "source": "radial_braking_reference",
+                "stop_distance_m": 20.0
+              }
+            },
+            "3": {
+              "dagger": {
+                "boost_end_s": 9.95,
+                "cap_mps2": 10.0,
+                "enabled": true,
+                "horizon_s": 2.0,
+                "reason": null,
+                "reason_counts": {
+                  "boost_gate": 42589,
+                  "cap_clamped": 72727,
+                  "non_finite": 0,
+                  "ok": 3724,
+                  "out_of_range": 0,
+                  "radius_zero": 0,
+                  "settled": 0
+                },
+                "source": "radial_braking_reference",
+                "stop_distance_m": 20.0
+              },
+              "privileged": {
+                "boost_end_s": 9.95,
+                "cap_mps2": 10.0,
+                "enabled": true,
+                "horizon_s": 2.0,
+                "reason": null,
+                "reason_counts": {
+                  "boost_gate": 487,
+                  "cap_clamped": 0,
+                  "non_finite": 0,
+                  "ok": 964,
+                  "out_of_range": 0,
+                  "radius_zero": 0,
+                  "settled": 0
+                },
+                "source": "radial_braking_reference",
+                "stop_distance_m": 20.0
+              }
+            }
+          },
+          "privileged_histogram": {
+            "1": {
+              "dagger": {
+                "boost_gate": 42589,
+                "cap_clamped": 72727,
+                "non_finite": 0,
+                "ok": 3724,
+                "out_of_range": 0,
+                "radius_zero": 0,
+                "settled": 0
+              },
+              "dagger_cap_usage": true,
+              "privileged": {
+                "boost_gate": 487,
+                "cap_clamped": 0,
+                "non_finite": 0,
+                "ok": 964,
+                "out_of_range": 0,
+                "radius_zero": 0,
+                "settled": 0
+              },
+              "privileged_active": 964,
+              "privileged_cap_usage": false
+            },
+            "2": {
+              "dagger": {
+                "boost_gate": 42589,
+                "cap_clamped": 72727,
+                "non_finite": 0,
+                "ok": 3724,
+                "out_of_range": 0,
+                "radius_zero": 0,
+                "settled": 0
+              },
+              "dagger_cap_usage": true,
+              "privileged": {
+                "boost_gate": 487,
+                "cap_clamped": 0,
+                "non_finite": 0,
+                "ok": 964,
+                "out_of_range": 0,
+                "radius_zero": 0,
+                "settled": 0
+              },
+              "privileged_active": 964,
+              "privileged_cap_usage": false
+            },
+            "3": {
+              "dagger": {
+                "boost_gate": 42589,
+                "cap_clamped": 72727,
+                "non_finite": 0,
+                "ok": 3724,
+                "out_of_range": 0,
+                "radius_zero": 0,
+                "settled": 0
+              },
+              "dagger_cap_usage": true,
+              "privileged": {
+                "boost_gate": 487,
+                "cap_clamped": 0,
+                "non_finite": 0,
+                "ok": 964,
+                "out_of_range": 0,
+                "radius_zero": 0,
+                "settled": 0
+              },
+              "privileged_active": 964,
+              "privileged_cap_usage": false
+            }
+          },
+          "source": "radial_braking_reference"
+        },
+        "summary_sha256": "68868be7bd29e52455d5d3e9981b314b8864cbccee27fa1893cf72d49888691e",
+        "teacher_gates_sha256": "8ffeb062bea860295848959a063d72060be889ca7d1f641b6a7514fdcf0bc2d3",
+        "torch": "2.15.0+cpu",
+        "trainer_source_sha256": "eda3100f04873ff018a05151f39c7d230c22234f058365e7c15dcdef475535ef"
+      },
+      "seed_order": [
+        1,
+        2,
+        3
+      ],
+      "seeds": {
+        "1": {
+          "braking_v2": {
+            "aggregate": {
+              "apogee_m_delta": 321.1399841308594,
+              "assisted": {
+                "apogee_m": 2294.883093261719,
+                "deployment_lateral_m": 1503.9833757880904,
+                "lateral_rms_m": 1136.9181316754255
+              },
+              "authority_gate_closed_ticks": 11280,
+              "authority_gate_open_ticks": 18720,
+              "baseline": {
+                "apogee_m": 1973.7431091308595,
+                "deployment_lateral_m": 1690.7564255008851,
+                "lateral_rms_m": 1309.4087332027586
+              },
+              "clipped_ticks": 0,
+              "confidence_gate": "none (residual decision target is ungated; seam clips only)",
+              "deployment_lateral_m_delta": -186.77304971279477,
+              "episodes": 20,
+              "interventions": 18720,
+              "lateral_rms_m_delta": -172.49060152733318,
+              "max_command_mps2": 6.106049537658691,
+              "mean_abs_correction_mps2": 2.728783055457783,
+              "mean_confidence": 0.37429810007909936,
+              "rows": 30000
+            },
+            "arm": "BRK04 BRK03-fixed --braking-teacher four-stage distill student",
+            "export_sha256": "4ec9decf073f0611aad338f2ad34e5f03cd21b39ed30bb7afd7f8cdc6425c85f",
+            "per_scenario": [
+              {
+                "apogee_m_delta": 336.5090576171874,
+                "assisted": {
+                  "apogee_m": 2277.306787109375,
+                  "deployment_lateral_m": 1470.112439977001,
+                  "lateral_rms_m": 1114.3274751081367
+                },
+                "baseline": {
+                  "apogee_m": 1940.7977294921875,
+                  "deployment_lateral_m": 1661.6456948965558,
+                  "lateral_rms_m": 1286.4818597264305
+                },
+                "deployment_lateral_m_delta": -191.5332549195548,
+                "episodes": 5,
+                "lateral_rms_m_delta": -172.15438461829376,
+                "scenario": "scenario_16"
+              },
+              {
+                "apogee_m_delta": 288.97690429687464,
+                "assisted": {
+                  "apogee_m": 2424.231982421875,
+                  "deployment_lateral_m": 1475.7701661404167,
+                  "lateral_rms_m": 1122.24914793421
+                },
+                "baseline": {
+                  "apogee_m": 2135.255078125,
+                  "deployment_lateral_m": 1708.2391166455657,
+                  "lateral_rms_m": 1303.5431332505752
+                },
+                "deployment_lateral_m_delta": -232.468950505149,
+                "episodes": 5,
+                "lateral_rms_m_delta": -181.29398531636525,
+                "scenario": "scenario_17"
+              },
+              {
+                "apogee_m_delta": 319.5238281249999,
+                "assisted": {
+                  "apogee_m": 2075.74404296875,
+                  "deployment_lateral_m": 1632.9773150319186,
+                  "lateral_rms_m": 1228.8835491975276
+                },
+                "baseline": {
+                  "apogee_m": 1756.22021484375,
+                  "deployment_lateral_m": 1731.881429270815,
+                  "lateral_rms_m": 1376.9384193612009
+                },
+                "deployment_lateral_m_delta": -98.90411423889645,
+                "episodes": 5,
+                "lateral_rms_m_delta": -148.05487016367329,
+                "scenario": "scenario_18"
+              },
+              {
+                "apogee_m_delta": 339.55014648437464,
+                "assisted": {
+                  "apogee_m": 2402.249560546875,
+                  "deployment_lateral_m": 1429.0279555465888,
+                  "lateral_rms_m": 1076.5722006540536
+                },
+                "baseline": {
+                  "apogee_m": 2062.6994140625,
+                  "deployment_lateral_m": 1660.1411329856035,
+                  "lateral_rms_m": 1268.063577265662
+                },
+                "deployment_lateral_m_delta": -231.11317743901463,
+                "episodes": 5,
+                "lateral_rms_m_delta": -191.4913766116083,
+                "scenario": "scenario_19"
+              }
+            ],
+            "sha256": {
+              "assisted": "be0e8582992bf5902a68d46667faae7fef22825161fda483c155b09f19eb5d94",
+              "baseline": "9b1d680d55f635a3a2cf84864498cb533a84132bbe15ba791154a3cd58bb5953"
+            }
+          },
+          "oracle_gtheta": {
+            "aggregate": {
+              "apogee_m_delta": 11.692065429687318,
+              "assisted": {
+                "apogee_m": 1985.4351745605468,
+                "deployment_lateral_m": 1650.280045135941,
+                "lateral_rms_m": 1292.096519590752
+              },
+              "baseline": {
+                "apogee_m": 1973.7431091308595,
+                "deployment_lateral_m": 1690.7564255008851,
+                "lateral_rms_m": 1309.4087332027586
+              },
+              "deployment_lateral_m_delta": -40.476380364944134,
+              "episodes": 20,
+              "lateral_rms_m_delta": -17.312213612006644
+            },
+            "arm": "run_episode_with_oracle / fin_accel_command",
+            "authority": {
+              "active_ticks": 16661,
+              "cap_fraction": 1.0,
+              "cap_hit_ticks": 16661,
+              "max_command_mps2": 10.0
+            },
+            "per_scenario": [
+              {
+                "apogee_m_delta": -12.8856201171875,
+                "assisted": {
+                  "apogee_m": 1927.912109375,
+                  "deployment_lateral_m": 1628.3068043395942,
+                  "lateral_rms_m": 1280.8132467129633
+                },
+                "baseline": {
+                  "apogee_m": 1940.7977294921875,
+                  "deployment_lateral_m": 1661.6456948965558,
+                  "lateral_rms_m": 1286.4818597264305
+                },
+                "deployment_lateral_m_delta": -33.33889055696159,
+                "episodes": 5,
+                "lateral_rms_m_delta": -5.668613013467166,
+                "scenario": "scenario_16"
+              },
+              {
+                "apogee_m_delta": 40.249755859375,
+                "assisted": {
+                  "apogee_m": 2175.504833984375,
+                  "deployment_lateral_m": 1652.7489407312655,
+                  "lateral_rms_m": 1271.4083796683926
+                },
+                "baseline": {
+                  "apogee_m": 2135.255078125,
+                  "deployment_lateral_m": 1708.2391166455657,
+                  "lateral_rms_m": 1303.5431332505752
+                },
+                "deployment_lateral_m_delta": -55.49017591430015,
+                "episodes": 5,
+                "lateral_rms_m_delta": -32.13475358218261,
+                "scenario": "scenario_17"
+              },
+              {
+                "apogee_m_delta": 32.404858398437455,
+                "assisted": {
+                  "apogee_m": 1788.6250732421875,
+                  "deployment_lateral_m": 1695.8755284264846,
+                  "lateral_rms_m": 1352.2963755201263
+                },
+                "baseline": {
+                  "apogee_m": 1756.22021484375,
+                  "deployment_lateral_m": 1731.881429270815,
+                  "lateral_rms_m": 1376.9384193612009
+                },
+                "deployment_lateral_m_delta": -36.00590084433043,
+                "episodes": 5,
+                "lateral_rms_m_delta": -24.64204384107461,
+                "scenario": "scenario_18"
+              },
+              {
+                "apogee_m_delta": -13.000732421875,
+                "assisted": {
+                  "apogee_m": 2049.698681640625,
+                  "deployment_lateral_m": 1623.1885261523953,
+                  "lateral_rms_m": 1261.8979101586856
+                },
+                "baseline": {
+                  "apogee_m": 2062.6994140625,
+                  "deployment_lateral_m": 1660.1411329856035,
+                  "lateral_rms_m": 1268.063577265662
+                },
+                "deployment_lateral_m_delta": -36.952606833208165,
+                "episodes": 5,
+                "lateral_rms_m_delta": -6.165667106976343,
+                "scenario": "scenario_19"
+              }
+            ],
+            "sha256": {
+              "assisted": "1d9a28ec83dfac5f9d16e84562450b1fd3317dbd2587885568561d2dca8fca15",
+              "baseline": "9b1d680d55f635a3a2cf84864498cb533a84132bbe15ba791154a3cd58bb5953"
+            }
+          }
+        },
+        "2": {
+          "braking_v2": {
+            "aggregate": {
+              "apogee_m_delta": 297.80245971679665,
+              "assisted": {
+                "apogee_m": 2270.661029052734,
+                "deployment_lateral_m": 1539.5095369277265,
+                "lateral_rms_m": 1162.8561225761694
+              },
+              "authority_gate_closed_ticks": 11258,
+              "authority_gate_open_ticks": 18742,
+              "baseline": {
+                "apogee_m": 1972.8585693359375,
+                "deployment_lateral_m": 1688.4185782917739,
+                "lateral_rms_m": 1306.3969471896512
+              },
+              "clipped_ticks": 0,
+              "confidence_gate": "none (residual decision target is ungated; seam clips only)",
+              "deployment_lateral_m_delta": -148.90904136404743,
+              "episodes": 20,
+              "interventions": 18742,
+              "lateral_rms_m_delta": -143.54082461348185,
+              "max_command_mps2": 6.941184997558594,
+              "mean_abs_correction_mps2": 4.807849735649271,
+              "mean_confidence": 0.37970563319822154,
+              "rows": 30000
+            },
+            "arm": "BRK04 BRK03-fixed --braking-teacher four-stage distill student",
+            "export_sha256": "90220137ea815c6975189c9fd68c04c8c028b7b0377b5b63c0bef5cee9e98873",
+            "per_scenario": [
+              {
+                "apogee_m_delta": 298.6591552734376,
+                "assisted": {
+                  "apogee_m": 2253.8546875,
+                  "deployment_lateral_m": 1521.013198363757,
+                  "lateral_rms_m": 1144.0009733451955
+                },
+                "baseline": {
+                  "apogee_m": 1955.1955322265626,
+                  "deployment_lateral_m": 1653.1631828938928,
+                  "lateral_rms_m": 1278.8022057770668
+                },
+                "deployment_lateral_m_delta": -132.14998453013573,
+                "episodes": 5,
+                "lateral_rms_m_delta": -134.8012324318713,
+                "scenario": "scenario_16"
+              },
+              {
+                "apogee_m_delta": 231.43774414062477,
+                "assisted": {
+                  "apogee_m": 2275.9205810546873,
+                  "deployment_lateral_m": 1538.8027772427615,
+                  "lateral_rms_m": 1157.4505378228407
+                },
+                "baseline": {
+                  "apogee_m": 2044.4828369140625,
+                  "deployment_lateral_m": 1673.1248291005438,
+                  "lateral_rms_m": 1279.600057233055
+                },
+                "deployment_lateral_m_delta": -134.3220518577823,
+                "episodes": 5,
+                "lateral_rms_m_delta": -122.14951941021422,
+                "scenario": "scenario_17"
+              },
+              {
+                "apogee_m_delta": 348.5392333984373,
+                "assisted": {
+                  "apogee_m": 2174.2064453125,
+                  "deployment_lateral_m": 1634.422845257418,
+                  "lateral_rms_m": 1247.2537098370776
+                },
+                "baseline": {
+                  "apogee_m": 1825.6672119140626,
+                  "deployment_lateral_m": 1774.1889928267817,
+                  "lateral_rms_m": 1399.6535372529443
+                },
+                "deployment_lateral_m_delta": -139.76614756936374,
+                "episodes": 5,
+                "lateral_rms_m_delta": -152.39982741586664,
+                "scenario": "scenario_18"
+              },
+              {
+                "apogee_m_delta": 312.57370605468714,
+                "assisted": {
+                  "apogee_m": 2378.66240234375,
+                  "deployment_lateral_m": 1458.638160483798,
+                  "lateral_rms_m": 1097.6637262969205
+                },
+                "baseline": {
+                  "apogee_m": 2066.0886962890627,
+                  "deployment_lateral_m": 1650.1476893863044,
+                  "lateral_rms_m": 1262.9135054270164
+                },
+                "deployment_lateral_m_delta": -191.50952890250642,
+                "episodes": 5,
+                "lateral_rms_m_delta": -165.24977913009593,
+                "scenario": "scenario_19"
+              }
+            ],
+            "sha256": {
+              "assisted": "0be4fc58c57376a89e32a497de31b28eedeb3abe929a8559d80073b840505110",
+              "baseline": "f0443872b644520d9f413e11b608241b0d8ea9bea65d5605b5e026ce08597aa2"
+            }
+          },
+          "oracle_gtheta": {
+            "aggregate": {
+              "apogee_m_delta": -2.1510437011718295,
+              "assisted": {
+                "apogee_m": 1970.7075256347657,
+                "deployment_lateral_m": 1650.632593337973,
+                "lateral_rms_m": 1295.8939994859302
+              },
+              "baseline": {
+                "apogee_m": 1972.8585693359375,
+                "deployment_lateral_m": 1688.4185782917739,
+                "lateral_rms_m": 1306.3969471896512
+              },
+              "deployment_lateral_m_delta": -37.785984953800835,
+              "episodes": 20,
+              "lateral_rms_m_delta": -10.50294770372102
+            },
+            "arm": "run_episode_with_oracle / fin_accel_command",
+            "authority": {
+              "active_ticks": 16584,
+              "cap_fraction": 1.0,
+              "cap_hit_ticks": 16584,
+              "max_command_mps2": 10.0
+            },
+            "per_scenario": [
+              {
+                "apogee_m_delta": 5.547045898437318,
+                "assisted": {
+                  "apogee_m": 1960.742578125,
+                  "deployment_lateral_m": 1616.689893113301,
+                  "lateral_rms_m": 1263.7955677230457
+                },
+                "baseline": {
+                  "apogee_m": 1955.1955322265626,
+                  "deployment_lateral_m": 1653.1631828938928,
+                  "lateral_rms_m": 1278.8022057770668
+                },
+                "deployment_lateral_m_delta": -36.47328978059181,
+                "episodes": 5,
+                "lateral_rms_m_delta": -15.006638054021096,
+                "scenario": "scenario_16"
+              },
+              {
+                "apogee_m_delta": -16.26730957031259,
+                "assisted": {
+                  "apogee_m": 2028.21552734375,
+                  "deployment_lateral_m": 1634.6599555111102,
+                  "lateral_rms_m": 1275.2538429156039
+                },
+                "baseline": {
+                  "apogee_m": 2044.4828369140625,
+                  "deployment_lateral_m": 1673.1248291005438,
+                  "lateral_rms_m": 1279.600057233055
+                },
+                "deployment_lateral_m_delta": -38.46487358943364,
+                "episodes": 5,
+                "lateral_rms_m_delta": -4.346214317451086,
+                "scenario": "scenario_17"
+              },
+              {
+                "apogee_m_delta": -11.705859375000045,
+                "assisted": {
+                  "apogee_m": 1813.9613525390625,
+                  "deployment_lateral_m": 1736.8235172205611,
+                  "lateral_rms_m": 1394.6150542280798
+                },
+                "baseline": {
+                  "apogee_m": 1825.6672119140626,
+                  "deployment_lateral_m": 1774.1889928267817,
+                  "lateral_rms_m": 1399.6535372529443
+                },
+                "deployment_lateral_m_delta": -37.36547560622057,
+                "episodes": 5,
+                "lateral_rms_m_delta": -5.03848302486449,
+                "scenario": "scenario_18"
+              },
+              {
+                "apogee_m_delta": 13.821948242187318,
+                "assisted": {
+                  "apogee_m": 2079.91064453125,
+                  "deployment_lateral_m": 1611.20964562092,
+                  "lateral_rms_m": 1244.5731321491478
+                },
+                "baseline": {
+                  "apogee_m": 2066.0886962890627,
+                  "deployment_lateral_m": 1650.1476893863044,
+                  "lateral_rms_m": 1262.9135054270164
+                },
+                "deployment_lateral_m_delta": -38.938043765384464,
+                "episodes": 5,
+                "lateral_rms_m_delta": -18.340373277868594,
+                "scenario": "scenario_19"
+              }
+            ],
+            "sha256": {
+              "assisted": "92cfa601580d151f83c89d9a8c9ee5790b06118f4b80fe17cc6b188c81c02336",
+              "baseline": "f0443872b644520d9f413e11b608241b0d8ea9bea65d5605b5e026ce08597aa2"
+            }
+          }
+        },
+        "3": {
+          "braking_v2": {
+            "aggregate": {
+              "apogee_m_delta": 294.59580688476535,
+              "assisted": {
+                "apogee_m": 2277.599169921875,
+                "deployment_lateral_m": 1521.3409883781844,
+                "lateral_rms_m": 1160.334816275998
+              },
+              "authority_gate_closed_ticks": 11250,
+              "authority_gate_open_ticks": 18750,
+              "baseline": {
+                "apogee_m": 1983.0033630371095,
+                "deployment_lateral_m": 1689.1858363442045,
+                "lateral_rms_m": 1306.38016408707
+              },
+              "clipped_ticks": 0,
+              "confidence_gate": "none (residual decision target is ungated; seam clips only)",
+              "deployment_lateral_m_delta": -167.8448479660201,
+              "episodes": 20,
+              "interventions": 18750,
+              "lateral_rms_m_delta": -146.0453478110719,
+              "max_command_mps2": 6.6902570724487305,
+              "mean_abs_correction_mps2": 4.408554063245727,
+              "mean_confidence": 0.38269838764965536,
+              "rows": 30000
+            },
+            "arm": "BRK04 BRK03-fixed --braking-teacher four-stage distill student",
+            "export_sha256": "61083ee15f932b1548379c68c39943a6d167860b517624e75c3ebbbb3cf38596",
+            "per_scenario": [
+              {
+                "apogee_m_delta": 331.4892089843747,
+                "assisted": {
+                  "apogee_m": 2315.28837890625,
+                  "deployment_lateral_m": 1455.507129008219,
+                  "lateral_rms_m": 1120.9879188614102
+                },
+                "baseline": {
+                  "apogee_m": 1983.799169921875,
+                  "deployment_lateral_m": 1645.7205894449971,
+                  "lateral_rms_m": 1272.5695260112736
+                },
+                "deployment_lateral_m_delta": -190.21346043677818,
+                "episodes": 5,
+                "lateral_rms_m_delta": -151.58160714986343,
+                "scenario": "scenario_16"
+              },
+              {
+                "apogee_m_delta": 289.82368164062495,
+                "assisted": {
+                  "apogee_m": 2302.07021484375,
+                  "deployment_lateral_m": 1509.4431213884072,
+                  "lateral_rms_m": 1128.511499325311
+                },
+                "baseline": {
+                  "apogee_m": 2012.246533203125,
+                  "deployment_lateral_m": 1669.9617141762494,
+                  "lateral_rms_m": 1279.3677014245936
+                },
+                "deployment_lateral_m_delta": -160.51859278784218,
+                "episodes": 5,
+                "lateral_rms_m_delta": -150.85620209928265,
+                "scenario": "scenario_17"
+              },
+              {
+                "apogee_m_delta": 298.61772460937505,
+                "assisted": {
+                  "apogee_m": 2183.3134765625,
+                  "deployment_lateral_m": 1649.7692237249325,
+                  "lateral_rms_m": 1254.871086668012
+                },
+                "baseline": {
+                  "apogee_m": 1884.695751953125,
+                  "deployment_lateral_m": 1784.65368433375,
+                  "lateral_rms_m": 1400.9906764551058
+                },
+                "deployment_lateral_m_delta": -134.88446060881756,
+                "episodes": 5,
+                "lateral_rms_m_delta": -146.1195897870939,
+                "scenario": "scenario_18"
+              },
+              {
+                "apogee_m_delta": 258.4526123046876,
+                "assisted": {
+                  "apogee_m": 2309.724609375,
+                  "deployment_lateral_m": 1462.6194244667865,
+                  "lateral_rms_m": 1131.659834469247
+                },
+                "baseline": {
+                  "apogee_m": 2051.2719970703124,
+                  "deployment_lateral_m": 1652.645757710885,
+                  "lateral_rms_m": 1267.8827796706996
+                },
+                "deployment_lateral_m_delta": -190.0263332440984,
+                "episodes": 5,
+                "lateral_rms_m_delta": -136.2229452014526,
+                "scenario": "scenario_19"
+              }
+            ],
+            "sha256": {
+              "assisted": "35d4f0caa666b26642606f6c114b0888e21ff0bff197d7623ba87fbfc4774932",
+              "baseline": "b1123a635768bdd5d71b1591326477be3fde9f80a22b4f24288f067234ecbc4d"
+            }
+          },
+          "oracle_gtheta": {
+            "aggregate": {
+              "apogee_m_delta": -7.601098632812636,
+              "assisted": {
+                "apogee_m": 1975.4022644042968,
+                "deployment_lateral_m": 1653.1973778851407,
+                "lateral_rms_m": 1297.998632791782
+              },
+              "baseline": {
+                "apogee_m": 1983.0033630371095,
+                "deployment_lateral_m": 1689.1858363442045,
+                "lateral_rms_m": 1306.38016408707
+              },
+              "deployment_lateral_m_delta": -35.98845845906385,
+              "episodes": 20,
+              "lateral_rms_m_delta": -8.381531295287914
+            },
+            "arm": "run_episode_with_oracle / fin_accel_command",
+            "authority": {
+              "active_ticks": 16531,
+              "cap_fraction": 1.0,
+              "cap_hit_ticks": 16531,
+              "max_command_mps2": 10.0
+            },
+            "per_scenario": [
+              {
+                "apogee_m_delta": 21.373950195312318,
+                "assisted": {
+                  "apogee_m": 2005.1731201171874,
+                  "deployment_lateral_m": 1614.5444086141185,
+                  "lateral_rms_m": 1251.8819746046227
+                },
+                "baseline": {
+                  "apogee_m": 1983.799169921875,
+                  "deployment_lateral_m": 1645.7205894449971,
+                  "lateral_rms_m": 1272.5695260112736
+                },
+                "deployment_lateral_m_delta": -31.176180830878593,
+                "episodes": 5,
+                "lateral_rms_m_delta": -20.687551406650982,
+                "scenario": "scenario_16"
+              },
+              {
+                "apogee_m_delta": -16.3258056640625,
+                "assisted": {
+                  "apogee_m": 1995.9207275390625,
+                  "deployment_lateral_m": 1632.684213986414,
+                  "lateral_rms_m": 1274.299448988068
+                },
+                "baseline": {
+                  "apogee_m": 2012.246533203125,
+                  "deployment_lateral_m": 1669.9617141762494,
+                  "lateral_rms_m": 1279.3677014245936
+                },
+                "deployment_lateral_m_delta": -37.27750018983534,
+                "episodes": 5,
+                "lateral_rms_m_delta": -5.068252436525654,
+                "scenario": "scenario_17"
+              },
+              {
+                "apogee_m_delta": -8.533203125,
+                "assisted": {
+                  "apogee_m": 1876.162548828125,
+                  "deployment_lateral_m": 1745.9734904342383,
+                  "lateral_rms_m": 1393.2275844640942
+                },
+                "baseline": {
+                  "apogee_m": 1884.695751953125,
+                  "deployment_lateral_m": 1784.65368433375,
+                  "lateral_rms_m": 1400.9906764551058
+                },
+                "deployment_lateral_m_delta": -38.68019389951178,
+                "episodes": 5,
+                "lateral_rms_m_delta": -7.763091991011606,
+                "scenario": "scenario_18"
+              },
+              {
+                "apogee_m_delta": -26.91933593749991,
+                "assisted": {
+                  "apogee_m": 2024.3526611328125,
+                  "deployment_lateral_m": 1615.9862195261917,
+                  "lateral_rms_m": 1267.703094882403
+                },
+                "baseline": {
+                  "apogee_m": 2051.2719970703124,
+                  "deployment_lateral_m": 1652.645757710885,
+                  "lateral_rms_m": 1267.8827796706996
+                },
+                "deployment_lateral_m_delta": -36.65953818469325,
+                "episodes": 5,
+                "lateral_rms_m_delta": -0.17968478829652668,
+                "scenario": "scenario_19"
+              }
+            ],
+            "sha256": {
+              "assisted": "68973c0f50d554065525c0093aa4deddc72ec69828d2e29d7dbc88e02f9e607d",
+              "baseline": "b1123a635768bdd5d71b1591326477be3fde9f80a22b4f24288f067234ecbc4d"
+            }
+          }
+        }
+      },
+      "sim_source": "read-only scripts/ab_control_v3 on git 6f44a25b6f24d668c5cf1cc9039b392f934bef35; oracle uses run_episode_with_oracle / fin_accel_command",
+      "students": [
+        {
+          "exports_sha256": {
+            "1": "4ec9decf073f0611aad338f2ad34e5f03cd21b39ed30bb7afd7f8cdc6425c85f",
+            "2": "90220137ea815c6975189c9fd68c04c8c028b7b0377b5b63c0bef5cee9e98873",
+            "3": "61083ee15f932b1548379c68c39943a6d167860b517624e75c3ebbbb3cf38596"
+          },
+          "label": "BRK04 BRK03-fixed --braking-teacher four-stage distill student",
+          "name": "braking_v2",
+          "stage_order": [
+            "sft",
+            "privileged",
+            "dagger",
+            "distill"
+          ]
+        }
+      ],
+      "supersedes": "any win reading of the RETRAIN-NIGHT server-side RMSE comparison or of an RMSE-only braking comparison: neither is a closed-loop A/B and both are void here; the unweakened pre-registered v6 gates are restored",
+      "verdict": {
+        "absolute_gates": false,
+        "eval01_gates": {
+          "closed_loop_improvement": false,
+          "ece": true,
+          "ece_source": true,
+          "oracle_positive_control": false,
+          "provenance": true,
+          "rmse_ratio": true,
+          "seed_spread": true
+        },
+        "gates_failed": 6,
+        "oracle_positive_control": false,
+        "pass": false,
+        "primary": "braking_v2",
+        "status": "FAIL",
+        "win_claimed": false
+      }
+    }
+  },
+  "blockers": [
+    "braking_v2: EVAL01 closed_loop_improvement failed: seed 1 lateral -13.17% is above -35%; seed 2 lateral -10.99% is above -35%; seed 3 lateral -11.18% is above -35%; seed 3 apogee 14.86% is below 15%",
+    "braking_v2: EVAL01 oracle_positive_control failed: seed 2 oracle did not raise apogee; seed 3 oracle did not raise apogee",
+    "braking_v2: braking_v2: oracle positive control did not improve both metrics on all seeds"
+  ],
+  "exit_code": 1,
+  "held_out_indices": [
+    16,
+    17,
+    18,
+    19,
+    36,
+    37,
+    38,
+    39,
+    56,
+    57,
+    58,
+    59,
+    76,
+    77,
+    78,
+    79,
+    96,
+    97,
+    98,
+    99
+  ],
+  "honesty_notes": [
+    "Simulator-only: the POTOKTRJ sidecar is emitted by the same simulator that flies the episodes; it is not an independent flight truth anchor.",
+    "No canopy/deployment event is scored; the proxy is the first DESCENT tick and is not a landing-dispersion measurement.",
+    "The braking teacher is privileged simulator truth. This A/B measures the distilled student's closed-loop behaviour, not teacher fidelity or flight.",
+    "Commands are generated from the baseline flight's recorded frames and replayed by frame index; they are emitted only where the baseline ai_healthy target is true, so boost-phase flight stays paired with the control.",
+    "provenance.git_head is the checked-out commit at run time; BRK03 source digests are recorded separately so an uncommitted stack is visible.",
+    "The helper was rebuilt from current HEAD; its seed-1 flown sidecar is bit-identical to the frozen instrument, while a small input-frame delta is counted in provenance. No gate threshold was changed.",
+    "No win is claimed unless every unweakened v6 gate passes; a FAIL is a measured miss."
+  ],
+  "measurement": "POTOKTRJ v3 flown-truth trajectory sidecar (stride 26), not surrogate",
+  "provenance": {
+    "apogee_limit_m": 2000.0,
+    "arms": [
+      "braking_v2"
+    ],
+    "baseline_frame_maxdiff_vs_frozen": 0.12069106101989746,
+    "baseline_input_note": "helper rebuilt from current HEAD; sensor frames differ slightly from the frozen dataset, while conditioning, labels and the flown sidecar are bit-identical",
+    "baseline_trajectory_sha256": {
+      "1": "9b1d680d55f635a3a2cf84864498cb533a84132bbe15ba791154a3cd58bb5953",
+      "2": "f0443872b644520d9f413e11b608241b0d8ea9bea65d5605b5e026ce08597aa2",
+      "3": "b1123a635768bdd5d71b1591326477be3fde9f80a22b4f24288f067234ecbc4d"
+    },
+    "baseline_validation_sha256": "779069d27e9292eb20c3c404beeb6d25807728b4419628c1ddc79af5f54fd8f7",
+    "braking_root": "ai/out/braking_v2",
+    "braking_teacher_source_sha256": "a1bd96135bda602a410e3acc05ab8916896eca0318b069861da6b0c90200faf9",
+    "brk03_version": "BRK03 one-way ACTIVE_PHASES whitelist + persistent per-episode window tick cursor",
+    "command_limit_mps2": 10.0,
+    "config": "ai/out/v3_final/sim.toml",
+    "config_hash": "9c34e71f9d10bcf081c31f15f5332f7bb2fac04dddb28009a27cd30987ab5e91",
+    "config_sha256": "9c34e71f9d10bcf081c31f15f5332f7bb2fac04dddb28009a27cd30987ab5e91",
+    "deployment_proxy": "first DESCENT tick (vz<0 and z>=5), radial distance from pad",
+    "dynamics_basis": "post-FIXPUMP; seed-1 zero-command sidecar checked bit-for-bit against the frozen held-out trajectory",
+    "dynamics_sha256": "6159cf4bd24862a8ac89f97529e1133d49ef6bd8f6ba2289f2b4d70987063cc2",
+    "export_manifest_sha256": "b4b41fe863b72a71c20467f460de5f24452327df66a1b0b5fad2ac475a54aabd",
+    "gate_source": "scripts/ab_v6.py (imported verbatim)",
+    "gate_source_sha256": "2da97169fc0f355c2d655f56985e963b1a578eee64bcf715b9fc8a2c2acc2463",
+    "generated_at_utc": "2026-11-24T12:23:09+00:00",
+    "git_head": "6f44a25b6f24d668c5cf1cc9039b392f934bef35",
+    "harness": "scripts/ab_braking_v2.py",
+    "harness_sha256": "d51dedd5c55b5b295d8b53d9aa1b83f9a9b27a417f48ad3072c688f46b0fe3f1",
+    "heldout": "ai/out/final_v3_postpump/data/held-out/validation.bin",
+    "heldout_manifest_sha256": "a9ff19947618f17790f1257ef6f7e85ba537915f5a2aca782befefa874db675e",
+    "heldout_sha256": "fdc1d1400b1c5f111e21f79dead37afa1dd9f058fe457edb78037dc6ebe89807",
+    "helper": "scripts/ab_control_v3/src/main.rs",
+    "helper_binary": "scripts/ab_control_v3/target/release/ab-control-v3",
+    "helper_binary_sha256": "d46e38e587d1852e7d1a8e3d69c58820a2aa2721486d985401a01c7b354d996d",
+    "helper_sha256": "1f5564e30d66d82e081e5e435bcac3932a862638163cb0fac9a7261920559fed",
+    "lateral_limit_m": 1000.0,
+    "numpy": "2.5.5",
+    "objective_head": "6f44a25b6f24d668c5cf1cc9039b392f934bef35",
+    "objective_source_sha256": "64400853113e70b60868add49d63b0f313a6c84b6d0a4801ebddee47be628411",
+    "objective_version": "TRUTH_VEL_START=3,TRUTH_VEL_END=6",
+    "python": "3.13.15",
+    "quality_report_sha256": "8ba904125055787c26e95da39102ecd9dcaa0102c3b66a456c5f265316b5b7d8",
+    "sample_dt_s": 0.02,
+    "summary_sha256": "68868be7bd29e52455d5d3e9981b314b8864cbccee27fa1893cf72d49888691e",
+    "teacher_gates_sha256": "8ffeb062bea860295848959a063d72060be889ca7d1f641b6a7514fdcf0bc2d3",
+    "torch": "2.15.0+cpu",
+    "trainer_source_sha256": "eda3100f04873ff018a05151f39c7d230c22234f058365e7c15dcdef475535ef"
+  },
+  "seed_order": [
+    1,
+    2,
+    3
+  ],
+  "sim_source": "read-only scripts/ab_control_v3 on git 6f44a25b6f24d668c5cf1cc9039b392f934bef35; oracle uses run_episode_with_oracle / fin_accel_command",
+  "students": [
+    {
+      "exports_sha256": {
+        "1": "4ec9decf073f0611aad338f2ad34e5f03cd21b39ed30bb7afd7f8cdc6425c85f",
+        "2": "90220137ea815c6975189c9fd68c04c8c028b7b0377b5b63c0bef5cee9e98873",
+        "3": "61083ee15f932b1548379c68c39943a6d167860b517624e75c3ebbbb3cf38596"
+      },
+      "label": "BRK04 BRK03-fixed --braking-teacher four-stage distill student",
+      "name": "braking_v2",
+      "stage_order": [
+        "sft",
+        "privileged",
+        "dagger",
+        "distill"
+      ]
+    }
+  ],
+  "supersedes": "any win reading of the RETRAIN-NIGHT server-side RMSE comparison or of an RMSE-only braking comparison: neither is a closed-loop A/B and both are void here; the unweakened pre-registered v6 gates are restored",
+  "verdict": {
+    "pass": false,
+    "per_arm": {
+      "braking_v2": "FAIL"
+    },
+    "status": "FAIL",
+    "win_claimed": false
+  }
+}

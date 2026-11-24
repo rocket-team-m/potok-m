@@ -1,0 +1,272 @@
+{
+  "ab_win_claimed": false,
+  "arm": "braking_v2",
+  "braking": {
+    "brk03_version": "BRK03 one-way ACTIVE_PHASES whitelist + persistent per-episode window tick cursor",
+    "cap_mps2": 10.0,
+    "enabled": true,
+    "flag": "--braking-teacher",
+    "limitation": "BRK03 fixed the target: the privileged stage now has boost-gated and active rows on every seed. The cap bucket is counted but empty on real v3 privileged windows (they stay inside +/-10); DAgger rows do saturate. No gate, physics or envelope value was changed by BRK04.",
+    "per_seed": {
+      "1": {
+        "dagger": {
+          "boost_end_s": 9.95,
+          "cap_mps2": 10.0,
+          "enabled": true,
+          "horizon_s": 2.0,
+          "reason": null,
+          "reason_counts": {
+            "boost_gate": 42589,
+            "cap_clamped": 72727,
+            "non_finite": 0,
+            "ok": 3724,
+            "out_of_range": 0,
+            "radius_zero": 0,
+            "settled": 0
+          },
+          "source": "radial_braking_reference",
+          "stop_distance_m": 20.0
+        },
+        "privileged": {
+          "boost_end_s": 9.95,
+          "cap_mps2": 10.0,
+          "enabled": true,
+          "horizon_s": 2.0,
+          "reason": null,
+          "reason_counts": {
+            "boost_gate": 487,
+            "cap_clamped": 0,
+            "non_finite": 0,
+            "ok": 964,
+            "out_of_range": 0,
+            "radius_zero": 0,
+            "settled": 0
+          },
+          "source": "radial_braking_reference",
+          "stop_distance_m": 20.0
+        }
+      },
+      "2": {
+        "dagger": {
+          "boost_end_s": 9.95,
+          "cap_mps2": 10.0,
+          "enabled": true,
+          "horizon_s": 2.0,
+          "reason": null,
+          "reason_counts": {
+            "boost_gate": 42589,
+            "cap_clamped": 72727,
+            "non_finite": 0,
+            "ok": 3724,
+            "out_of_range": 0,
+            "radius_zero": 0,
+            "settled": 0
+          },
+          "source": "radial_braking_reference",
+          "stop_distance_m": 20.0
+        },
+        "privileged": {
+          "boost_end_s": 9.95,
+          "cap_mps2": 10.0,
+          "enabled": true,
+          "horizon_s": 2.0,
+          "reason": null,
+          "reason_counts": {
+            "boost_gate": 487,
+            "cap_clamped": 0,
+            "non_finite": 0,
+            "ok": 964,
+            "out_of_range": 0,
+            "radius_zero": 0,
+            "settled": 0
+          },
+          "source": "radial_braking_reference",
+          "stop_distance_m": 20.0
+        }
+      },
+      "3": {
+        "dagger": {
+          "boost_end_s": 9.95,
+          "cap_mps2": 10.0,
+          "enabled": true,
+          "horizon_s": 2.0,
+          "reason": null,
+          "reason_counts": {
+            "boost_gate": 42589,
+            "cap_clamped": 72727,
+            "non_finite": 0,
+            "ok": 3724,
+            "out_of_range": 0,
+            "radius_zero": 0,
+            "settled": 0
+          },
+          "source": "radial_braking_reference",
+          "stop_distance_m": 20.0
+        },
+        "privileged": {
+          "boost_end_s": 9.95,
+          "cap_mps2": 10.0,
+          "enabled": true,
+          "horizon_s": 2.0,
+          "reason": null,
+          "reason_counts": {
+            "boost_gate": 487,
+            "cap_clamped": 0,
+            "non_finite": 0,
+            "ok": 964,
+            "out_of_range": 0,
+            "radius_zero": 0,
+            "settled": 0
+          },
+          "source": "radial_braking_reference",
+          "stop_distance_m": 20.0
+        }
+      }
+    },
+    "privileged_histogram": {
+      "1": {
+        "dagger": {
+          "boost_gate": 42589,
+          "cap_clamped": 72727,
+          "non_finite": 0,
+          "ok": 3724,
+          "out_of_range": 0,
+          "radius_zero": 0,
+          "settled": 0
+        },
+        "dagger_cap_usage": true,
+        "privileged": {
+          "boost_gate": 487,
+          "cap_clamped": 0,
+          "non_finite": 0,
+          "ok": 964,
+          "out_of_range": 0,
+          "radius_zero": 0,
+          "settled": 0
+        },
+        "privileged_active": 964,
+        "privileged_cap_usage": false
+      },
+      "2": {
+        "dagger": {
+          "boost_gate": 42589,
+          "cap_clamped": 72727,
+          "non_finite": 0,
+          "ok": 3724,
+          "out_of_range": 0,
+          "radius_zero": 0,
+          "settled": 0
+        },
+        "dagger_cap_usage": true,
+        "privileged": {
+          "boost_gate": 487,
+          "cap_clamped": 0,
+          "non_finite": 0,
+          "ok": 964,
+          "out_of_range": 0,
+          "radius_zero": 0,
+          "settled": 0
+        },
+        "privileged_active": 964,
+        "privileged_cap_usage": false
+      },
+      "3": {
+        "dagger": {
+          "boost_gate": 42589,
+          "cap_clamped": 72727,
+          "non_finite": 0,
+          "ok": 3724,
+          "out_of_range": 0,
+          "radius_zero": 0,
+          "settled": 0
+        },
+        "dagger_cap_usage": true,
+        "privileged": {
+          "boost_gate": 487,
+          "cap_clamped": 0,
+          "non_finite": 0,
+          "ok": 964,
+          "out_of_range": 0,
+          "radius_zero": 0,
+          "settled": 0
+        },
+        "privileged_active": 964,
+        "privileged_cap_usage": false
+      }
+    },
+    "source": "radial_braking_reference"
+  },
+  "data_provenance": {
+    "braking_teacher_source_sha256": "a1bd96135bda602a410e3acc05ab8916896eca0318b069861da6b0c90200faf9",
+    "brk03_version": "BRK03 one-way ACTIVE_PHASES whitelist + persistent per-episode window tick cursor",
+    "config_sha256": "9c34e71f9d10bcf081c31f15f5332f7bb2fac04dddb28009a27cd30987ab5e91",
+    "heldout_sha256": "fdc1d1400b1c5f111e21f79dead37afa1dd9f058fe457edb78037dc6ebe89807",
+    "objective_head": "6f44a25b6f24d668c5cf1cc9039b392f934bef35",
+    "objective_source_sha256": "64400853113e70b60868add49d63b0f313a6c84b6d0a4801ebddee47be628411",
+    "objective_version": "TRUTH_VEL_START=3,TRUTH_VEL_END=6",
+    "teacher_gates_source_sha256": "8ffeb062bea860295848959a063d72060be889ca7d1f641b6a7514fdcf0bc2d3",
+    "train_sha256": "34b35e0ff67f7eeecbd895b2efde8bebcfa159c1a3e78379da6750338b6930b6",
+    "trainer_source_sha256": "eda3100f04873ff018a05151f39c7d230c22234f058365e7c15dcdef475535ef",
+    "truth_sidecar_sha256": "7f25bb69124638ea7542be99f43330fda1c5248513f1971f6bfd125f5f759cb8"
+  },
+  "gates": {
+    "ece": {
+      "detail": "three disjoint ECE scores <= 0.05 with coverage in [0, 1]",
+      "name": "ece",
+      "passed": true
+    },
+    "ece_source": {
+      "detail": "three seeds labelled with a disjoint source ['disjoint', 'held-out', 'held_out']",
+      "name": "ece_source",
+      "passed": true
+    },
+    "rmse_ratio": {
+      "detail": "three seeds, held-out/train ratio <= 1.25",
+      "name": "rmse_ratio",
+      "passed": true
+    }
+  },
+  "measurement": "BRK04: BRK03-fixed radial braking teacher, 3 seeds x 100 epochs CPU, frozen RETRAIN-NIGHT recipe plus explicit --braking-teacher",
+  "rlvr_used": false,
+  "rmse_held_out_by_seed": {
+    "1": 6.90320702729153,
+    "2": 9.234743343500435,
+    "3": 9.035453391844523
+  },
+  "rmse_held_out_mean": 8.391134587545496,
+  "rmse_held_out_std": 1.292430052122839,
+  "seeds": [
+    1,
+    2,
+    3
+  ],
+  "stage_order": [
+    "sft",
+    "privileged",
+    "dagger",
+    "distill"
+  ],
+  "surrogate_binding": {
+    "claimed": true,
+    "reason": "The braking target is a privileged simulator reference; the on-policy world_step and the POTOKTRJ sidecar are simulator surrogates, not flight logs."
+  },
+  "upgrades": {
+    "AICAL": {
+      "conformal_files": [
+        "/home/sehaxe/potok-m/ai/out/braking_v2/runs/s1/conformal.json",
+        "/home/sehaxe/potok-m/ai/out/braking_v2/runs/s2/conformal.json",
+        "/home/sehaxe/potok-m/ai/out/braking_v2/runs/s3/conformal.json"
+      ],
+      "ece_source": "held-out",
+      "enabled": true
+    },
+    "AIFIX1_2_3_SHIELD01_02_DAgger": "inherited defaults, re-checked per seed",
+    "AIOBJ": {
+      "enabled": true,
+      "flag": "default (--legacy-objective not passed)",
+      "formula": "L = mean[((a_lat_resid - u_lat)/g0)^2 + (drag_est/g0)*gamma(u)^2]; gamma = atan2(vz_next, hypot(vx_next, vy_next)), vx_next = vx - u_pitch*dt, vy_next = vy + u_lat*dt, vz_next = vz",
+      "source": "impact"
+    },
+    "braking_teacher": "explicit CLI flag; BRK03 phase gate + real ticks, radial law from BRK01, no fitted coefficient"
+  }
+}

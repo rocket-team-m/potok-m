@@ -1,3 +1,82 @@
+<!-- braking-v2-ab:begin -->
+# BRK04 closed-loop A/B — exact verdict
+
+**FAIL** — 6 gates failed, `win_claimed=False`. Full evidence: `scripts/ab_report_braking_v2.json` and `ab_report_braking_v2.md`.
+
+| gate | result |
+|---|---|
+| eval01 rmse_ratio | PASS |
+| eval01 ece_source | PASS |
+| eval01 ece | PASS |
+| eval01 provenance | PASS |
+| eval01 seed_spread | PASS |
+| eval01 closed_loop_improvement | FAIL |
+| eval01 oracle_positive_control | FAIL |
+| seed 1 absolute gates | FAIL |
+| seed 2 absolute gates | FAIL |
+| seed 3 absolute gates | FAIL |
+| oracle_deployment_and_apogee_positive_control | FAIL |
+
+Blockers:
+- EVAL01 closed_loop_improvement failed: seed 1 lateral -13.17% is above -35%; seed 2 lateral -10.99% is above -35%; seed 3 lateral -11.18% is above -35%; seed 3 apogee 14.86% is below 15%
+- EVAL01 oracle_positive_control failed: seed 2 oracle did not raise apogee; seed 3 oracle did not raise apogee
+- braking_v2: oracle positive control did not improve both metrics on all seeds
+
+No gate, threshold, physics value or command envelope was changed. BRK03 repaired the privileged target (one-way active-phase whitelist and persistent window ticks); every seed's privileged histogram now carries boost_gate and active rows, with the cap bucket counted but empty on real v3 windows (DAgger does saturate). The helper rebuilt from current HEAD shifted input frames by 0.120691 while the flown sidecar stayed bit-identical. That is a counted limitation, not a gate edit.
+<!-- braking-v2-ab:end -->
+
+
+---
+
+<!-- braking-v2:begin -->
+# Braking-teacher results — BRK04 (BRK03-fixed phase gate)
+
+The shipped four-stage default (`sft -> privileged -> dagger -> distill`) was rerun on the frozen post-FIXPUMP split with the train-split v3 truth sidecar, **3 seeds x 100 epochs, CPU**, with the explicit `--braking-teacher` flag. BRK03's one-way active-phase whitelist and persistent per-episode window tick cursor are in force, so the privileged reference is evaluated on real post-burnout flight ticks. The radial law replaces the recorded optimizer labels in the privileged and DAgger stages; every other recipe value is identical to RETRAIN-NIGHT. No physics constant, gate threshold, command envelope, confidence threshold or loss weight was tuned. `--limit 1451` caps WINDOWS per batch builder, not episodes. RLVR stayed opt-in and was not run.
+
+Held-out RMSE: **8.391135 +/- 1.292430 m/s^2** (sample std).
+
+| seed | train RMSE | held-out RMSE | ratio | disjoint ECE |
+|---:|---:|---:|---:|---:|
+| 1 | 6.688764 | 6.903207 | 1.0321 | 0.0201 |
+| 2 | 8.592235 | 9.234743 | 1.0748 | 0.0193 |
+| 3 | 8.476108 | 9.035453 | 1.0660 | 0.0246 |
+
+## Gate verdict (teacher gates only)
+
+| check | verdict | detail |
+|---|---|---|
+| rmse_ratio | PASS | three seeds, held-out/train ratio <= 1.25 |
+| ece_source | PASS | three seeds labelled with a disjoint source ['disjoint', 'held-out', 'held_out'] |
+| ece | PASS | three disjoint ECE scores <= 0.05 with coverage in [0, 1] |
+
+Closed-loop gates are reported separately in `scripts/ab_report_braking_v2.json/.md` with the **unweakened v6 gates**; no win is claimed here. The ECE is a disjoint inner-held-out score; stage-local ECE values remain in-sample diagnostics.
+
+## BRK03 target histogram (privileged stage)
+
+Every seed must carry boost-gated and active rows; the cap bucket is counted. A boost-gate-only histogram is the BRK02 defect and is refused loudly. Real v3 privileged windows stay inside +/-10, so their cap_clamped bucket is empty here; DAgger rows carry cap usage. No physics or envelope value was tuned to change that.
+
+| seed | boost_gate | ok | cap_clamped | active (ok + cap) | DAgger cap_clamped |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 487 | 964 | 0 | 964 | 72727 |
+| 2 | 487 | 964 | 0 | 964 | 72727 |
+| 3 | 487 | 964 | 0 | 964 | 72727 |
+
+## Binding limitation — stated loudly
+
+The radial target is a privileged simulator reference. The on-policy `world_step` still advances surrogate sensor features, and the v3 truth sidecar is emitted by the same simulator, so generator and verifier share a source. This is not an independent flight-truth anchor and not a flight claim.
+
+## Provenance
+
+- train sha256: `34b35e0ff67f7eeecbd895b2efde8bebcfa159c1a3e78379da6750338b6930b6`; held-out sha256: `fdc1d1400b1c5f111e21f79dead37afa1dd9f058fe457edb78037dc6ebe89807`
+- config sha256: `9c34e71f9d10bcf081c31f15f5332f7bb2fac04dddb28009a27cd30987ab5e91`; truth sidecar sha256: `7f25bb69124638ea7542be99f43330fda1c5248513f1971f6bfd125f5f759cb8`
+- trainer sha256: `eda3100f04873ff018a05151f39c7d230c22234f058365e7c15dcdef475535ef`; BRK03 reference sha256: `a1bd96135bda602a410e3acc05ab8916896eca0318b069861da6b0c90200faf9`
+- BRK01B objective sha256: `64400853113e70b60868add49d63b0f313a6c84b6d0a4801ebddee47be628411`; version `TRUTH_VEL_START=3,TRUTH_VEL_END=6` at `6f44a25b6f24d668c5cf1cc9039b392f934bef35`
+- BRK03 version: `BRK03 one-way ACTIVE_PHASES whitelist + persistent per-episode window tick cursor`
+- per-seed evidence: `ai/out/braking_v2/runs/s*/metrics.json` and `conformal.json`; exports: `ai/out/braking_v2/exports/manifest.json`; full summary: `ai/out/braking_v2/summary.json`.
+<!-- braking-v2:end -->
+
+---
+
 <!-- braking-ab:begin -->
 # BRK02 closed-loop A/B — exact verdict
 
