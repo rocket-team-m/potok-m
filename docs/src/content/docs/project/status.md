@@ -18,7 +18,7 @@ description: Честный статус на 24.11.2026 — BRK04 A/B FAIL (bra
 | ИИ, closed-loop A/B | **BRK04 FAIL**, braking_v2 5 PASS / 6 FAIL (6 из 11 гейтов) | симуляционный прогон, не лётная квалификация; ИИ остаётся наблюдателем |
 | Симулятор | OR-parity PASS как регрессионный пин | не цифровой двойник: внешних измерений нет |
 | Прошивка | host/SIL/Renode green | HIL не пройден; `do not arm`, `do not flash` |
-| Приложение (GPUI) | механика и вёрстка работают | clippy `-D warnings` красный, CI его не запускает |
+| Приложение (GPUI) | механика и вёрстка работают | clippy `-D warnings` зелёный, но CI его не запускает |
 | RocketCraft | приватный воркбенч, 3/24 shipped | не готовый продукт; приборная аэрокарточка остаётся границей стыка |
 | Лицензия | GPL-3.0-or-later + коммерческая отдельно | сторонние лицензии не перелицензируются |
 
@@ -189,7 +189,7 @@ OR M=0,82 остаётся открытым; коэффициенты под ч�
 снимка — FIXPUMP (нормальная аэросила больше не совершает положительную
 работу; мнимая апогейная «власть» oracle исчезла) и SIMRESID
 (`a_lat_resid` приведён к интеграторской проекции; три consistency-теста
-починены без ослабления порогов). Интегрированное дерево: **321 тест,
+починены без ослабления порогов). Интегрированное дерево: **360 тестов,
 0 failing**; отдельный репозиторий `potok-m-sim`: 67. Ни один коэффициент
 не подгонялся под результат.
 
@@ -216,12 +216,11 @@ HIL **не выполнен**: `hw::build_board()`, `Rx::take()`, `Tx::send()` �
 ## Приложение и RocketCraft
 
 **Приложение** (`potok-m-app`, GPUI 0.2.2): механика и вёрстка работают;
-работа продолжается по транспортам, поиску и камере. 95 тестов зелёные,
+работа продолжается по транспортам, поиску и камере. 133 теста зелёные,
 проверка целостности визуальных baseline (4 PNG) проходит, но в CI рендера
-нет. `cargo clippy --all-targets -- -D warnings` **красный** на 4 линтах
-(`manual_div_ceil` в `src/live.rs:172`, три `unnecessary_cast` в
-`src/theme.rs:149-151`); CI приложения запускает только `check` и `test`,
-поэтому остаётся зелёным при красном clippy. Путь headless-скриншотов
+нет. `cargo clippy --all-targets -- -D warnings` **зелёный**: четыре линта,
+зафиксированные в `VERIFY-FINAL3.md`, исправлены. CI приложения запускает
+только `check` и `test`. Путь headless-скриншотов
 (sway `WLR_BACKENDS=headless` + grim) проверен и детерминирован, но ещё не
 оформлен как гейт репозитория. Число «216/223/269/303 хостовых тестов» в
 разных сводках — снимки разных деревьев; актуальное для прошивки — 303.
@@ -233,7 +232,8 @@ C14 (RANS kω) и C17 (аэрокарточка) понижены до `planned`
 нет. C02 (STEP) при реальном AP214-фикстуре всё равно отказывает без STEP-ядра;
 C05 (`.ork`) использует синтетический ZIP, не Simulation 9. Гейт лицензии
 зелёный (включая два закреплённых по SHA-256 текстовых OBJ-фикстуры).
-Workspace-тесты зелёные (446/452 в разных снимках). Граница с симулятором —
+Workspace-тесты зелёные (487 тестов, 0 failing, 1 ignored с фичей `app`).
+Граница с симулятором —
 аэрокарточка, а не исходники CAD.
 
 ## Лицензия и публичные репозитории
@@ -253,11 +253,11 @@ Workspace-тесты зелёные (446/452 в разных снимках). Г
 | --- | --- | --- |
 | [potok-m](https://github.com/rocket-team-m/potok-m) | сайт, ADR, общие артефакты | docs build green, local links green, guard green |
 | [potok-m-ai](https://github.com/rocket-team-m/potok-m-ai) | обучение, LoopWM/LRS-RNN, экспорт | 88 pytest зелёных; BRK04 A/B FAIL — текущий вердикт |
-| [potok-m-sim](https://github.com/rocket-team-m/potok-m-sim) | 6-DoF, рандомизация, данные | 67 тестов в split-репо, 321 в интегрированном дереве; не цифровой двойник |
+| [potok-m-sim](https://github.com/rocket-team-m/potok-m-sim) | 6-DoF, рандомизация, данные | 67 тестов в split-репо, 360 в интегрированном дереве; не цифровой двойник |
 | [potok-m-protocol](https://github.com/rocket-team-m/potok-m-protocol) | UART, генератор биндингов, C-эталон | 37 тестов, generator drift и 6 golden-шагов зелёные |
 | [potok-m-firmware](https://github.com/rocket-team-m/potok-m-firmware) | STM32H743, Embassy, SIL | 303 теста, Renode smoke PASS; HIL не пройден |
 | [potok-m-edge](https://github.com/rocket-team-m/potok-m-edge) | инференс на Raspberry Pi | 103 теста зелёных |
-| [potok-m-app](https://github.com/rocket-team-m/potok-m-app) | десктопное приложение GPUI | 95 тестов зелёных, clippy `-D warnings` красный, CI без clippy |
+| [potok-m-app](https://github.com/rocket-team-m/potok-m-app) | десктопное приложение GPUI | 133 теста зелёных, clippy `-D warnings` зелёный, CI без clippy |
 | [potok-m-3d](https://github.com/rocket-team-m/potok-m-3d) | текстовые CAD-входы, обмен геометрией | публичный репозиторий канонических входов |
 | `potok-m-workbench` (приватный) | RocketCraft: CAD → CFD/FEA → аэрокарточка | 3/24 shipped, лицензионный гейт зелёный |
 

@@ -58,8 +58,8 @@ cargo clippy --all-targets -- -D warnings
 cargo test --workspace -p potok-or-parity
 ```
 
-Канонический монорепозиторий содержит 154 теста workspace: 141 в `potok-sim`,
-9 в CLI и 4 в `potok-or-parity`. Отдельный репозиторий `potok-m-sim` на своей
+Канонический монорепозиторий содержит 360 тестов workspace по последнему
+прогону `cargo test --workspace`. Отдельный репозиторий `potok-m-sim` на своей
 ветке проверен на 67 тестах; разница — в составе дерева, а не в качестве кода.
 Если после перезапуска компоновщик падает с `Bus error` из-за обёртки
 `sccache`, используйте чистый каталог:
@@ -93,7 +93,7 @@ cargo test --test safety --test watchguard_tests --test protocol_link_tests
 cargo test --test perf_tests --test scheduler_tests --test watchdog_tests --test timing_budget_tests
 ```
 
-Host-набор — 216 тестов в 22 integration-бинарниках. SIL-гейты: 25 тестов
+Host-набор — 303 теста в 30 integration-бинарниках. SIL-гейты: 25 тестов
 инъекций отказов провода и 34 теста тайминга. Зелёный SIL — необходимое, но не
 достаточное условие перед работой с платой.
 

@@ -68,7 +68,7 @@ SHA-256 только v3, не v2; `-0.0` сохраняет знак при кр
 wind/scenario 12, manifest 8, determinism 5, extended OR parity 4,
 control seam 7, trajectory v3 6. Ещё три файла Wave B добавляют aero parity
 3, residual stream 7 и quality v3 7. Итог по каноническому монорепозиторию —
-154 теста workspace (141 `potok-sim`, 9 CLI, 4 `potok-or-parity`).
+360 тестов workspace по последнему прогону `cargo test --workspace`.
 
 Отдельно зафиксирован стык команды и динамики: `MAX_COMMAND_MPS2 = 10`,
 `MAX_FIN_DEFLECTION_RAD = 25°`, момент равен `mass · g · arm`, знак сохраняется
