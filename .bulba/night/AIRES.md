@@ -1,7 +1,7 @@
 # AIRES — deterministic residual-policy deployment ablation
 
 **Date:** 2026-11-24 · **Repo:** `/home/sehaxe/potok-m` (HEAD at run time `07a5e43ebcd123065227665a5d6b71c46f0acd7d`).
-**Status:** done. Local commit only, no push. No subagents. No trainer, physics, weight, gate or threshold file was edited.
+**Status:** done. Local commits only (`e5d587a` = task commit; `f6f0d06` = final harness fix, see Commit note), no push. No subagents. No trainer, physics, weight, gate or threshold file was edited.
 
 ## Scope
 
@@ -110,3 +110,7 @@ Full per-arm assisted-trajectory SHA-256 map is in `ablation_residual.json:prove
 - The fixed oracle positive control still fails the apogee half on seeds 2/3 (post-FIXPUMP behaviour already recorded in v5), so this harness cannot certify an apogee-improving assist even before the primary arm's own misses.
 - The helper binary was not rebuilt in this shared checkout; its frozen-baseline bit-identity check is the guard against another worker's in-flight simulator edits.
 - No gate was weakened, no threshold searched, no win claimed. Local commit only; nothing pushed.
+
+## Commit note
+
+A concurrent agent committed `.bulba/night/AICAL.md` between my task commit (`e5d587a`) and my `git commit --amend`; the amend therefore rewrote that commit, and the final harness fix plus regenerated reports landed in HEAD `f6f0d06` under the AICAL commit message. The measured artifacts are identical across both commits except the external-output path fix. No history was pushed and no other commit was rewritten. This is recorded here rather than silently repaired because the checkout has concurrent writers.
