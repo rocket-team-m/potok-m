@@ -60,12 +60,20 @@ phase field labels arithmetic rather than substituting a different law.
 
 ## 3. Phase gating, envelope and explicit reasons
 
-- **No boost.** A row at or before `boost_end_s = 9.95` s
-  (`sim/core/tests/sim_tests.rs:295`) returns zero with reason `boost_gate`; the
-  caller may supply a separate `ai_allowed` bit that is ANDed with the time
-  gate. In the privileged stage the bit comes from the window's flight tick;
-  in DAgger from the recorded health flag (the reference emits exactly zero
-  during boost). Only the boolean is used, never the recorded number.
+- **One-way phase whitelist (BRK03).** `FlightPhase` names the organizer's
+  phases. `PAD`, `BOOST` and `MOTOR_ARMED` are **banned** and return zero with
+  reason `boost_gate`; `COAST` and `DESCENT` are the **only active** phases in
+  which the radial demand is computed; an `UNKNOWN` supplied explicitly is
+  banned too. With no clock and no explicit phase (the DAgger wire row) the
+  whitelist is not applied and the recorded health bit is the sole interlock.
+  The gate tests membership in `ACTIVE_PHASES`, never the complement, so a
+  mislabelled clock cannot promote a banned frame to a target. An explicit
+  `flight_phases` argument from a caller overrides the clock-derived label.
+  `flight_phase()` transcribes `sim/core/src/dynamics.rs:735-755`: `t <= 0` is
+  Pad, `0 < t <= boost_end_s = 9.95` s (`sim/core/tests/sim_tests.rs:295`) is
+  Boost/motor-armed, and post-burnout is Coast or Descent by the sign of `vz`.
+  No threshold or physics constant was changed. The caller may supply a
+  separate `ai_allowed` bit that is ANDed with the phase gate.
 - **Envelope.** `a_r` is clipped to ±`a_cap` and the two fin channels are
   clipped again to ±10 m/s². A clipped row is counted as `cap_clamped`.
 - **Not in range.** Non-finite truth → `non_finite`; `r ≈ 0` (no radial
@@ -81,9 +89,13 @@ phase field labels arithmetic rather than substituting a different law.
   The flag is part of `config_hash`, so a braking run and a legacy run cannot be
   confused after the fact.
 - **Privileged stage:** each training batch's target tensor is replaced by the
-  radial demand computed from the same truth rows the stage already reads;
-  tick-derived time gates boost. The impact objective, JEPA and privileged
-  latent are unchanged. Eval stays label-blind and keeps the recorded target.
+  radial demand computed from the same truth rows the stage already reads.
+  `_WindowTickCursor` keeps a per-episode window counter for the whole stage:
+  window n ends at flight tick `window - 1 + n`, advanced once per batch.
+  BRK01's counter was local to each batch, so every row mapped to ticks 11..74
+  and 100% were boost-gated (1451/1451 per seed in BRK02). The impact
+  objective reads the same ticks; JEPA and privileged latent are unchanged.
+  Eval stays label-blind and keeps the recorded target.
 - **DAgger stage:** the recorded reference label remains in
   `sample.correction` (its provenance contract is unchanged); the braking
   demand is a parallel `dataset.braking_targets` stream, and the training loop
@@ -96,12 +108,22 @@ phase field labels arithmetic rather than substituting a different law.
 
 ## 5. Gates and verification
 
-`tests/test_braking_teacher.py`: 11 tests — derived coefficients, correct truth
-slots vs labels, cap-saturated brake, position correction after velocity is
-nulled, settled deadband, both boost gates, the three not-in-range reasons with
-zero demand, cap/histogram over a mixed batch, default-on CLI escape, and both
-stage wirings (including that a recorded `[3, 4]` label is *not* the braking
-target). Full AI suite and `ruff check src tests` are run before commit.
+`tests/test_braking_teacher.py`: 13 tests — the 11 BRK01 gates plus two BRK03
+falsification gates:
+
+1. `test_phase_gate_is_zero_on_banned_phases_and_active_after_burnout` checks
+   the split directly: an explicit phase vector (Pad/Boost/MotorArmed/Coast/
+   Descent) produces exactly zero command on the three banned rows, nonzero on
+   both active rows, and fails under an inverted gate.
+2. `test_privileged_target_is_active_on_post_burnout_rows` runs the real hook
+   on 600-frame truth records across many batches. It asserts the cursor does
+   not reset (`ticks[64] == ticks[0] + 64`, last tick = 599), that every
+   pre-burnout row's target is exactly zero, and that ≥80% of the 204
+   post-burnout privileged rows have a nonzero target — both in the direct hook
+   call and in `metrics.json`'s `reason_counts` after `ttv.run`. The old
+   per-batch counter gives 0 active rows and fails this test.
+
+Full AI suite and `ruff check src tests` are run before commit.
 
 ## 6. Honest limits
 
@@ -113,8 +135,11 @@ target). Full AI suite and `ruff check src tests` are run before commit.
 - The demand-to-lateral-acceleration transfer is assumed 1:1 in the reference.
   The oracle's measured transfer is worse at high amplitude; a reference is a
   target, not a predictor of flown trajectory.
-- The health bit used in DAgger comes from the recorded label's zero-ness. If a
-  future dataset emits a non-zero label during boost, the interlock must move
-  to an explicit phase field; this module will not infer it from a number.
+- The DAgger wire row carries no clock, so its phase is `UNKNOWN`; the health
+  bit inferred from the recorded label's zero-ness is the sole interlock there.
+  A dataset that emits a non-zero label during boost would defeat that bit; the
+  durable fix is to pass an explicit `flight_phases` vector or a real clock from
+  the rollout, which the hook now supports. This module will not infer a phase
+  from a label number.
 - All evidence here is simulator data and CPU tests. No canopy/deployment
   event and no flight log backs any lateral claim.

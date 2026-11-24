@@ -26,11 +26,15 @@ phase labels describe which term governs (BRAKE above ``v_ref`` outward,
 CORRECT otherwise), but they do not change the arithmetic: clipping the same
 sum already saturates at the cap.
 
-The AI interlock is respected explicitly: a boost-phase row (or a caller-supplied
-``ai_allowed == False``) returns a zero demand with reason ``boost_gate``. No
-command is invented from an invalid state: non-finite, zero-radius and
-out-of-range rows return zero with their own reason. These are counted by
-:meth:`BrakingTeacher.reason_counts` so the training log shows which arm ran.
+The AI interlock is explicit and one-way. ``FlightPhase`` names the organizer's
+phases: Pad, Boost and MotorArmed are BANNED (zero demand, reason ``boost_gate``);
+Coast and Descent are the only ACTIVE phases, where the radial law runs. A
+caller-supplied ``ai_allowed == False`` is a second, independent veto. The
+predicate is a whitelist of active phases, never its inverse, so a mislabelled
+clock cannot quietly turn a banned frame into a target. No command is invented
+from an invalid state: non-finite, zero-radius and out-of-range rows return zero
+with their own reason. All are counted by :meth:`BrakingTeacher.reason_counts`
+so the training log shows which arm ran.
 
 Scope: simulation-only training target. The student never sees privileged truth,
 no flight gate or physics constant is changed here, and no deployment-lateral
@@ -58,8 +62,10 @@ FRAME_DT_S = 0.02  # sim/config/default.toml:9 (50 Hz validation frames)
 BOOST_END_S = 9.95  # sim/core/tests/sim_tests.rs:295 (9.9 <= burn_end <= 10.0)
 
 __all__ = [
+    "ACTIVE_PHASES",
     "BOOST_END_S",
     "COMMAND_CAP_MPS2",
+    "FORBIDDEN_PHASES",
     "FRAME_DT_S",
     "POS_SLICE",
     "PRIV_END",
@@ -70,7 +76,9 @@ __all__ = [
     "BrakingConfig",
     "BrakingDecision",
     "BrakingTeacher",
+    "FlightPhase",
     "TrueState",
+    "flight_phase",
 ]
 
 
@@ -82,6 +90,50 @@ class BrakePhase(str, Enum):
     CORRECT = "correct"
     SETTLED = "settled"
     OUT_OF_RANGE = "out_of_range"
+
+
+class FlightPhase(str, Enum):
+    """Organizer flight phases. The AI ban is a whitelist, not a blacklist.
+
+    Pad, Boost and MotorArmed precede burnout and are forbidden. The v3 truth
+    row carries no motor-arm bit, so pre-burnout ticks are reported as ``BOOST``
+    (motor armed throughout); a caller with an explicit arm signal can label
+    those rows ``MOTOR_ARMED`` and the gate treats them identically. Coast and
+    Descent are the only phases in which a reference command is produced.
+    ``UNKNOWN`` is the DAgger interlock path: no clock is carried by a wire row,
+    so the recorded health bit (``ai_allowed``) is the sole authority there.
+    """
+
+    PAD = "pad"
+    BOOST = "boost"
+    MOTOR_ARMED = "motor_armed"
+    COAST = "coast"
+    DESCENT = "descent"
+    UNKNOWN = "unknown"
+
+
+#: The organizer ban, written out so it cannot drift from the whitelist.
+FORBIDDEN_PHASES = frozenset(
+    {FlightPhase.PAD, FlightPhase.BOOST, FlightPhase.MOTOR_ARMED, FlightPhase.UNKNOWN}
+)
+ACTIVE_PHASES = frozenset({FlightPhase.COAST, FlightPhase.DESCENT})
+if FORBIDDEN_PHASES & ACTIVE_PHASES or FORBIDDEN_PHASES | ACTIVE_PHASES != set(FlightPhase):
+    raise AssertionError("flight phases must split exactly into banned and active")
+
+
+def flight_phase(time_s: float, cfg: BrakingConfig, *, vz: float | None = None) -> FlightPhase:
+    """Transcribe ``sim/core/src/dynamics.rs:735-755`` into a training label.
+
+    Only the burnout boundary is used for the ban: ``t <= 0`` is Pad,
+    ``0 < t <= boost_end_s`` is Boost (motor armed), and everything after
+    burnout is Coast or Descent by the sign of vertical speed. No gate limit,
+    threshold or physics constant is changed here.
+    """
+    if time_s <= 0.0:
+        return FlightPhase.PAD
+    if time_s <= cfg.boost_end_s:
+        return FlightPhase.BOOST
+    return FlightPhase.DESCENT if vz is not None and vz < 0.0 else FlightPhase.COAST
 
 
 class BrakeReason(str, Enum):
@@ -200,6 +252,7 @@ class BrakingDecision:
     radial_velocity: np.ndarray  # [batch] outward m/s
     phases: tuple[BrakePhase, ...]
     reasons: tuple[BrakeReason, ...]
+    flight_phases: tuple[FlightPhase, ...]
 
 
 class BrakingTeacher:
@@ -219,12 +272,19 @@ class BrakingTeacher:
         self,
         state: TrueState,
         ai_allowed: np.ndarray | None = None,
+        *,
+        flight_phases: tuple[FlightPhase, ...] | None = None,
     ) -> BrakingDecision:
         """Return the bounded fin demand for each row of ``state``.
 
         ``ai_allowed`` is the caller's interlock (e.g. the recorded health flag).
-        A supplied ``state.time_s`` is an independent second gate: rows at or
-        before ``boost_end_s`` never receive a braking command.
+        A supplied ``state.time_s`` labels each row with an explicit
+        :class:`FlightPhase`: only Coast and Descent receive a braking command,
+        while Pad, Boost and MotorArmed return zero. An explicit ``flight_phases``
+        (e.g. an organizer phase field) overrides the clock-derived label.
+        Without either (the DAgger wire-row path) the phase is ``UNKNOWN`` and
+        only the caller's interlock decides, so that path is never silently
+        upgraded to active.
         """
         if not isinstance(state, TrueState):
             raise TypeError(f"state must be a TrueState, got {state!r}")
@@ -238,9 +298,23 @@ class BrakingTeacher:
                 raise ValueError(f"ai_allowed {allowed.shape} must have shape ({n},)")
         else:
             allowed = np.ones(n, dtype=bool)
-        if state.time_s is not None:
+        if flight_phases is not None:
+            flight = tuple(flight_phases)
+            if len(flight) != n or not all(isinstance(p, FlightPhase) for p in flight):
+                raise ValueError(f"flight_phases must be {n} FlightPhase values")
+        elif state.time_s is not None:
             times = np.asarray(state.time_s, dtype=np.float64).reshape(n)
-            allowed = allowed & (times > self.cfg.boost_end_s)
+            flight = tuple(
+                flight_phase(float(t), self.cfg, vz=float(velocity[i, 2]))
+                for i, t in enumerate(times)
+            )
+        else:
+            flight = (FlightPhase.UNKNOWN,) * n
+        if flight_phases is not None or state.time_s is not None:
+            # Whitelist: ACTIVE only. Never gate on the complement.
+            allowed = allowed & np.asarray(
+                [phase in ACTIVE_PHASES for phase in flight], dtype=bool
+            )
 
         x, y = position[:, 0], position[:, 1]
         vx, vy = velocity[:, 0], velocity[:, 1]
@@ -303,6 +377,8 @@ class BrakingTeacher:
             self._reason_counts[reason.value] += 1
         if len(phases) != n or len(reasons) != n:
             raise AssertionError("one phase and one reason per state row are required")
+        if len(flight) != n:
+            raise AssertionError("one flight phase per state row is required")
         return BrakingDecision(
-            command, radial_demand, radius, radial_velocity, tuple(phases), tuple(reasons)
+            command, radial_demand, radius, radial_velocity, tuple(phases), tuple(reasons), flight
         )

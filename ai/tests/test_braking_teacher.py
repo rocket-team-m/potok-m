@@ -12,11 +12,15 @@ import torch
 
 from potok_ai import train_teacher_v2 as ttv
 from potok_ai.braking_teacher import (
+    ACTIVE_PHASES,
+    FORBIDDEN_PHASES,
     BrakePhase,
     BrakeReason,
     BrakingConfig,
     BrakingTeacher,
+    FlightPhase,
     TrueState,
+    flight_phase,
 )
 from potok_ai.data import make_smart_episode
 
@@ -84,6 +88,33 @@ def test_no_boost_from_time_gate_or_explicit_interlock() -> None:
     vetoed = teacher.demand(_state(755.0, 155.0), ai_allowed=np.array([False]))
     assert vetoed.reasons == (BrakeReason.BOOST_GATE,)
     np.testing.assert_allclose(vetoed.command, [[0.0, 0.0]])
+
+
+def test_phase_gate_is_zero_on_banned_phases_and_active_after_burnout() -> None:
+    cfg = BrakingConfig()
+    banned = (FlightPhase.PAD, FlightPhase.BOOST, FlightPhase.MOTOR_ARMED)
+    active = (FlightPhase.COAST, FlightPhase.DESCENT)
+    assert FORBIDDEN_PHASES >= set(banned)
+    assert ACTIVE_PHASES == set(active)
+    assert not (FORBIDDEN_PHASES & ACTIVE_PHASES)
+    assert flight_phase(0.0, cfg) is FlightPhase.PAD
+    assert flight_phase(5.0, cfg) is FlightPhase.BOOST  # motor armed
+    assert flight_phase(12.0, cfg, vz=10.0) is FlightPhase.COAST
+    assert flight_phase(12.0, cfg, vz=-10.0) is FlightPhase.DESCENT
+
+    phases = (*banned, *active)
+    state = TrueState(
+        position=np.tile([755.0, 0.0, 1200.0], (len(phases), 1)),
+        velocity=np.tile([155.0, 0.0, 10.0], (len(phases), 1)),
+        time_s=np.full(len(phases), 12.0),
+    )
+    decision = BrakingTeacher().demand(state, flight_phases=phases)
+    assert decision.flight_phases == phases
+    np.testing.assert_allclose(decision.command[: len(banned)], 0.0)
+    assert np.count_nonzero(np.any(decision.command[len(banned) :] != 0.0, axis=1)) == len(active)
+    # The inverse gate would zero the active rows and light up the banned ones.
+    inverted = BrakingTeacher().demand(state, flight_phases=tuple(reversed(phases)))
+    np.testing.assert_allclose(inverted.command[len(active) :], 0.0)
 
 
 def test_not_in_range_rows_are_zero_with_explicit_reasons() -> None:
@@ -213,3 +244,73 @@ def test_dagger_stage_trains_on_braking_targets_not_recorded_labels(
     old = legacy.stages["dagger"]["details"]
     assert old["training_target"] == "recorded_label"
     assert old["braking"]["reason"] == "legacy_braking_teacher"
+
+
+class _BrakingTruthRecord:
+    """600 frames (12 s): ticks 0..497 are boost, 498..599 are post-burnout."""
+
+    def __init__(self, index: int, frames: int) -> None:
+        self.episode_index = index
+        privileged = np.zeros((frames, 22), dtype=np.float32)
+        privileged[:, 0] = 755.0
+        privileged[:, 3] = 155.0  # outward radial speed: cap-clamped when active
+        privileged[:, 2] = 1200.0
+        privileged[:, 5] = 10.0
+        privileged[:, 11:14] = (100.0, 20.0, 50.0)
+        privileged[:, 15] = 5.0
+        self.privileged = privileged
+        self.labels = np.tile(np.asarray([0.0, 0.0, 3.0, -4.0], np.float32), (frames, 1))
+
+
+class _BrakingTruthBuilder:
+    def __init__(self, episodes: list, frames: int) -> None:
+        self.encoder = SimpleNamespace(z_dim=3)
+        self.records = [_BrakingTruthRecord(int(e.index), frames) for e in episodes]
+
+    def z_priv(self, index: int) -> torch.Tensor:
+        record = next(r for r in self.records if r.episode_index == index)
+        return torch.as_tensor(record.privileged[:, :3]).clone()
+
+
+def test_privileged_target_is_active_on_post_burnout_rows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """BRK03 falsification: the old per-batch tick counter boost-gated 1451/1451."""
+    frames, window, batch = 600, 12, 64
+    episodes = [make_smart_episode(seed=100 + i, frames=frames, scenario_id=i) for i in range(4)]
+    monkeypatch.setattr(ttv, "load_episodes", lambda _path: episodes)
+    monkeypatch.setattr(
+        ttv, "_build_privileged", lambda cfg: _BrakingTruthBuilder(episodes, frames)
+    )
+    cfg = _cfg(tmp_path, out=tmp_path / "post_burnout", window=window, batch=batch, limit=1200)
+    fit, _inner, _held = ttv.partition_episodes(episodes, seed=cfg.seed)
+    n_windows = sum(frames - window + 1 for _e in fit)  # 2 * 589 = 1178 <= limit
+    burn_tick = int(BrakingConfig().boost_end_s / BrakingConfig().frame_dt_s)  # 497
+    # Window n of an episode ends at tick window-1+n, so post-burnout n >= 487.
+    post_burnout = sum(max(0, frames - window + 1 - (burn_tick + 2 - window)) for _e in fit)
+
+    cursor = ttv._WindowTickCursor()
+    ids = [int(e.index) for e in fit for _ in range(frames - window + 1)]
+    ticks = cursor.ticks(ids, cfg, where="falsification")
+    assert ticks[batch] == ticks[0] + batch  # no per-batch reset
+    assert ticks[-1] == frames - 1
+    target = ttv._braking_target_rows(
+        _BrakingTruthBuilder(episodes, frames),
+        ids,
+        ticks,
+        cfg,
+        BrakingTeacher(),
+        where="falsification",
+    ).numpy()
+    boost = ticks * BrakingConfig().frame_dt_s <= BrakingConfig().boost_end_s
+    post = ~boost
+    assert int(boost.sum()) + int(post.sum()) == n_windows
+    assert int(post.sum()) == post_burnout
+    np.testing.assert_allclose(target[boost], 0.0)
+    assert np.count_nonzero(np.any(target[post] != 0.0, axis=1)) >= 0.8 * post.sum()
+
+    metrics = ttv.run(cfg)
+    counts = metrics.stages["privileged"]["details"]["braking"]["reason_counts"]
+    active = counts.get("ok", 0) + counts.get("cap_clamped", 0)
+    assert counts.get("boost_gate", 0) > 0  # banned frames are counted and zero
+    assert active >= 0.8 * post_burnout  # BRK02's 0-active defect cannot recur

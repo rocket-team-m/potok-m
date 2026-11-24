@@ -881,46 +881,51 @@ def _privileged_snapshot(builder: Any, episode_index: int, tick: int, *, where: 
     return snapshot
 
 
-def _privileged_rows(
-    builder: Any, ids: list[int | None], cfg: TeacherV2Config, *, where: str
-) -> torch.Tensor:
-    """One 22-slot truth row per window, keyed by episode and window offset.
+class _WindowTickCursor:
+    """Per-episode window offsets that persist across the batches of one stage.
 
-    ``_window_batches`` emits each episode's windows in order starting at tick
-    0, so the n-th window of an episode ends at tick ``window - 1 + n``.
+    ``SmartWindowDataset`` emits each episode's windows in order, so window n
+    ends at flight tick ``window - 1 + n``. The old helper kept the offset in a
+    fresh dict per batch: with batch 64 every privileged row was mapped back to
+    ticks 11..74 (0.22..1.48 s), all before burnout, and 100% boost-gated. One
+    cursor per stage, advanced once per batch, restores the real flight clock.
     """
-    counters: dict[int, int] = {}
+
+    def __init__(self) -> None:
+        self.offsets: dict[int, int] = {}
+
+    def ticks(
+        self, ids: list[int | None], cfg: TeacherV2Config, *, where: str
+    ) -> np.ndarray:
+        ticks: list[int] = []
+        for episode_index in ids:
+            if episode_index is None:
+                raise ValueError(f"{where}: a braking target needs a numeric episode index")
+            index = int(episode_index)
+            offset = self.offsets.get(index, 0)
+            self.offsets[index] = offset + 1
+            ticks.append(cfg.window - 1 + offset)
+        return np.asarray(ticks, dtype=np.float64)
+
+
+def _privileged_rows(
+    builder: Any, ids: list[int | None], ticks: np.ndarray, *, where: str
+) -> torch.Tensor:
+    """One 22-slot truth row per window, keyed by its real flight tick."""
     rows: list[np.ndarray] = []
-    for episode_index in ids:
+    for episode_index, tick in zip(ids, ticks):
         if episode_index is None:
             raise ValueError(f"{where}: the impact objective needs a numeric episode index")
-        index = int(episode_index)
-        offset = counters.get(index, 0)
-        counters[index] = offset + 1
-        tick = cfg.window - 1 + offset
-        rows.append(_privileged_snapshot(builder, index, tick, where=where)[:TRUTH_PRIV_END])
+        rows.append(
+            _privileged_snapshot(builder, int(episode_index), int(tick), where=where)[:TRUTH_PRIV_END]
+        )
     return torch.as_tensor(np.stack(rows), dtype=torch.float32)
-
-
-def _window_ticks(
-    ids: list[int | None], cfg: TeacherV2Config, *, where: str
-) -> np.ndarray:
-    """Flight ticks of the same window rows :func:`_privileged_rows` returns."""
-    counters: dict[int, int] = {}
-    ticks: list[int] = []
-    for episode_index in ids:
-        if episode_index is None:
-            raise ValueError(f"{where}: a braking target needs a numeric episode index")
-        index = int(episode_index)
-        offset = counters.get(index, 0)
-        counters[index] = offset + 1
-        ticks.append(cfg.window - 1 + offset)
-    return np.asarray(ticks, dtype=np.float64)
 
 
 def _braking_target_rows(
     builder: Any,
     ids: list[int | None],
+    ticks: np.ndarray,
     cfg: TeacherV2Config,
     teacher: BrakingTeacher,
     *,
@@ -928,15 +933,14 @@ def _braking_target_rows(
 ) -> torch.Tensor:
     """True-state radial-braking command for one batch of window rows.
 
-    The authority gate comes from the flight tick (boost is forbidden), never
-    from the reference label slots.
+    The authority gate comes from the real flight tick: Pad/Boost/MotorArmed
+    return zero, Coast/Descent receive the radial demand. No label slot is read.
     """
-    privileged = _privileged_rows(builder, ids, cfg, where=where)
-    ticks = _window_ticks(ids, cfg, where=where)
+    privileged = _privileged_rows(builder, ids, ticks, where=where)
     state = TrueState(
         position=privileged[:, :3].numpy(),
         velocity=privileged[:, 3:6].numpy(),
-        time_s=ticks * BrakingConfig().frame_dt_s,
+        time_s=ticks * teacher.cfg.frame_dt_s,
     )
     decision = teacher.demand(state)
     if not np.isfinite(decision.command).all():
@@ -994,16 +998,23 @@ def _stage_privileged(
         if cfg.braking_teacher and getattr(builder, "records", None)
         else None
     )
+    tick_cursor = _WindowTickCursor()
+    batch_ticks = [tick_cursor.ticks(ids, cfg, where="privileged") for *_, ids in batches]
     if brake is not None:
         batches = [
-            (window, cond, _braking_target_rows(builder, ids, cfg, brake, where="privileged"), ids)
-            for window, cond, _recorded, ids in batches
+            (
+                window,
+                cond,
+                _braking_target_rows(builder, ids, ticks, cfg, brake, where="privileged"),
+                ids,
+            )
+            for (window, cond, _recorded, ids), ticks in zip(batches, batch_ticks)
         ]
     steps, entropy, privileged_terms = 0, 0.0, 0
     model.train()
     jepa.train()  # type: ignore[attr-defined]
     for _ in range(cfg.epochs):
-        for batch in batches:
+        for batch, ticks in zip(batches, batch_ticks):
             window, cond, target = (t.to(device) for t in batch[:3])
             z_priv = None
             if builder is not None and head is not None:
@@ -1018,7 +1029,7 @@ def _stage_privileged(
                     )
                 privileged_terms += 1
             privileged_truth = (
-                _privileged_rows(builder, batch[3], cfg, where="impact objective").to(device)
+                _privileged_rows(builder, batch[3], ticks, where="impact objective").to(device)
                 if impact is not None
                 else None
             )
