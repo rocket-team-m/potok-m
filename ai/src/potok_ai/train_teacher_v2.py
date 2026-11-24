@@ -46,6 +46,7 @@ from torch.nn import functional as F
 from torch.optim import AdamW, Optimizer
 
 from .calibration import confidence_target, correctness, expected_calibration_error, sigmoid
+from .conf_integration import DISJOINT_ECE_SOURCE, IN_SAMPLE_ECE_SOURCE, split_confidence_score
 from .data import (
     SMART_COND_FEATURES,
     SMART_FEATURES,
@@ -308,6 +309,7 @@ class StageReport:
     entropy: float = 0.0
     entropy_enabled: bool = False
     details: dict[str, Any] = field(default_factory=dict)
+    ece_source: str = IN_SAMPLE_ECE_SOURCE
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -323,6 +325,9 @@ class TeacherV2Metrics:
     ratio: float
     ece: float
     steps: int
+    ece_source: str = DISJOINT_ECE_SOURCE
+    ece_held_out: float = 0.0
+    conformal_coverage: float = 0.0
     entropy: float = 0.0
     entropy_enabled: bool = False
     reward_provenance: dict[str, Any] = field(default_factory=dict)
@@ -481,6 +486,43 @@ def _evaluate(
     if not train_values or len(held_values) != len(held_names):
         raise ValueError("fit and inner-held-out scenarios must both contribute RMSE")
     return sum(train_values) / len(train_values), sum(held_values) / len(held_values), ratio, ece
+
+
+def _confidence_hook(
+    model: nn.Module,
+    inner: list[Episode],
+    cfg: TeacherV2Config,
+    device: torch.device,
+    *,
+    student: bool,
+):
+    """Disjoint, seed-keyed split-conformal score on inner-held-out predictions.
+
+    ``split_confidence_score`` fits on one half and scores the other, writes the
+    edge-facing ``conformal.json`` with its frozen step map, and records the
+    effective alpha when the fit half is too small for the requested level.
+    Nothing here tunes a gate or claims a flight result: this is a measurement
+    of the network whose metrics are being reported.
+    """
+    logits: list[float] = []
+    errors: list[float] = []
+    with torch.no_grad():
+        for batch in _window_batches(inner, cfg):
+            window, cond, target = (t.to(device) for t in batch[:3])
+            _command, logit, error = _predict(
+                model, window, cond, target, cfg=cfg, student=student
+            )
+            logits.extend(logit.tolist())
+            errors.extend(error.tolist())
+    if not logits or not np.isfinite(logits).all() or not np.isfinite(errors).all():
+        raise ValueError("inner-held-out confidence predictions must be non-empty and finite")
+    return split_confidence_score(
+        np.asarray(logits, dtype=np.float64),
+        np.asarray(errors, dtype=np.float64),
+        cfg.out,
+        seed=cfg.seed,
+        tol=cfg.calib_tol,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1393,6 +1435,20 @@ def run(cfg: TeacherV2Config) -> TeacherV2Metrics:
         residual_info["gain"] = float(policy.gain.detach())
         residual_info["gate_reasons"] = policy.reason_counts()
 
+    # The distill stage trains a student it does not return; reload that saved
+    # network so the disjoint score describes exactly the model `last` reports.
+    if "distill" in reports:
+        confidence_model = _build_student(cfg, device)
+        stored = torch.load(cfg.out / "student.pt", map_location=device, weights_only=True)
+        confidence_model.load_state_dict(stored["state_dict"])  # type: ignore[attr-defined]
+        confidence_student = True
+    else:
+        confidence_model = model
+        confidence_student = False
+    confidence = _confidence_hook(
+        confidence_model, inner, cfg, device, student=confidence_student
+    )
+
     metrics = TeacherV2Metrics(
         stage=last.stage,
         seed=cfg.seed,
@@ -1400,7 +1456,10 @@ def run(cfg: TeacherV2Config) -> TeacherV2Metrics:
         rmse_train=last.rmse_train,
         rmse_held_out=last.rmse_held_out,
         ratio=last.ratio,
-        ece=last.ece,
+        ece=confidence.ece_held_out,
+        ece_source=DISJOINT_ECE_SOURCE,
+        ece_held_out=confidence.ece_held_out,
+        conformal_coverage=confidence.conformal_coverage,
         steps=last.steps,
         entropy=entropy,
         entropy_enabled=entropy_enabled,

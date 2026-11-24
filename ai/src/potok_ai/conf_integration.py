@@ -30,6 +30,33 @@ from .conformal import (
 
 CONFORMAL_FILE = "conformal.json"
 
+# ECE provenance labels. A disjoint score is the only one allowed to certify a
+# report; a stage-local diagnostic stays explicitly in-sample.
+DISJOINT_ECE_SOURCE = "held-out"
+IN_SAMPLE_ECE_SOURCE = "in-sample"
+
+
+def frozen_step_map(payload: dict) -> tuple[list[float], list[float]]:
+    """Validate and return the edge-facing two-bin step map of an export.
+
+    Frozen shape: two strictly ascending upper edges in ``(0, 1]`` and binary
+    levels ``(0, 1)``. The lower edge is inclusive -- the edge reader takes the
+    first upper edge strictly greater than ``p`` -- so no runtime tuning is
+    involved. A missing, malformed or non-finite map is a hard error.
+    """
+    result = ConformalResult.from_dict(payload)
+    if result.bins is None or result.values is None:
+        raise ValueError("conformal export is missing the frozen step map")
+    bins, values = list(result.bins), list(result.values)
+    if len(bins) != 2 or tuple(values) != (0.0, 1.0):
+        raise ValueError(
+            f"frozen step map needs two ascending edges and values (0, 1), "
+            f"got {bins} / {values}"
+        )
+    if not all(np.isfinite(v) for v in (*bins, *values)):
+        raise ValueError("frozen step map contains NaN or infinity")
+    return bins, values
+
 
 def conformal_export(
     calibration_error: np.ndarray,
@@ -50,6 +77,8 @@ def conformal_export(
     if not all(np.isfinite(value) for value in payload.values()
                if isinstance(value, (int, float))):
         raise ValueError("refusing to export a non-finite conformal calibration")
+    if with_bin_map:
+        frozen_step_map(payload)  # LOUD on a missing or non-finite edge map
     destination = Path(out) / CONFORMAL_FILE
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(result.to_json())
