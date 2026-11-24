@@ -1,6 +1,6 @@
 ---
 title: Гейты и статус A/B
-description: "Ночные hard-gate тесты, регрессионные пины и честный статус closed-loop A/B: v6 FAIL (night_final, обе руки) — текущий, v5/v4 FAIL и F1 PASS — история."
+description: "Ночные hard-gate тесты, регрессионные пины и честный статус closed-loop A/B: BRK04 FAIL (braking_v2, BRK03-fixed braking teacher) — текущий; v6/v5/v4 FAIL и F1 PASS — история."
 ---
 
 ## Ночные hard-gate тесты
@@ -24,9 +24,68 @@ description: "Ночные hard-gate тесты, регрессионные пи
 sim — 67 тестов в отдельном репозитории и 154 в монорепозитории, protocol —
 36, firmware — 216, workbench — все workspace-таргеты.
 
-## Closed-loop A/B: v6 FAIL текущий, v5/v4 FAIL и F1 PASS — история
+## Closed-loop A/B: BRK04 FAIL текущий, v6/v5/v4 FAIL и F1 PASS — история
 
-### v6 (night_final, обе руки) — FAIL, текущий вердикт
+### BRK04 (braking_v2, BRK03-fixed braking teacher) — FAIL, текущий вердикт
+
+`scripts/ab_braking_v2.py` на студенте `ai/out/braking_v2/`, переобученном с
+BRK03-исправленным привилегированным учителем торможения (одна рука, 3 seed ×
+100 эпох, замороженный RETRAIN-NIGHT рецепт, `--braking-teacher`, objective
+`TRUTH_VEL_START=3, TRUTH_VEL_END=6`, BRK03-курсор тиков, ±10 м/с², без
+тюнинга). Замороженный post-FIXPUMP held-out, 20 эпизодов на seed, **те же
+неослабленные гейты v6/EVAL01, вызываемые дословно из `scripts/ab_v6.py`**.
+Deployment-proxy — первый тик `DESCENT` (`vz<0 ∧ z≥5`), радиальное расстояние
+от площадки, pooled RMS; апогей — максимум z за 30 с. Held-out RMSE
+**8,391135 ± 1,292430 м/с²** (seed 1/2/3: 6,903207 / 9,234743 / 9,035453);
+учительские гейты `rmse_ratio`, `ece_source`, `ece` проходят.
+
+| Seed | zero command: dep / апогей / lat, м | braking_v2: dep / апогей / lat, м |
+| --- | --- | --- |
+| 1 | 1690,76 / 1973,74 / 1309,41 | **1503,98 / 2294,88 / 1136,92** |
+| 2 | 1688,42 / 1972,86 / 1306,40 | **1539,51 / 2270,66 / 1162,86** |
+| 3 | 1689,19 / 1983,00 / 1306,38 | **1521,34 / 2277,60 / 1160,33** |
+
+Прирост к спаренной нулевой команде (полная траектория): латераль
+**−13,17 / −10,99 / −11,18 %**, апогей **+16,27 / +15,09 / +14,86 %** (seed 3
+ниже +15 %). Deployment-латераль 1503,98 / 1539,51 / 1521,34 м.
+
+Вердикт: `FAIL`, `exit_code = 1`, `win_claimed = false`, **5 PASS / 6 FAIL
+(6 из 11 гейтов)**:
+
+- PASS (гейты EVAL01 дословно): `rmse_ratio`, `ece_source`, `ece`,
+  `provenance`, `seed_spread`.
+- FAIL `closed_loop_improvement`: −35 % латерали и +15 % апогея не достигнуты
+  (латераль −13,17 / −10,99 / −11,18 %, seed 3 апогея +14,86 % < +15 %).
+- FAIL `oracle_positive_control`: апогей oracle не растёт на seed 2/3
+  (+11,69 / −2,15 / −7,60 м; латераль oracle −40,48 / −37,79 / −35,99 м,
+  cap ticks 16 661 / 16 584 / 16 531 — привод насыщен ±10 м/с² на каждом
+  активном тике и всё равно не проходит двухметрический контроль).
+- FAIL `seed 1/2/3 absolute gates`: deployment-латераль 1503,98 / 1539,51 /
+  1521,34 м > 1000 м на всех сидах (промах 504–540 м); апогей 2294,88 /
+  2270,66 / 2277,60 м ≥ 2000 м проходит.
+- FAIL `oracle_deployment_and_apogee_positive_control`.
+
+BRK03-исправление цели подтверждено в реальном ретренинге, а не только на
+фикстуре: привилегированная рука даёт **964 активных строк на seed**
+(`boost_gate` 487, `ok` 964, `cap_clamped` 0; DAgger `cap_clamped` 72727)
+против 100 % boost-gated и **0 активных строк** в BRK02. Cap-бакет на
+привилегированной руке пуст — реальные v3-окна укладываются в ±10 м/с²;
+это считается в `summary.json`, не скрывается.
+
+:::danger
+**Текущий вердикт — BRK04 (braking_v2, BRK03-fixed braking teacher), FAIL.**
+`exit_code = 1`, `win_claimed = false`, 5 PASS / 6 FAIL (6 из 11 гейтов)
+(`scripts/ab_report_braking_v2.json`, `scripts/ab_report_braking_v2.md`,
+`.bulba/night/BRK04.md`, commit `32b9009`). Deployment-латераль 1503,98 /
+1539,51 / 1521,34 м > 1000 м на всех сидах, апогей ≥2000 м проходит, seed 3
+апогея +14,86 % < +15 %, oracle-контроль не достоверен по апогею на seed 2/3.
+Ни один гейт не ослаблен, победы не заявлено. v6 (night_final, обе руки),
+v5, v4 и F1 — история. Измерение симуляционное: POTOKTRJ выходит из того же
+симулятора; посадочного события нет, proxy — тик снижения, а не разброс
+приземления.
+:::
+
+### v6 (night_final, обе руки) — FAIL, история
 
 `scripts/ab_v6.py` на двух руках из `ai/out/night_final`: `night_default` —
 четырёхстадийный дефолт `sft → privileged → dagger → distill`
@@ -81,13 +140,13 @@ sim — 67 тестов в отдельном репозитории и 154 в �
 а не разброс приземления.
 
 :::danger
-**Текущий вердикт — v6 (night_final), FAIL обе руки.** `exit_code = 1`,
+**v6 (night_final), FAIL обе руки — история.** `exit_code = 1`,
 `win_claimed = false`: `night_default` — 4 PASS / 7 FAIL, `night_adversarial` —
 5 PASS / 6 FAIL (`scripts/ab_report_v6.json`, `scripts/ab_report_v6.md`,
 `.bulba/night/ABV6.md`). Апогей ≥2000 м проходит на всех сидах обеих рук;
 деплой-латераль 1462,98–1560,57 м (default) и 1458,08–1553,58 м (adversarial)
-> 1000 м; oracle-апогей +11,69 / −2,15 / −7,60 м. v5 (FINAL all-fix), v4
-(AIPOST1) и F1 — история. Победы не заявлено.
+> 1000 м; oracle-апогей +11,69 / −2,15 / −7,60 м. Вытеснен BRK04 как текущим
+вердиктом. v5 (FINAL all-fix), v4 (AIPOST1) и F1 — история. Победы не заявлено.
 :::
 
 ### v5 (FINAL all-fix) — FAIL, история
@@ -113,7 +172,7 @@ sim — 67 тестов в отдельном репозитории и 154 в �
 Никакой победы не заявлено: гейт закрытия не проходит по шести причинам, и положительный контроль не может сертифицировать улучшение апогея. All-fix экспорт заметно ближе к цели, чем рука v4 (латераль ~10–13 % против ~0,4–5,6 %, апогей ≥2000 м на всех сидах, `seed_spread` теперь проходит), но FAIL — измеренное попадание не в цель, а не ослабление гейта. Измерение симуляционное: POTOKTRJ выходит из того же симулятора; посадочного события нет, proxy — тик снижения, а не разброс приземления.
 
 :::danger
-**v5 (FINAL all-fix) — FAIL, история.** Неослабленные пред-регистрированные гейты AIPOST1: `exit_code = 1`, **5 PASS / 6 FAIL** (`scripts/ab_report_v5.json`, `scripts/ab_report_v5.md`). PASS: `rmse_ratio`, `ece_source`, `ece`, `provenance`, `seed_spread`. FAIL: deployment-латераль 1473,06 / 1558,44 / 1496,79 м > 1000 м на всех сидах; −35 % / +15 % не достигнуты; oracle-положительный контроль недостоверен по апогею на seed 2/3. Апогей ≥2000 м проходит на всех сидах. Победы не заявлено. Вытеснен v6 как текущий вердикт.
+**v5 (FINAL all-fix) — FAIL, история.** Неослабленные пред-регистрированные гейты AIPOST1: `exit_code = 1`, **5 PASS / 6 FAIL** (`scripts/ab_report_v5.json`, `scripts/ab_report_v5.md`). PASS: `rmse_ratio`, `ece_source`, `ece`, `provenance`, `seed_spread`. FAIL: deployment-латераль 1473,06 / 1558,44 / 1496,79 м > 1000 м на всех сидах; −35 % / +15 % не достигнуты; oracle-положительный контроль недостоверен по апогею на seed 2/3. Апогей ≥2000 м проходит на всех сидах. Победы не заявлено. Вытеснен v6, затем BRK04 как текущим вердиктом.
 :::
 
 ### v4 (AIPOST1) — FAIL, история
@@ -158,15 +217,15 @@ distill` (`teacher_v2_s{1,2,3}.pt`), 20 held-out эпизодов на seed, т�
 `scripts/ab_report_v4.md`). PASS: `rmse_ratio`, `ece_source`, `ece`,
 `provenance`. FAIL: боковая RMS > 1000 м на всех сидах, апогей < 2000 м на
 seed 2/3, пороги −35 % / +15 % не достигнуты, oracle-положительный контроль
-недостоверен. Победы не заявлено. Вытеснен v5, затем v6 как текущим вердиктом.
+недостоверен. Победы не заявлено. Вытеснен v5, затем v6 и BRK04 как текущим вердиктом.
 :::
 
 :::note
 **F1 (ABFIX/ORCLR, 23.11.2026) — PASS в узком детекторе.** Проверялись только
 латераль, знак 12 сценарных Δ и использование привода; апогей был понижен до
 диагностики. `verdict.status = PASS`, `exit_code = 0`. Проход не отменяется,
-но и не является текущим вердиктом: полный набор гейтов даёт FAIL в v6 (и
-ранее в v5/v4). Ни один из детекторов не является лётной квалификацией: реальных
+но и не является текущим вердиктом: полный набор гейтов даёт FAIL в BRK04 (и
+ранее в v6, v5/v4). Ни один из детекторов не является лётной квалификацией: реальных
 пусков нет, ИИ остаётся наблюдателем.
 :::
 
@@ -177,8 +236,8 @@ seed 2/3, пороги −35 % / +15 % не достигнуты, oracle-пол�
 *Рисунок: историческое сравнение двух детекторных линий (v4 FAIL / F1 PASS);
 гистограммы по сидам — данные исторического F1-прохода (сценарии 16–19,
 `loopwm`/`lite`/`lrs`/oracle), где «н/д» у `lrs` на seed 3 означает отсутствие
-экспорта без подстановок. Текущий вердикт — v6 в таблице выше; авторитетны
-`scripts/ab_report_v6.md/json` (v6), `scripts/ab_report_v5.md/json` (v5),
+экспорта без подстановок. Текущий вердикт — BRK04 в таблице выше; авторитетны
+`scripts/ab_report_braking_v2.md/json` (BRK04), `scripts/ab_report_v6.md/json` (v6), `scripts/ab_report_v5.md/json` (v5),
 `scripts/ab_report_v4.md/json` (v4) и `ab_report.md/json` (F1).*
 
 Измерение — по flown-truth sidecar `POTOKTRJ` v3 (stride 26), а не по
@@ -221,10 +280,10 @@ Post-FIXPUMP (`584b1dc`: нормальная аэродинамическая �
 ~42 м из ~1309 м латерали (≈3 %).
 
 Этот PASS относится **только** к узкому детектору F1 (латераль + знак +
-привод, апогей — диагностика) и вытеснен как текущий вердикт измерением v6:
-FAIL (night_default 4 PASS / 7 FAIL, night_adversarial 5 PASS / 6 FAIL); ранее
-v5: FAIL, 5 PASS / 6 FAIL, и v4: FAIL, 4 PASS / 7 FAIL. Все проходы —
-симуляция, не лётная квалификация.
+привод, апогей — диагностика) и вытеснен как текущий вердикт измерением BRK04:
+FAIL (braking_v2 5 PASS / 6 FAIL, 6 из 11 гейтов); ранее v6: FAIL (night_default
+4 PASS / 7 FAIL, night_adversarial 5 PASS / 6 FAIL), v5: FAIL, 5 PASS / 6 FAIL,
+и v4: FAIL, 4 PASS / 7 FAIL. Все проходы — симуляция, не лётная квалификация.
 
 Жёсткие границы после исправления (не predictions; `RECALC01.md`): фазовый
 гейт замораживает первые 498 тиков — пол RMS ≈174–175 м, ниже контроллер
@@ -271,18 +330,21 @@ v5: FAIL, 5 PASS / 6 FAIL, и v4: FAIL, 4 PASS / 7 FAIL. Все проходы �
 
 1. Нет ни одного реального лётного лога.
 2. Статистики датчиков не подтверждены стендовыми измерениями Аллана.
-3. Текущий v6 A/B (night_final, обе руки) **провален** (FAIL, exit 1,
-   `win_claimed = false`): `night_default` 4 PASS / 7 FAIL,
-   `night_adversarial` 5 PASS / 6 FAIL; деплой-латераль 1454–1561 м > 1000 м,
-   −35 % / +15 % и oracle-контроль не проходят; апогей ≥2000 м проходит на
-   всех сидах. v5 (FINAL all-fix, FAIL, 5 PASS / 6 FAIL), v4 (AIPOST1, FAIL,
-   4 PASS / 7 FAIL) и исторический F1 PASS (exit 0, латераль+знак) остаются
-   историей. Все — симуляция, не реальный полёт и не лётная квалификация.
+3. Текущий BRK04 A/B (braking_v2, BRK03-fixed braking teacher) **провален**
+   (FAIL, exit 1, `win_claimed = false`): 5 PASS / 6 FAIL (6 из 11 гейтов);
+   деплой-латераль 1503,98 / 1539,51 / 1521,34 м > 1000 м, −35 % / +15 % и
+   oracle-контроль не проходят (seed 3 апогея +14,86 % < +15 %), апогей
+   ≥2000 м проходит на всех сидах. v6 (night_final, FAIL, default 4 PASS /
+   7 FAIL, adversarial 5 PASS / 6 FAIL), v5 (FINAL all-fix, FAIL,
+   5 PASS / 6 FAIL), v4 (AIPOST1, FAIL, 4 PASS / 7 FAIL) и F1 PASS
+   (exit 0, латераль+знак) — история. Все — симуляция, не реальный полёт и
+   не лётная квалификация.
 4. Симулятор не прошел критерии допуска `SIM_FIDELITY.md` в части реального
    лётного лога и сравнения выхода модели на настоящих кадрах.
 
-Источник: `scripts/ab_report_v6.json`, `scripts/ab_report_v6.md`,
-`.bulba/night/ABV6.md` (v6 FAIL, текущий); `scripts/ab_report_v5.json`,
+Источник: `scripts/ab_report_braking_v2.json`, `scripts/ab_report_braking_v2.md`,
+`.bulba/night/BRK04.md` (BRK04 FAIL, текущий); `scripts/ab_report_v6.json`,
+`scripts/ab_report_v6.md`, `.bulba/night/ABV6.md` (v6 FAIL, история); `scripts/ab_report_v5.json`,
 `scripts/ab_report_v5.md`, `.bulba/night/ABV5.md` (v5 FAIL, история); `scripts/ab_report_v4.json`,
 `scripts/ab_report_v4.md`, `.bulba/night/AIPOST1.md` (v4 FAIL, история);
 `ab_report.json`, `ab_report.md`,

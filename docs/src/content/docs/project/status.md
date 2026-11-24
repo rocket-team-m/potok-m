@@ -1,12 +1,12 @@
 ---
 title: Текущий статус
-description: Честный статус на 24.11.2026 — v6 A/B FAIL (night_final, обе руки), границы достоверности симулятора и прошивки, состояние приложения и RocketCraft, лицензия, публичные репозитории.
+description: Честный статус на 24.11.2026 — BRK04 A/B FAIL (braking_v2, BRK03-fixed braking teacher), границы достоверности симулятора и прошивки, состояние приложения и RocketCraft, лицензия, публичные репозитории.
 ---
 
 # Текущий статус (24.11.2026)
 
 Эта страница — авторитетная точка отсчёта для текущего состояния проекта.
-Цифры ниже взяты из артефактов (`scripts/ab_report_v6.json`, отчётов гейтов,
+Цифры ниже взяты из артефактов (`scripts/ab_report_braking_v2.json`, `scripts/ab_report_v6.json`, отчётов гейтов,
 `LICENSE`, документационных файлов канонических репозиториев), а не из описаний
 намерений. Исторические проходы помечены как история; там, где гейты не
 пройдены, победа не заявляется. Лётной квалификации нет ни у одной подсистемы.
@@ -15,14 +15,49 @@ description: Честный статус на 24.11.2026 — v6 A/B FAIL (night_
 
 | Подсистема | Статус | Граница, которую нельзя переступать в формулировках |
 | --- | --- | --- |
-| ИИ, closed-loop A/B | **v6 FAIL**, default 4 PASS / 7 FAIL, adversarial 5 PASS / 6 FAIL | симуляционный прогон, не лётная квалификация; ИИ остаётся наблюдателем |
+| ИИ, closed-loop A/B | **BRK04 FAIL**, braking_v2 5 PASS / 6 FAIL (6 из 11 гейтов) | симуляционный прогон, не лётная квалификация; ИИ остаётся наблюдателем |
 | Симулятор | OR-parity PASS как регрессионный пин | не цифровой двойник: внешних измерений нет |
 | Прошивка | host/SIL/Renode green | HIL не пройден; `do not arm`, `do not flash` |
 | Приложение (GPUI) | механика и вёрстка работают | clippy `-D warnings` красный, CI его не запускает |
 | RocketCraft | приватный воркбенч, 3/24 shipped | не готовый продукт; приборная аэрокарточка остаётся границей стыка |
 | Лицензия | GPL-3.0-or-later + коммерческая отдельно | сторонние лицензии не перелицензируются |
 
-## ИИ: v6 closed-loop A/B — FAIL (текущий вердикт)
+## ИИ: BRK04 closed-loop A/B — FAIL (текущий вердикт)
+
+Авторитетный источник — `scripts/ab_braking_v2.py`,
+`scripts/ab_report_braking_v2.json` / `.md` и `.bulba/night/BRK04.md` (commit
+`32b9009`). Одна рука — студент `ai/out/braking_v2/`, переобученный с
+BRK03-исправленным привилегированным учителем торможения (3 seed × 100 эпох,
+замороженный RETRAIN-NIGHT рецепт, `--braking-teacher`, objective
+`TRUTH_VEL_START=3, TRUTH_VEL_END=6`, BRK03-курсор тиков, ±10 м/с², без
+тюнинга). Замороженный post-FIXPUMP held-out, 20 эпизодов на seed, **те же
+неослабленные гейты v6/EVAL01, вызываемые дословно из `scripts/ab_v6.py`**.
+Deployment-proxy — первый тик `DESCENT` (`vz<0 ∧ z≥5`), pooled радиальное
+расстояние от площадки; апогей — максимум высоты за 30 с. Held-out RMSE
+**8,391135 ± 1,292430 м/с²** (seed 1/2/3: 6,903207 / 9,234743 / 9,035453).
+
+| Seed | zero command: dep / апогей / lat, м | braking_v2: dep / апогей / lat, м |
+| ---: | ---: | ---: |
+| 1 | 1690,76 / 1973,74 / 1309,41 | 1503,98 / 2294,88 / 1136,92 |
+| 2 | 1688,42 / 1972,86 / 1306,40 | 1539,51 / 2270,66 / 1162,86 |
+| 3 | 1689,19 / 1983,00 / 1306,38 | 1521,34 / 2277,60 / 1160,33 |
+
+Приросты латерали −13,17 / −10,99 / −11,18 %, апогея +16,27 / +15,09 /
++14,86 % (seed 3 ниже +15 %). Вердикт `FAIL`, `exit_code = 1`,
+`win_claimed = false`, **5 PASS / 6 FAIL (6 из 11 гейтов)**: PASS —
+`rmse_ratio`, `ece_source`, `ece`, `provenance`, `seed_spread`; FAIL —
+`closed_loop_improvement` (−35 % / +15 % не достигнуты),
+`oracle_positive_control` (апогей oracle +11,69 / −2,15 / −7,60 м, не растёт
+на seed 2/3), три `absolute gates` (деплой-латераль 1503,98 / 1539,51 /
+1521,34 м > 1000 м; апогей ≥2000 м проходит) и
+`oracle_deployment_and_apogee_positive_control`.
+
+BRK03-исправление цели подтверждено в реальном ретренинге: **964 активных
+строк на seed** против 0 в BRK02. Ни один гейт не ослаблен, победы не
+заявлено; все измерения симуляционные. v6 (night_final, обе руки), v5, v4 и
+F1 — история.
+
+## ИИ: v6 closed-loop A/B — FAIL (история)
 
 Авторитетный источник — `scripts/ab_v6.py`, `scripts/ab_report_v6.json` и
 `scripts/ab_report_v6.md` (`.bulba/night/ABV6.md`). Две руки на `night_final`:
@@ -105,8 +140,9 @@ RMSE RETRAIN-ALLFIX = **7,855551 ± 2,604600 м/с²** (5,148904 / 10,344432 /
 8,073319) не является выигрышем у RETRAIN-DAGGER (7,902916 ± 0,498808):
 разность средних внутри одного baseline-σ, разброс seed в 5,2 раза хуже.
 
-v5, v4 (AIPOST1, FAIL, 4 PASS / 7 FAIL) и F1 (PASS в узком детекторе, апогей —
-диагностика) — **история**, вытесненная v6. Любая формулировка «A/B пройден»
+v6 (night_final, FAIL, обе руки), v5, v4 (AIPOST1, FAIL, 4 PASS / 7 FAIL) и F1
+(PASS в узком детекторе, апогей — диагностика) — **история**, вытесненная BRK04.
+Любая формулировка «A/B пройден»
 без номера детектора и даты не соответствует текущему статусу. Подробности — в
 [гейтах A/B](/potok-m/docs/ai/gates/).
 
@@ -216,7 +252,7 @@ Workspace-тесты зелёные (446/452 в разных снимках). Г
 | Репозиторий | Роль | Состояние на снимке |
 | --- | --- | --- |
 | [potok-m](https://github.com/rocket-team-m/potok-m) | сайт, ADR, общие артефакты | docs build green, local links green, guard green |
-| [potok-m-ai](https://github.com/rocket-team-m/potok-m-ai) | обучение, LoopWM/LRS-RNN, экспорт | 88 pytest зелёных; v6 A/B FAIL — текущий вердикт |
+| [potok-m-ai](https://github.com/rocket-team-m/potok-m-ai) | обучение, LoopWM/LRS-RNN, экспорт | 88 pytest зелёных; BRK04 A/B FAIL — текущий вердикт |
 | [potok-m-sim](https://github.com/rocket-team-m/potok-m-sim) | 6-DoF, рандомизация, данные | 67 тестов в split-репо, 321 в интегрированном дереве; не цифровой двойник |
 | [potok-m-protocol](https://github.com/rocket-team-m/potok-m-protocol) | UART, генератор биндингов, C-эталон | 37 тестов, generator drift и 6 golden-шагов зелёные |
 | [potok-m-firmware](https://github.com/rocket-team-m/potok-m-firmware) | STM32H743, Embassy, SIL | 303 теста, Renode smoke PASS; HIL не пройден |
@@ -226,7 +262,7 @@ Workspace-тесты зелёные (446/452 в разных снимках). Г
 | `potok-m-workbench` (приватный) | RocketCraft: CAD → CFD/FEA → аэрокарточка | 3/24 shipped, лицензионный гейт зелёный |
 
 Ни один репозиторий не даёт лётной квалификации. Источники снимков —
-отчёты проверки в `.bulba/night/` (`VERIFY-FINAL3.md`, `ABV6.md`, `ABV5.md`,
-`SIMIDEAL.md`, `FWCRIT.md`, `RCSTATUS.md` и др.) и генерируемые артефакты
+отчёты проверки в `.bulba/night/` (`VERIFY-FINAL3.md`, `BRK04.md`, `ABV6.md`,
+`ABV5.md`, `SIMIDEAL.md`, `FWCRIT.md`, `RCSTATUS.md` и др.) и генерируемые артефакты
 гейтов; при расхождении с формулировкой в другом документе авторитетны
 эта страница и прямо названный ею артефакт.
